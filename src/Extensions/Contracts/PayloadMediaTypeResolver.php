@@ -7,10 +7,9 @@ namespace Docuccino\Core\Extensions\Contracts;
 use Docuccino\Core\Inference\DType\DType;
 
 /**
- * A gated seam classifying a response payload's media type — e.g. a JSON:API resource (either family)
- * serialising as `application/vnd.api+json`. Resolved per-document like the exception-mapper chain
- * (first non-null wins, default `application/json`), so a DISABLED integration contributes no matcher
- * and the built-in inferred-responses extension reads only this chain (never a resource reflector).
+ * A gated seam classifying a response payload's media type — a JSON:API resource serialising as
+ * `application/vnd.api+json`, say. Resolved per-document, first non-null wins and `application/json` is
+ * the default, so the inferred-responses extension reads this chain and never a resource reflector.
  */
 interface PayloadMediaTypeResolver
 {

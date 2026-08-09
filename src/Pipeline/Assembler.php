@@ -19,10 +19,10 @@ use Docuccino\Core\Overlay\OverlayApplier;
 use Docuccino\Core\Overlay\OverlayDocument;
 
 /**
- * Merges operation fragments into a UIR document array (design §5): places operations under their
- * path/method, hoists and identifies components, stamps document identity + generator metadata,
- * applies overlays and document transformers, and computes the content hash. Duplicate operation
- * identities (two routes claiming one `GET /x`) are error diagnostics, never silent overwrites.
+ * Merges operation fragments into a UIR document array: places operations under their path/method,
+ * hoists and identifies components, stamps document identity + generator metadata, applies overlays
+ * and document transformers, then computes the content hash. Duplicate operation identities (two
+ * routes claiming one `GET /x`) are error diagnostics, never silent overwrites.
  *
  * @internal
  */
@@ -94,15 +94,13 @@ final class Assembler
             $componentsOut['schemas'] = $componentSchemas;
         }
 
-        // Reusable response components (design §6 error-response chain) — emitted in registry order
-        // (deterministic: routes process in sorted order); the canonicalizer sorts the keys.
+        // Registry order is deterministic (routes process sorted) and the canonicalizer sorts keys.
         $componentResponses = $components->responses();
         if ($componentResponses !== []) {
             $componentsOut['responses'] = $componentResponses;
         }
 
-        // Explicit config schemes win over integration-contributed ones (Sanctum/Passport auto-config);
-        // the canonicalizer sorts the keys.
+        // Explicit config schemes win over integration-contributed ones (Sanctum/Passport).
         $securitySchemes = $document->securitySchemes() + $components->securitySchemes();
         if ($securitySchemes !== []) {
             $componentsOut['securitySchemes'] = $securitySchemes;
@@ -124,9 +122,9 @@ final class Assembler
         $doc = $this->applyOverlays($doc, $overlayDocuments, $diagnostics);
         $doc = $this->applyTransformers($doc, $document, $documentId, $transformers, $diagnostics);
 
-        // Resolve the narrative content against the now-final document (directives and nav refs see
-        // any overlay/transformer changes). Injected before the content hash so pages/nav participate
-        // in it — a prose edit or nav move is a visible, non-breaking change.
+        // Content resolves against the now-final document, so directives and nav refs see overlay
+        // and transformer changes — and lands before the hash, so a prose edit or nav move shows up
+        // as a (non-breaking) change.
         $doc = $this->applyContent($doc, $content, $diagnostics);
 
         $doc = $this->stampContentHash($doc);
@@ -146,7 +144,7 @@ final class Assembler
             $diagnostics[] = $diagnostic;
         }
 
-        // An empty content tree leaves the document untouched — no empty `content` key.
+        // An empty content tree leaves no empty `content` key behind.
         if ($resolved->isEmpty()) {
             return $doc;
         }

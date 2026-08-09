@@ -7,11 +7,10 @@ namespace Docuccino\Core\Extensions\Ordering;
 use ReflectionClass;
 
 /**
- * Deterministic topological sort of extensions by their {@see ExtensionOrder} (design §6).
- *
- * `before`/`after` become hard edges; among nodes with no remaining prerequisite the sort
- * picks by priority descending, then FQCN ascending, then original index — so the output bytes
- * never depend on registration order. A cycle raises {@see CyclicExtensionOrderException}.
+ * Deterministic topological sort of extensions by their {@see ExtensionOrder}. `before`/`after` become
+ * hard edges; among nodes with no remaining prerequisite it picks by priority descending, then FQCN
+ * ascending, then original index — so output bytes never depend on registration order. A cycle raises
+ * {@see CyclicExtensionOrderException}.
  */
 final class ExtensionSorter
 {

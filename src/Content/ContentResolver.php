@@ -15,12 +15,10 @@ use Docuccino\Core\Provenance\Source;
 
 /**
  * Turns the compiled {@see CompiledContent} into the resolved `x-docuccino.content` layer against
- * an already-assembled document (design §Narrative content layer). This is the document-input half
- * of the content pipeline; like the compiler it lives in core: assigns each page its stable `page:`
- * id, resolves
- * `::operation`/`::schema` directives in the body, builds the deterministic nav tree from the
- * folder-derived groups + frontmatter overrides, and validates operation/tag nav refs — every
- * broken reference surfacing as a diagnostic rather than a silent drop.
+ * an already-assembled document: assigns each page its stable `page:` id, resolves
+ * `::operation`/`::schema` directives in the body, builds the nav tree from folder-derived groups
+ * plus frontmatter overrides, and validates operation/tag nav refs. Every broken reference becomes
+ * a diagnostic, never a silent drop.
  *
  * @internal
  */
@@ -42,7 +40,7 @@ final readonly class ContentResolver
         }
 
         $index = DocumentIndex::build($document);
-        // Drain any build-time index warnings (duplicate operationId collisions) into the document.
+        // Index build-time warnings (duplicate operationId collisions) go into the document too.
         $diagnostics = $index->diagnostics();
 
         $pages = [];
@@ -89,10 +87,9 @@ final readonly class ContentResolver
     }
 
     /**
-     * Build the nav tree: each non-hidden page becomes a node (a page link, or an operation/tag
-     * reference), grouped by its folder-derived (or frontmatter-overridden) group, and ordered
-     * deterministically — explicit `nav.order`, then title, then slug; groups by their least child
-     * order then name.
+     * Each non-hidden page becomes a node — a page link, or an operation/tag reference — grouped by
+     * its folder-derived (or frontmatter-overridden) group. Order is explicit `nav.order`, then
+     * title, then slug; groups sort by their least child order, then name.
      *
      * @param  array<string, string>  $navByPage  slug → page id (only pages that survived dedup)
      * @param  list<Diagnostic>  $diagnostics

@@ -8,11 +8,9 @@ use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Extensions\Contracts\ValidationRulesToSchema;
 
 /**
- * The output of {@see ValidationRulesToSchema::convert()}:
- * the request JSON Schema (an object with `properties`/`required`), the media type it belongs
- * under (`multipart/form-data` once a `file`/`image` rule is seen, else `application/json`), and
- * any diagnostics raised for rules no transformer handled (design §6 — the schema stays
- * permissive, an info diagnostic names the rule).
+ * The output of {@see ValidationRulesToSchema::convert()}: the request JSON Schema, the media type it
+ * belongs under (`multipart/form-data` once a `file`/`image` rule is seen, else `application/json`),
+ * and an info diagnostic per rule no transformer handled — those leave the schema permissive.
  */
 final readonly class ValidationSchema
 {

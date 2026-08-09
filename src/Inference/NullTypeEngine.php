@@ -5,10 +5,8 @@ declare(strict_types=1);
 namespace Docuccino\Core\Inference;
 
 /**
- * The totalising fallback engine: it knows nothing, resolves everything to
- * "unknown", and never throws — so consumers stay total even when the real
- * engine fails to boot (engine-level boot failure → `NullTypeEngine`, design
- * §3, so docblock/attribute-only docs still build).
+ * The totalising fallback engine: knows nothing, resolves everything to "unknown", never throws. When
+ * the real engine fails to boot we swap this in, so docblock- and attribute-only docs still build.
  */
 final readonly class NullTypeEngine implements TypeEngine
 {

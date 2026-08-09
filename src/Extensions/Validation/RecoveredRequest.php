@@ -13,30 +13,20 @@ use Docuccino\Core\Support\Fqcn;
 
 /**
  * Applies a {@see ValidationSchema} to an operation the one way every request-schema source shares:
- * diagnostics are drained, then body verbs (POST/PUT/PATCH) get a request body under the schema's
- * media type and read verbs (GET/HEAD) get query parameters. Its input is a core value object
- * (a ValidationSchema), not framework code — the HTTP verb → body-or-query decision is generic OAS
+ * drain diagnostics, then give body verbs (POST/PUT/PATCH) a request body under the schema's media
+ * type and read verbs (GET/HEAD) query parameters. That verb → body-or-query decision is generic OAS
  * assembly, so it lives in core; the adapter's recovery extensions (FormRequest/inline, spatie-Data,
- * laravel-actions) each recover a rule set differently, then converge on this one applier, passing
- * only the provenance producer that distinguishes them.
+ * laravel-actions) each recover a rule set differently and then converge here, passing only the
+ * provenance producer that tells them apart.
  *
- * Component hoisting (design §5): when the body was recovered from a single source CLASS (a spatie
- * Data class, a FormRequest, an action `rules()` class), the class-derived body schema is hoisted to a
- * `components.schemas` entry the operation `$ref`s — named by the class short name / `#[SchemaName]`,
- * deduped so the same class across N operations yields ONE component. An inline `validate()`/
- * `Validator::make()` body has no source class to name honestly, so it stays inline. So does an
- * operation carrying a `#[BodyParameter]` — that attribute patches individual body PROPERTIES at a
- * higher layer, which cannot be expressed through a `$ref` without mutating the shared component
- * (the attribute extension reads `schema.properties`, absent on a `$ref`); dereferencing keeps its
- * $ref honest and lets the patch merge onto the full inline body. Call-site partials
- * (`include`/`exclude`/`only`/`except`) shape the RESPONSE via query parameters, not the request body,
- * so they never force the request body inline.
- *
- * Request- and response-side components of the same class carry DISTINCT diff identities (the request
- * body's is the FQCN plus a `#request` discriminator), so a class used on both sides never dedupes a
- * request rules-shape into a response property-shape (or vice versa) by identity: structurally-equal
- * shapes still collapse to one component via the registry's structural dedupe, and genuinely different
- * shapes yield two deterministically-named components.
+ * Hoisting (design §5): a body recovered from a single source class hoists to a `components.schemas`
+ * entry the operation `$ref`s — named by class short name or `#[SchemaName]`, deduped so one class
+ * across N operations is one component. Two cases stay inline: an inline `validate()`/
+ * `Validator::make()` body, which has no class to name honestly, and an operation carrying
+ * `#[BodyParameter]`, because that attribute patches individual body properties by reading
+ * `schema.properties` — absent on a `$ref` — and dereferencing beats mutating the shared component.
+ * Call-site partials (`include`/`exclude`/`only`/`except`) shape the response via query parameters,
+ * not the body, so they never force it inline.
  */
 final class RecoveredRequest
 {
@@ -44,9 +34,8 @@ final class RecoveredRequest
 
     /**
      * Drain the schema's diagnostics and write it as a request body (write verbs) or query parameters
-     * (read verbs), attributed to `integration:<producer>`. `$sourceClass` is the single class the body
-     * was recovered from (a Data class / FormRequest / action `rules()` class) so the body can hoist to
-     * a named component; null (an inline `validate()`) keeps the body inline.
+     * (read verbs), attributed to `integration:<producer>`. Pass the single class the body was
+     * recovered from as `$sourceClass` so it can hoist; null (an inline `validate()`) stays inline.
      */
     public function apply(OperationDraft $operation, RouteContext $context, ValidationSchema $result, string $producer, ?string $sourceClass = null): void
     {
@@ -80,8 +69,8 @@ final class RecoveredRequest
     }
 
     /**
-     * The body schema to write: a `$ref` to a hoisted component when the body came from a single source
-     * class and this operation does not deviate from that class-derived schema, else the inline schema.
+     * A `$ref` to a hoisted component when the body came from a single source class and this operation
+     * doesn't deviate from the class-derived schema; the inline schema otherwise.
      *
      * @return array<string, mixed>
      */
@@ -93,20 +82,16 @@ final class RecoveredRequest
 
         $name = SchemaIdentity::name($sourceClass) ?? Fqcn::short($sourceClass);
 
-        // A request-scoped diff identity, distinct from the response-side `sch:<FQCN>`, so the two never
-        // dedupe across the request/response divide by identity alone. It honours `#[SchemaId]` exactly as
-        // the response side does ({@see ComponentHoist}/{@see EnumSchema}) so a pinned class stays
-        // rename-stable on BOTH sides — only the `#request` discriminator keeps them distinct.
+        // A request-scoped diff identity, distinct from the response side's `sch:<FQCN>`, so a class used
+        // on both sides never dedupes a rules-shape into a property-shape by identity alone —
+        // structurally-equal shapes still collapse via the registry's structural dedupe. It honours
+        // `#[SchemaId]` like the response side does, so a pinned class stays rename-stable on both.
         $id = (SchemaIdentity::id($sourceClass) ?? $sourceClass).'#request';
 
         return $context->components->reference($name, $result->schema, $id);
     }
 
-    /**
-     * Whether a higher layer patches this operation's body relative to the canonical class-derived
-     * schema — a `#[BodyParameter]` attribute, which the attribute-layer body extension applies by
-     * reading `schema.properties`; a `$ref` has none, so that op keeps its body inline (dereferenced).
-     */
+    /** Whether `#[BodyParameter]` patches this body — which forces it inline; see the class header. */
     private function deviates(RouteContext $context): bool
     {
         return $context->attributes->all(BodyParameter::class) !== [];

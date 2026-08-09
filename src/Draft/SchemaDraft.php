@@ -11,9 +11,9 @@ use Docuccino\Core\Patch\PatchGuard;
 use Docuccino\Core\Patch\PatchResult;
 
 /**
- * A mutable JSON Schema builder. Scalar keywords (type, format, enum, required, …) go through
- * the guard; nested object properties merge by name so a later layer patches a single
- * property without discarding inferred siblings (design §7).
+ * A mutable JSON Schema builder. Scalar keywords (type, format, enum, required, …) go through the
+ * guard; nested object properties merge by name, so a later layer can patch a single property without
+ * discarding inferred siblings.
  */
 final class SchemaDraft
 {
@@ -81,11 +81,9 @@ final class SchemaDraft
     }
 
     /**
-     * The underlying patch guard.
-     *
-     * @internal Not part of the frozen extension-author surface: it hands back the {@see PatchGuard}
-     * (itself `@internal`). Extensions read winning state through {@see producerFor()} /
-     * {@see resolvedField()} instead.
+     * @internal Not part of the frozen extension-author surface — it hands back the (also
+     * `@internal`) {@see PatchGuard}. Extensions read winning state via {@see producerFor()} /
+     * {@see resolvedField()}.
      */
     public function guard(): PatchGuard
     {

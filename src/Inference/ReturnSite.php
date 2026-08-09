@@ -8,10 +8,8 @@ use Docuccino\Core\Inference\DType\DType;
 use Docuccino\Core\Inference\DType\UnknownT;
 
 /**
- * One return path of an action, paired with its flow-refined type. Because
- * PHPStan's `MethodReturnStatementsNode` pairs every `return` with the scope at
- * that point, each `ReturnSite` carries per-return-path provenance for free
- * (design §2).
+ * One return path of an action with its flow-refined type. PHPStan's `MethodReturnStatementsNode`
+ * pairs every `return` with the scope at that point, so per-return-path provenance comes for free.
  */
 final readonly class ReturnSite
 {

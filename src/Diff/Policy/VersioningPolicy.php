@@ -7,11 +7,10 @@ namespace Docuccino\Core\Diff\Policy;
 use Docuccino\Core\Diff\Changeset;
 
 /**
- * Enforces a versioning discipline against a semantic {@see Changeset} (design §6): given the
- * changeset and both documents' `info.version`, it returns a {@see PolicyVerdict} saying whether
- * the version delta is adequate for the change severity. Wired into `docuccino:diff --enforce`
- * (nonzero exit for CI). Longitudinal governance — deprecation windows, multi-release history,
- * cross-repo policy — is deliberately SaaS territory, not modelled here.
+ * Enforces a versioning discipline against a semantic {@see Changeset}: given the changeset and both
+ * documents' `info.version`, returns a {@see PolicyVerdict} on whether the version delta matches the
+ * change severity. `docuccino:diff --enforce` exits nonzero on a violation. Longitudinal governance —
+ * deprecation windows, multi-release history, cross-repo policy — isn't modelled here.
  */
 interface VersioningPolicy
 {

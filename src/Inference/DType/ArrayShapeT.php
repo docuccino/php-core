@@ -5,10 +5,9 @@ declare(strict_types=1);
 namespace Docuccino\Core\Inference\DType;
 
 /**
- * A constant array shape (`array{id: int, name?: string}` or a positional
- * list-shape). Field order is significant and preserved verbatim — it is not
- * sorted, unlike union members. `isList` records whether the shape's keys are a
- * `0..n` sequence (from PHPStan's list accessory).
+ * A constant array shape (`array{id: int, name?: string}`, or a positional list-shape). Field order
+ * matters and is preserved verbatim — unlike union members, it's never sorted. `isList` records
+ * whether the keys are a `0..n` sequence, from PHPStan's list accessory.
  */
 final readonly class ArrayShapeT extends DType
 {
@@ -25,10 +24,10 @@ final readonly class ArrayShapeT extends DType
     }
 
     /**
-     * A copy of this shape with every field's value type passed through `$map` — keys, key ORDER,
-     * optionality and `isList` all preserved. The seam for the recurring "rewrite some members of a
-     * recovered body" operation (pin one key to a folded literal; resolve every status-provenance member
-     * to a concrete status), which callers otherwise hand-roll as an `array_map` + rebuild.
+     * A copy with every field's value type passed through `$map`; keys, key order, optionality and
+     * `isList` all survive. The seam for rewriting members of a recovered body — pinning one key to a
+     * folded literal, resolving status-provenance members to a concrete status — instead of every
+     * caller hand-rolling an `array_map` + rebuild.
      *
      * @param  callable(DType, string|int): DType  $map  a field's current type + key → its replacement type
      */

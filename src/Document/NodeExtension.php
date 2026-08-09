@@ -8,10 +8,9 @@ use Docuccino\Core\Provenance\Provenance;
 use Docuccino\Core\Support\Hydrate;
 
 /**
- * Node-level `x-docuccino` member (operations, parameters, responses, schemas):
- * id, provenance and mock hints. The document-level counterpart (identity,
- * generator, content, diagnostics) is {@see DocumentExtension}. Unknown members
- * are preserved verbatim to honour additive forward compatibility.
+ * The node-level `x-docuccino` member on operations, parameters, responses and schemas: id,
+ * provenance, mock hints. {@see DocumentExtension} is the document-level counterpart. Unknown members
+ * survive verbatim, so additive forward compatibility holds.
  *
  * @internal
  */

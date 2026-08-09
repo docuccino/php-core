@@ -7,19 +7,16 @@ namespace Docuccino\Core\Inference;
 use PhpParser\Node;
 
 /**
- * An interactive walk over an action's call graph. The engine walks every node
- * of each entered method (with its flow-refined {@see TypeScope}) and asks the
- * visitor about each one; harvesting happens as a side effect inside
- * `enterNode`, through the `TypeScope`.
+ * An interactive walk over an action's call graph. The engine visits every node of each entered
+ * method with its flow-refined {@see TypeScope}; harvesting happens as a side effect inside
+ * `enterNode`, through that scope.
  *
- * Responsibility split (Spike B): the visitor is pure semantics + harvesting and
- * imports zero PHPStan; the ENGINE owns bounded depth, per-`class::method`
- * memoisation, the cycle guard, callee resolution, per-file parser priming, and
- * deterministic descent ordering.
+ * The split: a visitor is pure semantics plus harvesting and imports zero PHPStan. The engine owns
+ * bounded depth, per-`class::method` memoisation, the cycle guard, callee resolution, per-file parser
+ * priming and deterministic descent ordering.
  *
- * Returning `true` is a *request* to descend into the node's callee that the
- * engine may decline (vendor code, magic/forwarded calls, unresolvable callees,
- * or depth/budget exceeded).
+ * Returning `true` *requests* a descent into the node's callee; the engine may decline it (vendor
+ * code, magic/forwarded calls, unresolvable callees, depth or budget exceeded).
  */
 interface TraceVisitor
 {

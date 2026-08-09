@@ -8,14 +8,12 @@ use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Support\Hydrate;
 
 /**
- * The result of {@see TypeEngine::analyzeAction()}: every return path's type,
- * every escaping exception, any diagnostics, and the transitive set of files
- * the analysis read.
+ * The result of {@see TypeEngine::analyzeAction()}: every return path's type, every escaping
+ * exception, any diagnostics, and the transitive set of files the analysis read.
  *
- * `dependencyFiles` feeds the pipeline's OperationFragment cache key — sound
- * even for a Query class three calls deep (plan §Caching). Serialization is
- * canonical (`dependencyFiles` sorted + deduped) so two runs of the same code
- * produce byte-identical output — the engine's determinism invariant.
+ * `dependencyFiles` feeds the OperationFragment cache key, so it stays sound even for a Query class
+ * three calls deep. It's sorted and deduped on serialization, keeping two runs of the same code
+ * byte-identical.
  */
 final readonly class ActionAnalysis
 {

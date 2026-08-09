@@ -1,5 +1,8 @@
 # docuccino/core
 
+> **This repository is a read-only subtree split** of [docuccino/docuccino](https://github.com/docuccino/docuccino).
+> Open issues and pull requests on the monorepo — commits pushed here are overwritten.
+
 The framework-agnostic heart of [Docuccino](https://docuccino.app): the UIR
 document model, canonicalizer, identity/hashing, JSON-Schema validator and the
 OpenAPI / UIR emitters. It has no framework dependency and is consumed by the

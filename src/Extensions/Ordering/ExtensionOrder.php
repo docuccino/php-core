@@ -7,9 +7,9 @@ namespace Docuccino\Core\Extensions\Ordering;
 use Attribute;
 
 /**
- * Declares an extension's ordering (design §6). `priority` breaks ties (higher runs earlier);
- * `before`/`after` name other extension classes to impose hard ordering edges, topologically
- * sorted by {@see ExtensionSorter}. A cycle is a build error, not a silent reordering.
+ * Declares an extension's ordering. `priority` breaks ties (higher runs earlier); `before`/`after` name
+ * other extension classes as hard edges, topologically sorted by {@see ExtensionSorter}. A cycle is a
+ * build error, never a silent reordering.
  */
 #[Attribute(Attribute::TARGET_CLASS)]
 final readonly class ExtensionOrder

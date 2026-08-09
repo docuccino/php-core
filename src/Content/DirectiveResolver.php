@@ -10,31 +10,27 @@ use Docuccino\Core\Provenance\Source;
 
 /**
  * Resolves live-reference directives embedded in page markdown against the assembled document, so
- * prose cannot silently drift from the code it documents.
+ * prose can't silently drift from the code it documents.
  *
  * Authored (leaf-directive) syntax:
  *   ::operation{id="forms.index"}      — id is an operationId, or a "METHOD /path" signature
  *   ::schema{name="FormData"}          — name is a component schema name
  *
- * Resolved form (this class's output): the authored attributes are preserved verbatim and a single
- * `ref` attribute carrying the stable UIR identity is appended, e.g.
- *   ::operation{id="forms.index" ref="op:v1:mfz3q8k2w9r7t1ua"}
- *   ::schema{name="FormData" ref="sch:v1:6r5x…"}
- * A viewer/SaaS links on `ref`; the authored selector stays legible. Appending one attribute keeps
- * the rewrite deterministic.
+ * Output keeps the authored attributes verbatim and appends one `ref` carrying the stable UIR
+ * identity — `::operation{id="forms.index" ref="op:v1:mfz3q8k2w9r7t1ua"}`. Viewers link on `ref`,
+ * the authored selector stays legible, and appending exactly one attribute keeps the rewrite
+ * deterministic.
  *
- * Failure modes are never silent:
- *   - a known directive whose reference resolves to nothing → error diagnostic, left unresolved;
- *   - an unknown directive name → warning diagnostic, passed through untouched (graceful
- *     degradation for third-party directives).
+ * Nothing fails silently: a known directive resolving to nothing errors and is left unresolved; an
+ * unknown directive name warns and passes through untouched, so third-party directives degrade.
  *
  * @internal
  */
 final class DirectiveResolver
 {
     /**
-     * A leaf directive at a token boundary: `::name{attrs}`. Kept intentionally strict (single line,
-     * no nested braces) so ordinary prose containing `::` is never mistaken for a directive.
+     * A leaf directive at a token boundary: `::name{attrs}`. Strict on purpose — single line, no
+     * nested braces — so prose containing `::` is never mistaken for a directive.
      */
     private const string DIRECTIVE = '/(?<![\p{L}\p{N}_:])::([a-zA-Z][a-zA-Z0-9-]*)\{([^}\n]*)\}/u';
 
@@ -92,12 +88,9 @@ final class DirectiveResolver
         Source $source,
         array &$diagnostics,
     ): string {
-        // A pre-existing ref (hand-written in source, or a stale committed one) is NOT trusted: it is
-        // stripped and re-derived from the selector below, so a ref pointing at an id that no longer
-        // exists is re-validated and surfaces as content.unresolved-directive rather than silently
-        // drifting. In the normal loop the source is ref-free, so this branch never runs there and the
-        // authored attributes pass through verbatim; a directive whose selector still resolves re-emits
-        // the identical ref (idempotent).
+        // Never trust a pre-existing ref (hand-written, or stale and committed): strip it and
+        // re-derive from the selector, so one pointing at a dead id surfaces as
+        // content.unresolved-directive instead of drifting. Re-resolving is idempotent.
         if (isset($attrs['ref'])) {
             $attrsRaw = $this->stripRef($attrsRaw);
         }

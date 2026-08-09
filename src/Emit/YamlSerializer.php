@@ -8,13 +8,11 @@ use stdClass;
 use Symfony\Component\Yaml\Yaml;
 
 /**
- * Deterministic YAML writer. Member order is the caller's responsibility (feed it canonical
- * output); Symfony's dumper preserves the insertion order it is given, so identical canonical
- * input yields byte-identical YAML across runs.
+ * Deterministic YAML writer. Member order is the caller's job — feed it canonical output; Symfony's
+ * dumper keeps the insertion order it's given, so the same canonical input gives byte-identical YAML.
  *
- * Style: 2-space indent, block collections at every depth (only empty maps/lists render
- * inline, as `{  }` / `[]`), multi-line string literals preserved as literal blocks, and
- * `stdClass` empty-object markers dumped as maps.
+ * Style: 2-space indent, block collections at every depth (only empty maps/lists go inline, as
+ * `{  }` / `[]`), multi-line strings as literal blocks, `stdClass` empty-object markers as maps.
  *
  * @internal
  */

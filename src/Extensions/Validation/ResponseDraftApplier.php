@@ -12,13 +12,12 @@ use Docuccino\Core\Provenance\Source;
 /**
  * Applies a frozen {@see ResponseDraft} to an operation the one way every response-producing source
  * shares: a `$ref` draft becomes the status entry's reference, otherwise the description and each
- * schema keyword are merged under the given producer's provenance. Its input is a core value object
- * (a ResponseDraft), not framework code — merging a response into an operation is generic OAS
- * assembly, so it lives in core; the error-response extension and the laravel-actions authorize
- * extension each build a draft differently, then converge on this one applier.
+ * schema keyword merge under the producer's provenance. Merging a response into an operation is
+ * generic OAS assembly, so it lives in core; the error-response and laravel-actions authorize
+ * extensions each build a draft differently and then converge here.
  *
- * The mapper's own draft froze in its provenance under `x-docuccino`; the applier drops that key so
- * the target schema keeps only its keywords and the merge records fresh provenance for `$producer`.
+ * The incoming draft froze its own provenance under `x-docuccino`; that key is dropped so the target
+ * keeps only real keywords and the merge records fresh provenance for `$producer`.
  */
 final class ResponseDraftApplier
 {
@@ -28,9 +27,9 @@ final class ResponseDraftApplier
         $response = $operation->response($draft->status);
         $contribution = Contribution::forProducer($producer, $source);
 
-        // A mapper that references a shared response component (e.g. the Problem Details preset's
-        // reusable `#/components/responses/Problem*`) freezes as a `$ref`; the operation's status entry
-        // becomes that reference rather than an inline body (design §6 / §11 worked example).
+        // A mapper referencing a shared response component (the Problem Details preset's reusable
+        // `#/components/responses/Problem*`) freezes as a `$ref` — so the status entry becomes that
+        // reference rather than an inline body.
         if ($frozen->ref !== null) {
             $response->setRef($frozen->ref, $contribution);
 
@@ -50,8 +49,7 @@ final class ResponseDraftApplier
                 $response->content((string) $mediaType)->set((string) $keyword, $value, $contribution);
             }
 
-            // Carry the media-type example (a sibling of `schema`, assembled by the mapper from
-            // statically-known values) across the merge; first writer wins in the target.
+            // Carry the media-type example (a sibling of `schema`) across the merge; first writer wins.
             if (is_array($media) && array_key_exists('example', $media)) {
                 $response->setExample((string) $mediaType, $media['example']);
             }

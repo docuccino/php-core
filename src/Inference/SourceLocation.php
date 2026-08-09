@@ -7,14 +7,12 @@ namespace Docuccino\Core\Inference;
 use Docuccino\Core\Provenance\Source;
 
 /**
- * Where something was found in source. `line` is nullable — PHPStan reports
- * `-1` for some synthesised throw points and execution-end nodes (Spike C trap
- * #3), which we normalise to `null`. `pos` is the byte offset used for
- * deterministic ordering (Spike B trap #5), also nullable.
+ * Where something was found in source. `line` is nullable: PHPStan reports `-1` for some synthesised
+ * throw points and execution-end nodes, which we normalise to `null`. `pos` is the byte offset used
+ * for deterministic ordering, also nullable.
  *
- * Deliberately distinct from {@see Source}: this is the
- * engine's raw, absolute-path finding; that is the emitted, project-root-relative
- * provenance source. Cross via {@see Source::fromLocation()}.
+ * Not the same as {@see Source} — this is the engine's raw absolute-path finding, that's the emitted
+ * project-root-relative provenance source. Cross via {@see Source::fromLocation()}.
  */
 final readonly class SourceLocation
 {

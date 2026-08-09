@@ -5,11 +5,9 @@ declare(strict_types=1);
 namespace Docuccino\Core\Support;
 
 /**
- * Hydration helpers for the JSON boundary. Decoded UIR/OAS data is typed
- * `array<mixed, mixed>`; these coerce individual members to the narrow shapes
- * the immutable document model expects, dropping anything malformed. Every
- * `fromArray()` in the model reaches for one of these instead of hand-rolling
- * the same guarded loops.
+ * Hydration helpers for the JSON boundary. Decoded UIR/OAS data is `array<mixed, mixed>`; these
+ * coerce members to the narrow shapes the document model expects, dropping anything malformed.
+ * Every `fromArray()` in the model uses one instead of hand-rolling the same guarded loop.
  *
  * @internal
  */
@@ -21,8 +19,7 @@ final class Hydrate
     }
 
     /**
-     * A string value, coercing any other scalar (int/float/bool) to its string form, and falling
-     * back to `$default` for null/array/object. The shape every `info.version` / `uir` read uses.
+     * A string, coercing other scalars to their string form; `$default` for null/array/object.
      */
     public static function stringOr(mixed $value, string $default): string
     {
@@ -44,8 +41,7 @@ final class Hydrate
     }
 
     /**
-     * A mixed value coerced to a string-keyed map; non-arrays become an empty map.
-     * The guarded counterpart of {@see Arr::stringKeyed()} for the raw-config bags.
+     * A string-keyed map; non-arrays become empty. The guarded {@see Arr::stringKeyed()}.
      *
      * @return array<string, mixed>
      */
@@ -76,9 +72,8 @@ final class Hydrate
     }
 
     /**
-     * A string-keyed map of raw sub-maps (name → object): entries with a
-     * non-string key or non-array value are dropped. Used for component schema
-     * and security-scheme maps.
+     * name → raw sub-map, dropping non-string keys and non-array values. Component schema and
+     * security-scheme maps use this.
      *
      * @return array<string, array<string, mixed>>
      */
@@ -121,8 +116,8 @@ final class Hydrate
     }
 
     /**
-     * A list of raw map members (non-arrays dropped), or null when the value is
-     * not a list at all — the shape used for `servers`, `security`, `tags`.
+     * Raw map members (non-arrays dropped), or null when the value isn't an array at all —
+     * the shape `servers`, `security` and `tags` want.
      *
      * @return list<array<string, mixed>>|null
      */
@@ -168,8 +163,7 @@ final class Hydrate
     }
 
     /**
-     * Hydrate each map member of a keyed collection through `$factory`, keys
-     * coerced to strings; non-arrays dropped.
+     * Hydrate each map member of a keyed collection through `$factory`; keys coerced to strings.
      *
      * @template T
      *

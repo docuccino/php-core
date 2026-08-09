@@ -10,17 +10,14 @@ use Docuccino\Core\Support\Fqcn;
  * A constant value recovered by {@see TypeScope::constantValueOf()}. Closed set:
  *
  *   - `scalar`     — a string / int / float / bool / null literal;
- *   - `descriptor` — a factory static-call we deliberately do NOT collapse to
- *     its runtime type (`AllowedFilter::exact('status')` → factory + folded
- *     args). The `factory` records the FULLY-QUALIFIED `Class::method`
- *     (`Spatie\QueryBuilder\AllowedFilter::exact`); {@see render()} shortens the
- *     class for display. This variant is the crux of the Scramble-Pro-beater (Spike B):
- *     PHPStan would tell us the *type* is `AllowedFilter`, but the docs need the
- *     *call*, so factory calls are folded at the AST level before PHPStan type
- *     collapse. A descriptor may also carry a `chain` of fluent method calls made
- *     on it (`Rule::enum(Status::class)->only([Status::Active])` → factory `Rule::enum`
- *     + a `only` chain call) via {@see withChainedCall()}, so a builder-style
- *     descriptor's narrowing survives the same AST-level fold (validation §4 #10);
+ *   - `descriptor` — a factory static-call we don't collapse to its runtime type
+ *     (`AllowedFilter::exact('status')` → factory + folded args). PHPStan would only tell us the
+ *     *type* is `AllowedFilter`, but the docs need the *call*, so factory calls are folded at the
+ *     AST level before PHPStan collapses them. `factory` holds the fully-qualified `Class::method`
+ *     (`Spatie\QueryBuilder\AllowedFilter::exact`); {@see render()} shortens the class for
+ *     display. A descriptor can also carry a `chain` of fluent calls made on it
+ *     (`Rule::enum(Status::class)->only([Status::Active])`) via {@see withChainedCall()}, so
+ *     builder-style narrowing survives the same fold;
  *   - `array`      — an array of the above (per-item recursion);
  *   - `unknown`    — folding failed, with a reason.
  */
@@ -63,9 +60,8 @@ final readonly class ConstValue
     }
 
     /**
-     * A copy of this descriptor with one fluent method call appended to its chain — the AST-level
-     * record of `->only([...])` / `->except([...])` (or any builder call) made on a factory
-     * descriptor. Only meaningful on a descriptor; on any other kind it returns the value unchanged.
+     * A copy of this descriptor with one fluent call appended to its chain (`->only([…])` and
+     * friends). Any other kind returns itself unchanged.
      *
      * @param  list<ConstValue>  $args
      */
@@ -162,8 +158,7 @@ final readonly class ConstValue
     }
 
     /**
-     * The descriptor serialization: `chain` is emitted only when non-empty, so an unchained
-     * descriptor round-trips to exactly the bytes it always did.
+     * `chain` is emitted only when non-empty, so unchained descriptors keep their old bytes.
      *
      * @return array<string, mixed>
      */
@@ -248,8 +243,7 @@ final readonly class ConstValue
     }
 
     /**
-     * Shorten a fully-qualified `Class::method` factory to `ShortClass::method`
-     * for display, leaving the stored `factory` (an FQCN) untouched.
+     * `Class::method` → `ShortClass::method` for display; the stored `factory` stays fully qualified.
      */
     private static function shortFactory(string $factory): string
     {

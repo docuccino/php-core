@@ -9,9 +9,9 @@ use Symfony\Component\Yaml\Exception\ParseException;
 use Symfony\Component\Yaml\Yaml;
 
 /**
- * A minimal YAML-frontmatter splitter: a leading `---` fenced block is parsed (symfony/yaml) into
- * the metadata map, the remainder is the markdown body. A file with no fence is all body; a
- * malformed fence yields an empty map (the caller treats missing metadata as "derive from path").
+ * A minimal YAML-frontmatter splitter: a leading `---` fence is parsed into the metadata map, the rest
+ * is the markdown body. No fence means all body; a malformed one yields an empty map, which the caller
+ * reads as "derive from path".
  *
  * @internal
  */
@@ -22,10 +22,10 @@ final class Frontmatter
      */
     public static function parse(string $raw): array
     {
-        // Normalise CRLF so the fence detection and body are line-ending independent (determinism).
+        // Normalise CRLF so fence detection and the body are line-ending independent.
         $normalized = str_replace(["\r\n", "\r"], "\n", $raw);
 
-        // A leading `---` fence closed by a `---` on its own line; everything after it is the body.
+        // A `---` fence closed by a `---` on its own line; everything after is body.
         if (! str_starts_with($normalized, "---\n")
             || preg_match('/^---\n(.*?)\n---\n?(.*)$/s', $normalized, $matches) !== 1) {
             return [[], $normalized];

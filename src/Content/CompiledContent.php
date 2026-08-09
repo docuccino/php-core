@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace Docuccino\Core\Content;
 
 /**
- * The full set of compiled pages for one document, before directive resolution and nav assembly.
- * Carries a deterministic {@see digest()} of the content tree (source paths + per-file content
- * hashes) so a content-file edit invalidates the document-level fragment-cache key (design §10, A2).
+ * The compiled pages for one document, before directive resolution and nav assembly. Carries a
+ * {@see digest()} of the content tree — source paths plus per-file content hashes — so editing a
+ * content file invalidates the document-level fragment-cache key.
  *
  * @internal
  */
@@ -24,9 +24,8 @@ final readonly class CompiledContent
     }
 
     /**
-     * A file-order-independent fingerprint of the content tree: every source path paired with its
-     * content hash, sorted, then hashed. Two builds over the same files (in any read order) produce
-     * the same digest; any edit, addition or removal changes it.
+     * Every source path paired with its content hash, sorted, then hashed — so read order can't change
+     * the digest, but any edit, addition or removal does.
      */
     public function digest(): string
     {

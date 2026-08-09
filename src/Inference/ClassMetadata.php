@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace Docuccino\Core\Inference;
 
 /**
- * The reflected + docblock-driven shape of a class (Data / Resource / Model):
- * its FQCN, an optional class-level summary, and its properties. Produced lazily
- * and memoised per class per run by {@see TypeEngine::classMetadata()}.
+ * The reflected + docblock-driven shape of a class (Data / Resource / Model): FQCN, an optional
+ * class-level summary, and its properties. Built lazily and memoised per class per run by
+ * {@see TypeEngine::classMetadata()}.
  */
 final readonly class ClassMetadata
 {

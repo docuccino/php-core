@@ -7,10 +7,10 @@ namespace Docuccino\Core\Extensions\Validation;
 use Docuccino\Core\Extensions\Contracts\RuleTransformer;
 
 /**
- * The mutable façade a {@see RuleTransformer} sees for one
- * field: it sets schema keywords, marks presence/nullability, flags the request multipart, and
- * reaches a sibling field for cross-field rules (`confirmed`). It hides the {@see FieldNode} tree
- * and the {@see RequestSchemaBuilder} root so a transformer stays pure.
+ * The mutable façade a {@see RuleTransformer} sees for one field: set schema keywords, mark
+ * presence/nullability, flag the request multipart, reach a sibling for a cross-field rule like
+ * `confirmed`. It hides the {@see FieldNode} tree and the {@see RequestSchemaBuilder} root so
+ * transformers stay pure.
  */
 final readonly class ValidationField
 {

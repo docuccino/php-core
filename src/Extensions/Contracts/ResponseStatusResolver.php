@@ -7,18 +7,17 @@ namespace Docuccino\Core\Extensions\Contracts;
 use Docuccino\Core\Extensions\Context\RouteContext;
 
 /**
- * A gated seam contributing the success-status override(s) for a returned class — e.g. a spatie Data
- * class overriding `calculateResponseStatus()` to 201/202. Resolved per-document like the
- * exception-mapper chain (first resolver returning a non-empty list wins), so a DISABLED integration
- * contributes no override and the built-in inferred-responses extension reads only this chain (never
- * the integration class).
+ * A gated seam contributing success-status overrides for a returned class — a spatie Data class
+ * overriding `calculateResponseStatus()` to 201, say. Resolved per-document, first non-empty list
+ * wins, so a disabled integration contributes nothing; the inferred-responses extension reads this
+ * chain and never an integration class.
  */
 interface ResponseStatusResolver
 {
     /**
-     * The HTTP success status(es) this class documents, or `[]` to leave the inferred default in
-     * place. Usually one; more than one when the override folds to several constants (a
-     * conditional/ternary whose arms all fold — each status carries the same response body).
+     * The success status(es) this class documents, or `[]` to leave the inferred default alone. Usually
+     * one; several when the override is a conditional whose arms all fold to constants, in which case
+     * every status carries the same body.
      *
      * @return list<int>
      */

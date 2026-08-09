@@ -5,17 +5,14 @@ declare(strict_types=1);
 namespace Docuccino\Core\Inference;
 
 /**
- * The result of {@see TypeEngine::trace()}. Trace is interactive — the visitor
- * harvests as it walks — but the walk still reads a transitive set of files, and
- * that dependency accounting must reach the caller: the pipeline's
- * OperationFragment cache keys on these files, so a QB chain traced three files
- * deep invalidates when any of those deep files change (without this the cache
- * would serve stale docs).
+ * The result of {@see TypeEngine::trace()}. The visitor harvests as it walks, but the walk still
+ * reads a transitive set of files and the caller needs that accounting: the OperationFragment cache
+ * keys on it, so a chain traced three files deep invalidates when any of those deep files change.
+ * Without it the cache would serve stale docs.
  *
- * `dependencyFiles` is canonical — sorted + deduped, the same normalization as
- * {@see ActionAnalysis} — so the report is deterministic and directly usable as a
- * cache-key input. The type is deliberately a small struct (not a bare array) so
- * later diagnostics/telemetry can grow onto it without another contract break.
+ * `dependencyFiles` is sorted and deduped, same normalisation as {@see ActionAnalysis}, so the report
+ * is deterministic and usable straight as a cache-key input. It's a struct rather than a bare array
+ * so diagnostics or telemetry can grow onto it later without breaking the contract.
  */
 final readonly class TraceReport
 {

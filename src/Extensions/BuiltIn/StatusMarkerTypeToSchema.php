@@ -13,10 +13,9 @@ use Docuccino\Core\Inference\DType\StatusMarkerT;
 
 /**
  * A {@see StatusMarkerT} → a bare `integer` schema. The response-building seam normally resolves the
- * marker to a concrete {@see LiteralT} (the response's own status)
- * BEFORE conversion, so a `const`-pinned integer is emitted instead; this mapper is the total, HONEST
- * fallback for an unresolved marker — an integer with NO `const` and NO example, never a fabricated
- * status.
+ * marker to a concrete {@see LiteralT} before conversion, emitting a `const`-pinned integer instead;
+ * this is the honest fallback for a marker that stayed unresolved — no `const`, no example, never a
+ * fabricated status.
  */
 final class StatusMarkerTypeToSchema implements TypeToSchema
 {

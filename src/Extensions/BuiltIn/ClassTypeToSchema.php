@@ -15,18 +15,12 @@ use Docuccino\Core\Inference\DType\UnionT;
 use Docuccino\Core\Support\Fqcn;
 
 /**
- * A named class → an object schema hoisted to `components.schemas` and referenced by `$ref`
- * (design §5 component hoisting). Properties come from {@see TypeEngine::classMetadata()}; the
- * component is named by the short class name and pinned by the FQCN as its `schemaId` diff
- * identity. This is the framework-agnostic fallback class mapper — it does not read
- * `#[SchemaName]`/`#[SchemaId]`; the integration mappers that supersede it (spatie Data, Eloquent,
- * resources) resolve those attribute overrides, so it passes its name/id explicitly to suppress the
- * shared skeleton's attribute fallback.
- *
- * The reserve → build → reference dance (and the self-reference cycle-break) is the shared
- * {@see ComponentHoist} skeleton the integration mappers use; this mapper degrades an unexpandable
- * class (no properties) to a bare `{type: object}` before reserving a name — nothing self-references
- * a class with no body — mirroring the integration mappers' own degradation.
+ * A named class → an object schema hoisted to `components.schemas` and referenced by `$ref`.
+ * Properties come from {@see TypeEngine::classMetadata()}; the component is named by the short class
+ * name and pinned by the FQCN. This is the framework-agnostic fallback mapper, and it ignores
+ * `#[SchemaName]`/`#[SchemaId]` on purpose — the mappers that supersede it (spatie Data,
+ * Eloquent, resources) resolve those, so this one passes name and id explicitly to suppress
+ * {@see ComponentHoist}'s attribute fallback.
  */
 final class ClassTypeToSchema implements TypeToSchema
 {
@@ -50,13 +44,13 @@ final class ClassTypeToSchema implements TypeToSchema
         return $this->hoist->hoist($context, $fqcn, function () use ($fqcn, $context): ?array {
             $metadata = $context->engine()->classMetadata(new ClassRef($fqcn));
 
-            // The class's reflected source is a fragment-cache dependency (design §10): editing the
-            // class (adding/retyping a property) must invalidate any warm fragment that referenced it.
+            // The class's reflected source is a fragment-cache dependency — adding or retyping a
+            // property must invalidate any warm fragment that referenced it.
             $context->dependsOn(...$metadata->dependencyFiles);
 
             if ($metadata->properties === []) {
-                // Degrade to a bare object; returning null keeps the reserved name unused so it never
-                // reaches components.schemas (an unexpandable class has no body to self-reference).
+                // Degrade to a bare object: null leaves the reserved name unused, so it never reaches
+                // components.schemas. An unexpandable class has no body to self-reference anyway.
                 return null;
             }
 

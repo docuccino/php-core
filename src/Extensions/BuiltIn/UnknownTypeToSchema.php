@@ -16,9 +16,8 @@ use Docuccino\Core\Inference\DType\UnknownT;
 use Docuccino\Core\Inference\DType\VoidT;
 
 /**
- * The terminal mapper: unresolvable, callable, void and never types all become an open `{}`
- * schema at low confidence (design §5 — `UnknownT → {}` + low-confidence provenance). Pinned
- * last in the chain via {@see ExtensionOrder} so anything specific wins first.
+ * The terminal mapper: unresolvable, callable, void and never types all become an open `{}` schema at
+ * low confidence. Pinned last via {@see ExtensionOrder} so anything specific wins first.
  */
 #[ExtensionOrder(priority: Priorities::LAST)]
 final class UnknownTypeToSchema implements TypeToSchema

@@ -5,14 +5,12 @@ declare(strict_types=1);
 namespace Docuccino\Core\Extensions\Context;
 
 /**
- * The per-route dependency-contribution seam (design §10): the mutable bag a {@see RouteContext}
- * exposes so extensions that read facts out-of-band — a `#[DescriptionFromFile]` markdown file, a
- * FormRequest analysed separately, a traced helper — can register the FILES those facts came from.
- * Every registered file joins the fragment cache key's dependency manifest, so editing any of them
- * invalidates the cached fragment.
+ * The mutable bag behind {@see RouteContext::dependencies()}: the files behind facts an extension read
+ * out-of-band — a `#[DescriptionFromFile]` markdown file, a separately analysed FormRequest, a traced
+ * helper — each of which joins the fragment cache key's dependency manifest.
  *
- * Scalar (non-file) cache inputs belong on {@see RouteDescriptor::$cacheInputs} instead: they must
- * fold into the pre-build lookup key, whereas files are validated after the fact by re-hashing.
+ * Scalar (non-file) cache inputs go on {@see RouteDescriptor::$cacheInputs} instead: those have to fold
+ * into the pre-build lookup key, whereas files are validated afterwards by re-hashing.
  */
 final class RouteDependencies
 {

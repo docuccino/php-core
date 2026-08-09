@@ -22,17 +22,17 @@ use ReflectionClass;
 use Throwable;
 
 /**
- * The extension set for one build, partitioned by contract and pre-sorted within each partition
- * by {@see ExtensionSorter}. One instance may satisfy several
- * contracts and appears in each matching partition.
+ * The extension set for one build, partitioned by contract and pre-sorted within each partition by
+ * {@see ExtensionSorter}. One instance may satisfy several contracts and then appears in every
+ * matching partition.
  *
  * @internal
  */
 final readonly class ResolvedExtensions
 {
     /**
-     * Operation extensions grouped by phase once, up front (order within each phase preserved), so a
-     * build that iterates phases per route does not re-filter the whole list on every phase.
+     * Grouped by phase once, up front, so a build iterating phases per route doesn't re-filter the
+     * whole list every time.
      *
      * @var array<int, list<OperationExtension>> phase value → its extensions, sorted order preserved
      */
@@ -82,8 +82,8 @@ final readonly class ResolvedExtensions
     }
 
     /**
-     * The deduped class-string list of every resolved extension, in a deterministic order — a
-     * fragment-cache key input (design §10): a changed extension set must invalidate every fragment.
+     * Every resolved extension class, deduped and sorted — a fragment-cache key input, so changing
+     * the extension set invalidates every fragment.
      *
      * @return list<string>
      */
@@ -103,11 +103,10 @@ final readonly class ResolvedExtensions
     }
 
     /**
-     * The fragment-cache extension-signature (design §10): every resolved extension class paired
-     * with its owning composer package's installed version, so upgrading a package that changes an
-     * extension's behaviour invalidates every fragment even when the class list is unchanged. The
-     * version lookup is tolerant — an unresolvable package contributes an empty version rather than
-     * failing the build.
+     * {@see classSignature()} with each class paired with its composer package's installed version,
+     * so upgrading a package that changes an extension's behaviour invalidates every fragment even
+     * though the class list didn't move. The lookup is tolerant: an unresolvable package contributes
+     * an empty version rather than failing the build.
      *
      * @return list<string>
      */
@@ -122,8 +121,8 @@ final readonly class ResolvedExtensions
     }
 
     /**
-     * The installed version of the composer package owning $class, or `''` when it cannot be
-     * determined (class has no file, no composer.json above it, or the package is not tracked).
+     * The installed version of the composer package owning $class, or `''` when it can't be worked
+     * out — no file, no composer.json above it, or the package isn't tracked.
      */
     private static function packageVersion(string $class): string
     {

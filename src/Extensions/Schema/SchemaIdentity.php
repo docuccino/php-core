@@ -10,17 +10,16 @@ use Docuccino\Attributes\SchemaName;
 use ReflectionClass;
 
 /**
- * Reads the Docuccino `#[SchemaName]` (component display name), `#[SchemaId]` (diff identity) and the
- * class-level `#[Hidden]` deny-list off a class — the reading every schema mapper that hoists a class
- * to a component honours, so it stays identical whether the source is core's built-in class mapper, a
- * spatie Data class, an API Resource, or an Eloquent model. Reflecting Docuccino attributes off a
- * class is framework-neutral, so it lives beside {@see ComponentHoist} in core.
+ * Reads `#[SchemaName]` (component display name), `#[SchemaId]` (diff identity) and the class-level
+ * `#[Hidden]` deny-list off a class. Every class-hoisting schema mapper reads them through here, so
+ * the behaviour is identical whether the source is core's class mapper, a spatie Data class, an API
+ * Resource or an Eloquent model.
  */
 final class SchemaIdentity
 {
     /**
-     * The property names a class-level `#[Hidden(...)]` deny-lists from output (merged across every
-     * such attribute), or `[]` when the class carries none.
+     * Property names a class-level `#[Hidden(...)]` keeps out of the output, merged across every such
+     * attribute.
      *
      * @return list<string>
      */

@@ -5,20 +5,20 @@ declare(strict_types=1);
 namespace Docuccino\Core\Support;
 
 /**
- * Confines a user-supplied relative path to a base directory (security L2): `#[DescriptionFromFile]`
- * and `info.description.file` both read a project file whose path comes from config/attributes, so a
- * `../../etc/passwd` value must never escape the app. Resolution is lexical first (collapsing `.` /
- * `..` without touching the filesystem, which rejects traversal even for non-existent targets) and,
- * when the target exists, re-checked through {@see realpath()} so a symlink cannot tunnel out either.
+ * Confines a user-supplied relative path to a base directory. `#[DescriptionFromFile]` and
+ * `info.description.file` both read a project file whose path comes from config or an attribute, so
+ * `../../etc/passwd` must never escape the app. Resolution is lexical first — collapsing `.` / `..`
+ * without touching the filesystem, which catches traversal even for targets that don't exist — then
+ * re-checked through {@see realpath()} when the target does exist, so symlinks can't tunnel out.
  *
  * @internal
  */
 final class ConfinedPath
 {
     /**
-     * The absolute path $relative resolves to under $base, or null when it escapes $base. A returned
-     * path is confined but not guaranteed to exist — the caller reads it and treats a read failure as
-     * "absent", distinct from this method's null which means "rejected escape".
+     * The absolute path $relative resolves to under $base, or null when it escapes. A returned path
+     * is confined but may not exist: callers treat a read failure as "absent", which is a different
+     * thing from this null, meaning "rejected escape".
      */
     public static function resolve(string $base, string $relative): ?string
     {
@@ -29,8 +29,7 @@ final class ConfinedPath
             return null;
         }
 
-        // Defend against symlink escapes: if the target (or its parent) exists, realpath must still
-        // land inside the realpath of the base.
+        // Symlink escapes: if the target exists, its realpath must land inside the base's realpath.
         $real = realpath($candidate);
         $realBase = realpath($base);
         if ($real !== false && $realBase !== false && ! self::within($realBase, $real)) {
@@ -46,9 +45,8 @@ final class ConfinedPath
     }
 
     /**
-     * Collapse `.` and `..` segments lexically, preserving a leading `/`. Public so the adapter's
-     * base-path relativisation — the inverse direction — shares this one normalizer rather than
-     * re-rolling it.
+     * Collapse `.` and `..` lexically, keeping any leading `/`. Public so the adapter's base-path
+     * relativisation (the inverse direction) shares this normalizer instead of re-rolling it.
      */
     public static function normalize(string $path): string
     {

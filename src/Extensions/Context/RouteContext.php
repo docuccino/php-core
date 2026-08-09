@@ -29,14 +29,16 @@ use Docuccino\Core\Provenance\Source;
 use Docuccino\Core\Provenance\SourcePathResolver;
 
 /**
- * Everything an {@see OperationExtension} needs about the route it is documenting (design §5):
- * the discovered route, its engine action reference, the collected attributes (method > class),
- * docblock prose, and the document being built. The inference handle is lazy — {@see analysis()}
- * calls the engine at most once per context and memoises, so extensions in different phases
- * share one analysis pass. {@see converter()} exposes the resolved type→schema chain over the
- * document-wide {@see ComponentRegistry} (shared across routes so cross-route `$ref`s stay
- * consistent); the components a route newly registered are collected into its fragment — as a
- * delta of that shared registry — after the pipeline runs.
+ * Everything an {@see OperationExtension} needs about the route it documents (design §5): the
+ * route, its engine action ref, the collected attributes (method beats class), docblock prose and
+ * the document being built. {@see analysis()} hits the engine at most once and memoises, so
+ * extensions in different phases share one pass. {@see converter()} works over the document-wide
+ * {@see ComponentRegistry} so cross-route `$ref`s stay consistent; each route's fragment gets the
+ * delta it added.
+ *
+ * The gated resolver chains below (response target/status, payload media type, route-binding
+ * schema) all take the first non-null answer, so a disabled integration contributes nothing and
+ * the default stands.
  */
 final class RouteContext
 {
@@ -48,10 +50,7 @@ final class RouteContext
 
     private ?ValidationRulesToSchema $validation = null;
 
-    /**
-     * The out-of-band dependency-file contributions for this route (traces + integrations reading
-     * files the action analysis did not surface). Merged into {@see dependencyFiles()}.
-     */
+    /** Files the action analysis didn't surface (traces, integrations); merged into {@see dependencyFiles()}. */
     private RouteDependencies $dependencies;
 
     /**
@@ -94,11 +93,7 @@ final class RouteContext
         $this->dependencies = new RouteDependencies;
     }
 
-    /**
-     * The success-body analysis redirect for this route from the gated {@see ResponseAnalysisTarget}
-     * chain (first non-null wins), or null to analyse the dispatched action itself. A disabled
-     * integration contributes no target, so a plain inference is used and attributed honestly.
-     */
+    /** Where to analyse the success body, or null to analyse the dispatched action itself. */
     public function responseAnalysisRedirect(): ?ResponseAnalysisRedirect
     {
         foreach ($this->responseAnalysisTargets as $target) {
@@ -112,11 +107,9 @@ final class RouteContext
     }
 
     /**
-     * Walk the exception→response chain for a throw and return the first mapper that supports it AND
-     * yields a non-null {@see ResponseDraft}, paired with that draft (or null when none applies). The
-     * single home for the "first supports() + non-null toResponse() wins" chain resolution the error /
-     * implicit / QB-strict / action-authorize extensions all synthesize a throw for — each then applies
-     * the returned draft with its own producer/source.
+     * The first exception mapper that both supports the throw and yields a draft, paired with that
+     * draft — the one home for that chain resolution. Every extension that synthesizes a throw comes
+     * through here and then applies the draft under its own producer and source.
      */
     public function mapThrow(ThrownException $throw): ?MappedResponse
     {
@@ -135,9 +128,7 @@ final class RouteContext
     }
 
     /**
-     * The success-status override(s) for a returned class from the gated {@see ResponseStatusResolver}
-     * chain (first resolver returning a non-empty list wins), or `[]` to keep the inferred default. A
-     * disabled integration contributes nothing.
+     * Success-status overrides for a returned class, or `[]` to keep the inferred default.
      *
      * @return list<int>
      */
@@ -153,11 +144,7 @@ final class RouteContext
         return [];
     }
 
-    /**
-     * The media type a response payload serialises as, from the gated {@see PayloadMediaTypeResolver}
-     * chain (first non-null wins), defaulting to `application/json`. A disabled resource integration
-     * contributes no matcher, so its resources stay `application/json`.
-     */
+    /** The media type a response payload serialises as, defaulting to `application/json`. */
     public function payloadMediaType(DType $payload): string
     {
         foreach ($this->payloadMediaTypeResolvers as $resolver) {
@@ -171,9 +158,7 @@ final class RouteContext
     }
 
     /**
-     * The JSON-schema keywords for a route-bound model's key, from the gated
-     * {@see RouteBindingSchemaResolver} chain (first non-null wins), or null to fall back to a plain
-     * string. A disabled Eloquent integration contributes nothing.
+     * JSON-schema keywords for a route-bound model's key, or null to fall back to a plain string.
      *
      * @return array<string, mixed>|null
      */
@@ -190,9 +175,9 @@ final class RouteContext
     }
 
     /**
-     * The specific HTTP method this context documents (lower-case). A multi-method route builds one
-     * context per documentable method (arch F8), so extensions that branch on the verb — request
-     * body vs query parameters — must read THIS, not {@see RouteDescriptor::primaryMethod()}.
+     * The HTTP method this context documents (lower-case). A multi-method route gets one context per
+     * documentable method, so anything branching on the verb — request body vs query parameters —
+     * must read this and not {@see RouteDescriptor::primaryMethod()}.
      */
     public function httpMethod(): string
     {
@@ -200,8 +185,11 @@ final class RouteContext
     }
 
     /**
-     * The dependency-contribution bag (design §10): extensions reading facts out-of-band register
-     * the FILES those facts came from here, so editing any of them invalidates the cached fragment.
+     * The dependency-contribution bag (design §10) — and the home of fragment-cache soundness:
+     * anything an extension reads that affects output must be registered here (or in the descriptor
+     * cache inputs), because the fragment cache key is exactly these files plus the action
+     * analysis's own. A fact read from an unregistered file means editing that file leaves a stale
+     * fragment warm.
      */
     public function dependencies(): RouteDependencies
     {
@@ -215,11 +203,9 @@ final class RouteContext
     }
 
     /**
-     * Drive an interprocedural {@see TraceVisitor} walk from the action, recording the walk's
-     * transitive dependency files so they join the fragment cache key (design §10 — a chain traced
-     * N files deep must invalidate when any of those files change). Integrations that recover facts
-     * by tracing (validation rules, query builders) should go through this rather than the engine
-     * directly, so their dependencies are accounted for.
+     * Drive an interprocedural {@see TraceVisitor} walk from the action, recording the walk's transitive
+     * dependency files. Trace through here rather than calling the engine directly, or those
+     * dependencies go unrecorded — see {@see dependencies()}.
      */
     public function trace(TraceVisitor $visitor): TraceReport
     {
@@ -231,8 +217,7 @@ final class RouteContext
     }
 
     /**
-     * Record extra dependency files an integration read out-of-band (e.g. a FormRequest class it
-     * analysed separately) so they join the fragment cache key alongside the action's own.
+     * Record files read out-of-band, e.g. a separately analysed FormRequest. See {@see dependencies()}.
      *
      * @param  list<string>  $files
      */
@@ -242,8 +227,8 @@ final class RouteContext
     }
 
     /**
-     * Every file this route's analysis + traces read, deduped and sorted — the fragment cache key
-     * input the pipeline persists (design §10).
+     * Every file this route's analysis and traces read, deduped and sorted — the fragment cache key
+     * input the pipeline persists.
      *
      * @return list<string>
      */
@@ -255,21 +240,15 @@ final class RouteContext
         return $files;
     }
 
-    /**
-     * The validation rule → schema converter for this route: the core chain driver over the
-     * resolved rule-transformer vocabulary (Laravel's set plus any user transformers). Recovery
-     * integrations feed it a {@see RuleSet}.
-     */
+    /** The rule→schema chain driver over the resolved transformers; feed it a {@see RuleSet}. */
     public function validation(): ValidationRulesToSchema
     {
         return $this->validation ??= new DefaultValidationRulesToSchema($this->ruleTransformers);
     }
 
     /**
-     * A provenance {@see Source} for an engine {@see SourceLocation}, with the file path made
-     * project-root-relative via the resolver (design §4). Returns null when no resolver or no
-     * usable file is available, so a contribution simply carries no source rather than a churny
-     * absolute path.
+     * A provenance {@see Source} for an engine {@see SourceLocation}, path made project-relative.
+     * Null when there's no resolver or no usable file — better no source than a churny absolute path.
      */
     public function sourceAt(SourceLocation $location, ?string $symbol = null): ?Source
     {
@@ -281,8 +260,8 @@ final class RouteContext
     }
 
     /**
-     * A provenance {@see Source} pointing at the action itself (the reflection target for
-     * attribute-produced contributions, and a fallback location for reflection-derived inference).
+     * A provenance {@see Source} pointing at the action itself — the reflection target for
+     * attribute-produced contributions, and a fallback for reflection-derived inference.
      */
     public function actionSource(): ?Source
     {
@@ -301,13 +280,12 @@ final class RouteContext
      */
     public function converter(): SchemaConverter
     {
-        // Share this route's dependency bag with the converter so mappers recording reflected /
-        // classMetadata / enum files via SchemaContext::dependsOn() widen the fragment cache key
-        // (design §10 — editing a returned DTO/model/enum must invalidate the warm fragment).
+        // The converter gets this route's dependency bag so mappers recording files via
+        // SchemaContext::dependsOn() widen the fragment cache key — see dependencies().
         return $this->converter ??= new SchemaConverter($this->typeMappers, $this->engine, $this->components, $this->representation(), $this->dependencies);
     }
 
-    /** The document's representation policy (design §Representation policies), resolved once. */
+    /** The document's representation policy, resolved once. */
     public function representation(): RepresentationPolicy
     {
         return $this->representation ??= RepresentationPolicy::fromConfig(

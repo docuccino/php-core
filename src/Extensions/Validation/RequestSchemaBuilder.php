@@ -7,10 +7,10 @@ namespace Docuccino\Core\Extensions\Validation;
 use Docuccino\Core\Extensions\Context\RepresentationPolicy;
 
 /**
- * Assembles the request object schema from dot/wildcard field paths. `field('items.*.id')`
- * descends the tree creating an `items` array whose item objects carry an `id` property; a `*`
- * segment turns the current node into an array and descends into its items. The multipart flag is
- * raised by a `file`/`image` transformer through the field façade.
+ * Assembles the request object schema from dot/wildcard field paths: `field('items.*.id')` creates an
+ * `items` array whose item objects carry an `id` property, since a `*` segment turns the current node
+ * into an array and descends into its items. A `file`/`image` transformer raises the multipart flag
+ * through the field façade.
  */
 final class RequestSchemaBuilder
 {

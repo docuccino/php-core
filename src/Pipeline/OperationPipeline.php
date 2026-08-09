@@ -10,10 +10,9 @@ use Docuccino\Core\Extensions\Contracts\OperationPhase;
 use Docuccino\Core\Extensions\ResolvedExtensions;
 
 /**
- * Runs the phased operation extensions in order (design §5): every phase in
- * {@see OperationPhase} declaration order, and within a phase the extensions in their resolved
- * (topologically sorted) order. All writes flow through the draft's PatchGuard, so precedence
- * and provenance hold regardless of execution order.
+ * Runs the phased operation extensions: phases in {@see OperationPhase} declaration order, and within
+ * a phase the extensions in their resolved (topologically sorted) order. Every write goes through the
+ * draft's PatchGuard, so precedence and provenance hold whatever the execution order.
  *
  * @internal
  */

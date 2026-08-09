@@ -5,12 +5,12 @@ declare(strict_types=1);
 namespace Docuccino\Core\Overlay;
 
 /**
- * A single OpenAPI Overlay 1.0 action: a `target` selector plus exactly one operation — either
- * an `update` (merge an object / replace a scalar or array at the target) or a `remove` (delete
- * the targeted node). `update` may legitimately be `null` or `false`, so its presence is tracked
- * explicitly rather than inferred from the value. An action declaring BOTH `update` and `remove`
- * is a conflict: it parses (both flags stay set) and {@see OverlayApplier} surfaces an error
- * diagnostic at apply time rather than silently guessing which operation was intended.
+ * One OpenAPI Overlay 1.0 action: a `target` selector plus exactly one operation — `update` (merge an
+ * object, or replace a scalar/array) or `remove` (delete the node). `update` can legitimately be
+ * `null` or `false`, so its presence is tracked explicitly rather than inferred from the value.
+ *
+ * An action declaring both operations is a conflict, and it still parses with both flags set:
+ * {@see OverlayApplier} raises an error at apply time instead of guessing which was meant.
  */
 final readonly class OverlayAction
 {

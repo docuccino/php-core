@@ -13,11 +13,10 @@ use Docuccino\Core\Inference\DType\DType;
 use Docuccino\Core\Inference\TypeEngine;
 
 /**
- * Drives the {@see TypeToSchema} chain (design §6): for a given type it asks each mapper in
- * order, taking the first that {@see TypeToSchema::supports()} and returns a non-null result;
- * a null result defers to the next. Nested types recurse through {@see convert()}, so mappers
- * compose without knowing the chain. It is the {@see SchemaContext} the mappers receive, and it
- * tracks the lowest confidence any mapper reports across a whole top-level conversion.
+ * Drives the {@see TypeToSchema} chain (design §6): asks each mapper in order and takes the first that
+ * supports the type and returns a non-null result. Nested types recurse through {@see convert()}, so
+ * mappers compose without knowing the chain. It's also the {@see SchemaContext} they receive, and it
+ * keeps the lowest confidence any mapper reported across a whole top-level conversion.
  *
  * @internal
  */
@@ -25,7 +24,7 @@ final class SchemaConverter implements SchemaContext
 {
     private float $confidence = 1.0;
 
-    /** Recursion depth of the running conversion: 1 while a mapper converts the top-level type, deeper for nested types. */
+    /** Recursion depth: 1 at the top-level type, deeper for nested ones. */
     private int $depth = 0;
 
     /**

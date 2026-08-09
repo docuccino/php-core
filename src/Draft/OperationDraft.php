@@ -12,10 +12,10 @@ use Docuccino\Core\Patch\PatchResult;
 use Docuccino\Core\Support\Hydrate;
 
 /**
- * The mutable operation builder (design §5/§7). Scalar fields go through the guard; parameters
- * merge by `(in, name)` and responses by status, each a nested draft with its own guard — so
- * a targeted patch never wipes inferred siblings. {@see freeze()} produces the immutable
- * Phase 1a {@see Operation}, provenance assembled into every node's `x-docuccino`.
+ * The mutable operation builder. Scalar fields go through the guard; parameters merge by
+ * `(in, name)` and responses by status, each a nested draft with its own guard — so a targeted
+ * patch never wipes inferred siblings. {@see freeze()} produces the immutable {@see Operation},
+ * provenance assembled into every node's `x-docuccino`.
  */
 final class OperationDraft
 {
@@ -124,11 +124,9 @@ final class OperationDraft
     }
 
     /**
-     * The underlying patch guard.
-     *
-     * @internal Not part of the frozen extension-author surface: it hands back the {@see PatchGuard}
-     * (itself `@internal`). Extensions read winning state through {@see producerFor()} /
-     * {@see resolvedField()} instead.
+     * @internal Not part of the frozen extension-author surface — it hands back the (also
+     * `@internal`) {@see PatchGuard}. Extensions read winning state via {@see producerFor()} /
+     * {@see resolvedField()}.
      */
     public function guard(): PatchGuard
     {
@@ -143,9 +141,9 @@ final class OperationDraft
     }
 
     /**
-     * Assign identities to every child parameter and response draft (design §2). The response
-     * callback receives the response's primary media type (`''` when it has none, e.g. a `$ref`),
-     * and may return null to leave the response without an id.
+     * Assigns identities to every child parameter and response draft. The response callback gets the
+     * primary media type (`''` when there isn't one, e.g. a `$ref`) and may return null to leave the
+     * response id-less.
      *
      * @param  callable(string $in, string $name): ?string  $parameterId
      * @param  callable(string $status, string $primaryMediaType): ?string  $responseId
@@ -157,8 +155,7 @@ final class OperationDraft
         }
 
         foreach ($this->responses as $status => $draft) {
-            // Numeric-string status keys (e.g. '200') are coerced to int array keys by PHP; the
-            // callback contract is string, so restore it.
+            // PHP coerces numeric-string keys like '200' to ints; the callback wants a string.
             $draft->assignId($responseId((string) $status, $draft->primaryMediaType()));
         }
     }

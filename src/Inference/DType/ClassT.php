@@ -7,12 +7,11 @@ namespace Docuccino\Core\Inference\DType;
 use Docuccino\Core\Inference\TypeEngine;
 
 /**
- * An object of a named class/interface, with any resolved generic type
- * arguments (`Collection<int, User>` → `ClassT('…\Collection', [int, User])`).
+ * An object of a named class/interface with any resolved generic type arguments
+ * (`Collection<int, User>` → `ClassT('…\Collection', [int, User])`).
  *
- * Class *expansion* (properties, docblocks) is lazy via
- * {@see TypeEngine::classMetadata()}; a ClassT only
- * carries identity so it stays serializable and cache-stable.
+ * A ClassT carries identity only, which keeps it serializable and cache-stable; expanding the class
+ * into properties and docblocks is lazy, via {@see TypeEngine::classMetadata()}.
  */
 final readonly class ClassT extends DType
 {

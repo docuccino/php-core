@@ -9,23 +9,20 @@ use Docuccino\Core\Extensions\Contracts\SchemaContext;
 use Docuccino\Core\Support\Fqcn;
 
 /**
- * The shared component-hoisting skeleton for any schema mapper that lifts a class to a reusable
- * `components.schemas` entry: core's built-in {@see ClassTypeToSchema}
- * and the adapter's integration mappers (a spatie Data class, an API Resource, a JSON:API resource,
- * an Eloquent model) all delegate the same three-step dance to it —
+ * The shared skeleton for any schema mapper that lifts a class to a reusable `components.schemas`
+ * entry — core's {@see ClassTypeToSchema} and the adapter's integration mappers (spatie Data, API
+ * Resource, JSON:API resource, Eloquent model) all delegate the same dance:
  *
- * 1. an expanding-map cycle-break: a self-reference discovered mid-expansion returns a `$ref` to
- *    the name reserved for the class rather than recursing into it (the guard against infinite
- *    recursion / stack overflow on a self-referential class);
- * 2. {@see SchemaIdentity} resolution of the component name (`#[SchemaName]`, else the short class
- *    name) and diff identity (`#[SchemaId]`, else the FQCN);
- * 3. reserving the final (possibly collision-suffixed) component name up front via
- *    {@see SchemaContext::reserveComponentName()} so the cycle-breaking `$ref` points at the exact
- *    name the registry will hoist under; and
- * 4. materialising the body through {@see SchemaContext::reference()}, or degrading to a bare
- *    `{type: object}` at low confidence when the builder cannot analyse the class.
+ * 1. cycle-break — a self-reference found mid-expansion returns a `$ref` to the class's reserved
+ *    name rather than recursing into it forever;
+ * 2. resolve the component name (`#[SchemaName]`, else the short class name) and diff identity
+ *    (`#[SchemaId]`, else the FQCN) via {@see SchemaIdentity};
+ * 3. reserve the final, possibly collision-suffixed name up front through
+ *    {@see SchemaContext::reserveComponentName()} so that cycle-breaking `$ref` is accurate;
+ * 4. materialise the body via {@see SchemaContext::reference()}, or degrade to a bare
+ *    `{type: object}` at low confidence when the builder can't analyse the class.
  *
- * A single instance is held per mapper (its `expanding` map is the mapper's recursion state), so the
+ * One instance lives per mapper — its `expanding` map is that mapper's recursion state — so the
  * mapper stays effectively stateless between top-level conversions.
  */
 final class ComponentHoist
@@ -38,13 +35,12 @@ final class ComponentHoist
     private array $expanding = [];
 
     /**
-     * Hoist `$fqcn` to a named component, calling `$build` to materialise its body between reserving
-     * the name and referencing it. `$build` may recurse back through the chain into the same mapper
-     * (self-reference is cycle-broken via the reserved name); returning null degrades the class to a
-     * bare `{type: object}`.
+     * Hoist `$fqcn` to a named component, calling `$build` between reserving the name and referencing
+     * it. `$build` may recurse back through the chain into the same mapper — a self-reference is
+     * cycle-broken via the reserved name — and returning null degrades to a bare `{type: object}`.
      *
-     * `$schemaName`/`$schemaId` override the resolved {@see SchemaIdentity} pair when a mapper reads
-     * them from its own reflection (e.g. spatie facts) — pass null to fall back to the attribute pair.
+     * `$schemaName`/`$schemaId` override the {@see SchemaIdentity} pair when a mapper reads them from
+     * its own reflection (spatie facts, say); null falls back to the attribute pair.
      *
      * @param  callable(): (array<string, mixed>|null)  $build
      */

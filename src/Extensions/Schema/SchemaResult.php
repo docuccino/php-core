@@ -7,9 +7,8 @@ namespace Docuccino\Core\Extensions\Schema;
 use Docuccino\Core\Extensions\Contracts\TypeToSchema;
 
 /**
- * The output of a {@see TypeToSchema} mapper: the JSON
- * Schema fragment plus the confidence the mapper assigns it (recorded-only in v1 — feeds
- * provenance `confidence`, no behaviour acts on it yet, design §4).
+ * The output of a {@see TypeToSchema} mapper: the JSON Schema fragment plus the mapper's confidence in
+ * it. Confidence is recorded only — it feeds provenance, and nothing branches on it yet.
  */
 final readonly class SchemaResult
 {

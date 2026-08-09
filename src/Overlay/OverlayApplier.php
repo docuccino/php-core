@@ -10,13 +10,14 @@ use Docuccino\Core\Support\Arr;
 
 /**
  * Applies an {@see OverlayDocument} to a document array as the Overlay(45) precedence layer
- * (design §7). Each action's `target` is resolved by {@see TargetResolver}; `update` merges an
- * object (deep, update wins) or replaces a scalar/array, `remove` deletes the matched node.
+ * (docs/design/uir-and-extensions.md §7). {@see TargetResolver} resolves each action's `target`;
+ * `update` deep-merges an object (update wins) or replaces a scalar/array, `remove` deletes the
+ * matched node.
  *
- * Every value an `update` changes is recorded in the affected node's `x-docuccino.provenance` with
- * `producer: overlay`, `layer: overlay`, and the prior value captured in `overrode` — so the
- * "why is it documented this way" trail survives regeneration. An unsupported selector yields an
- * error diagnostic; a target matching nothing yields a warning — never a silent skip.
+ * Every value an `update` changes is recorded in the affected node's `x-docuccino.provenance`
+ * (`producer`/`layer: overlay`, prior value in `overrode`), so the "why is it documented this way"
+ * trail survives regeneration. An unsupported selector errors, a target matching nothing warns —
+ * never a silent skip.
  *
  * @internal
  */
@@ -150,7 +151,7 @@ final class OverlayApplier
     }
 
     /**
-     * Attaches overlay provenance to the parent node when a scalar/array leaf member is replaced.
+     * Provenance for a replaced scalar/array leaf hangs off the parent node.
      *
      * @param  array<string, mixed>  $document
      * @param  list<int|string>  $path

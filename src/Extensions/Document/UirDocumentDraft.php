@@ -9,11 +9,9 @@ use Docuccino\Core\Extensions\Contracts\DocumentTransformer;
 use Docuccino\Core\Support\Arr;
 
 /**
- * A mutable, array-shaped view of the assembled document handed to
- * {@see DocumentTransformer}s and overlay application
- * before canonicalisation. Kept deliberately raw (an array, not the immutable
- * {@see UirDocument}) so transformers and overlays can touch any node
- * uniformly.
+ * A mutable, array-shaped view of the assembled document, handed to {@see DocumentTransformer}s and
+ * overlay application before canonicalisation. Raw arrays rather than the immutable
+ * {@see UirDocument} so transformers and overlays can touch any node uniformly.
  */
 final class UirDocumentDraft
 {

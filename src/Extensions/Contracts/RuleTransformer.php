@@ -8,15 +8,14 @@ use Docuccino\Core\Extensions\Validation\ValidationField;
 use Docuccino\Core\Extensions\Validation\ValidationRule;
 
 /**
- * One link in the per-rule transformer chain a {@see ValidationRulesToSchema} drives (design §6 —
- * the Scribe `RuleTransformer` parity point). The first transformer whose {@see supports()} is true
- * handles the rule and applies its effect to the field being built; a rule no transformer supports
- * becomes an info diagnostic and leaves the field permissive.
+ * One link in the per-rule transformer chain a {@see ValidationRulesToSchema} drives (design §6). The
+ * first transformer whose {@see supports()} is true handles the rule; a rule nothing supports becomes
+ * an info diagnostic and leaves the field permissive.
  *
- * Transformers are pure and framework-agnostic: they read a {@see ValidationRule} (a name + string
+ * Transformers are pure and framework-agnostic: they read a {@see ValidationRule} (a name plus string
  * parameters, recovered statically — never executed) and mutate a {@see ValidationField}. Cross-field
- * rules (`confirmed`) and media-type effects (`file`/`image`) reach siblings and the request root
- * through the field facade.
+ * rules like `confirmed` and media-type effects like `file`/`image` reach siblings and the request
+ * root through that field facade.
  */
 interface RuleTransformer
 {
@@ -25,9 +24,9 @@ interface RuleTransformer
     public function apply(ValidationRule $rule, ValidationField $field, SchemaContext $context): void;
 
     /**
-     * The exhaustive list of rule names this transformer handles — the single source of truth its
-     * {@see supports()} is derived from, so the vocabulary can be guarded: every declared name must
-     * route to exactly one transformer and carry a dataset row (design §Test-coverage standards).
+     * Every rule name this transformer handles, and the source of truth {@see supports()} derives
+     * from. It keeps the vocabulary guardable: each declared name must route to exactly one
+     * transformer and carry a dataset row.
      *
      * @return list<string>
      */

@@ -8,20 +8,17 @@ use Docuccino\Core\Support\Arr;
 
 /**
  * Resolves an OpenAPI Overlay `target` (a JSONPath expression) against a document, returning the
- * concrete key-paths it matches. Docuccino supports a **documented subset** of JSONPath focused
- * on object-member targeting (sufficient for real overlays over an OAS/UIR document):
+ * concrete key-paths it matches. Only a documented subset of JSONPath is supported — enough for
+ * object-member targeting over an OAS/UIR document:
  *
  * - root `$`;
- * - dot-member `.name` (name = letter/underscore then letters/digits/`_`/`-`);
- * - bracket-member `['name']` / `["name"]` (any characters — the form for keys like `/paths`
- *   entries, e.g. `$.paths['/pets']`);
+ * - dot-member `.name`;
+ * - bracket-member `['name']` / `["name"]` — any characters, so `$.paths['/pets']` works;
  * - array index `[0]`;
- * - array equality filter `[?(@.field=='value')]` / `[?(@.field=="value")]` — string values
- *   only (matches parameters by `name`/`in`, responses by a field, etc.).
+ * - array equality filter `[?(@.field=='value')]`, string values only.
  *
- * Anything else — wildcards `*`, recursive descent `..`, slices `[1:3]`, unions, or comparison
- * operators other than `==` — is outside the subset and raises {@see UnsupportedSelectorException},
- * which the applier turns into an error diagnostic (never a silent skip).
+ * Anything else — wildcards, recursive descent `..`, slices, unions, comparisons other than `==` —
+ * raises {@see UnsupportedSelectorException}, which the applier turns into an error diagnostic.
  *
  * @internal
  */

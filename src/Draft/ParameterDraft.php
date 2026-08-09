@@ -22,9 +22,9 @@ final class ParameterDraft
     private readonly SchemaDraft $schema;
 
     /**
-     * Additive semantic facts an integration records under this parameter's `x-docuccino.facts`
-     * (design §Representation policies — facts stay stable regardless of representation). Not
-     * contested fields, so they bypass the guard.
+     * Additive semantic facts an integration records under this parameter's `x-docuccino.facts`.
+     * Facts stay stable whatever the representation, and nothing contests them, so they skip the
+     * guard.
      *
      * @var array<string, mixed>
      */
@@ -84,11 +84,9 @@ final class ParameterDraft
     }
 
     /**
-     * The underlying patch guard.
-     *
-     * @internal Not part of the frozen extension-author surface: it hands back the {@see PatchGuard}
-     * (itself `@internal`). Extensions read winning state through {@see producerFor()} /
-     * {@see resolvedField()} instead.
+     * @internal Not part of the frozen extension-author surface — it hands back the (also
+     * `@internal`) {@see PatchGuard}. Extensions read winning state via {@see producerFor()} /
+     * {@see resolvedField()}.
      */
     public function guard(): PatchGuard
     {
@@ -103,8 +101,8 @@ final class ParameterDraft
     }
 
     /**
-     * The collection key for a parameter identified by `(in, name)` — the single
-     * owner of the `in:name` convention, shared with {@see OperationDraft}.
+     * The `in:name` collection key. This is the one place that convention lives;
+     * {@see OperationDraft} calls through here.
      */
     public static function keyFor(string $in, string $name): string
     {

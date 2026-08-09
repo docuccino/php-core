@@ -9,26 +9,21 @@ use Docuccino\Core\Inference\TypeEngine;
 use InvalidArgumentException;
 
 /**
- * The closed set of framework-agnostic types the inference engine speaks
- * (design §5). Every {@see TypeEngine} result is
- * expressed in these — never a PHPStan `Type` — so results are serializable
- * across worker and cache boundaries.
+ * The closed set of framework-agnostic types the inference engine speaks. Every {@see TypeEngine}
+ * result is expressed in these — never a PHPStan `Type` — so results survive worker and cache
+ * boundaries. Design detail: docs/design/inference-embedding.md §5.
  *
- * Serialization contract: `toArray()`/`fromArray()` round-trip losslessly and
- * are path-free (no absolute file paths leak into a DType), so the same code
- * always produces byte-identical serialized types. Class *definition*
- * provenance is deliberately NOT part of a DType — a return's location lives on
- * its {@see ReturnSite}, keeping the type a clean,
- * cache-stable identity.
- *
- * `canonicalKey()` gives a total order used to sort union/intersection members
- * deterministically.
+ * `toArray()`/`fromArray()` round-trip losslessly and are path-free (no absolute paths leak into
+ * a DType), so identical code always serializes to identical bytes. Class *definition* provenance
+ * is not part of a DType — a return's location lives on its {@see ReturnSite} — which keeps the
+ * type a cache-stable identity. `canonicalKey()` gives the total order used to sort
+ * union/intersection members.
  */
 abstract readonly class DType
 {
     /**
-     * Fixed member ordering used for canonical sorting. Null sorts last so that
-     * nullability (`UnionT[..., NullT]`) renders with null at the tail.
+     * Fixed member ordering for canonical sorting. Null sorts last so nullability
+     * (`UnionT[…, NullT]`) renders with null at the tail.
      *
      * @var array<string, int>
      */
@@ -59,14 +54,10 @@ abstract readonly class DType
     abstract public function toArray(): array;
 
     /**
-     * A deterministic total-order key: kind ordinal (zero-padded) followed by
-     * the JSON of the type's canonical serialization.
-     *
-     * Float literals are normalised to a fixed 17-significant-digit form BEFORE
-     * encoding, so the key never depends on the ambient `serialize_precision` ini
-     * (raw `json_encode` of a float would). 17 significant digits round-trips any
-     * IEEE-754 double, keeping distinct floats distinct — this mirrors the
-     * precision-independence the canonical serializer enforces for output.
+     * Deterministic total-order key: zero-padded kind ordinal, then the JSON of the canonical
+     * serialization. Floats are normalised to 17 significant digits first, so the key never
+     * depends on the ambient `serialize_precision` (raw `json_encode` of a float would) — 17
+     * digits round-trips any IEEE-754 double, so distinct floats stay distinct.
      */
     final public function canonicalKey(): string
     {
@@ -76,8 +67,7 @@ abstract readonly class DType
     }
 
     /**
-     * Recursively replace any float with a precision- and locale-independent
-     * string so canonical keys are stable across `serialize_precision` settings.
+     * Replaces floats with a precision- and locale-independent string, recursively.
      */
     private static function normalizeFloats(mixed $value): mixed
     {
@@ -93,11 +83,10 @@ abstract readonly class DType
     }
 
     /**
-     * Shared canonicalisation for {@see UnionT::of()} / {@see IntersectionT::of()}:
-     * flatten nested members of the same composite kind, deduplicate by
-     * {@see canonicalKey()}, then sort — so `A|B` and `B|A` yield identical,
-     * byte-stable survivors. Collapsing an empty/single result back to a concrete
-     * type is left to each caller.
+     * Shared canonicalisation for {@see UnionT::of()} / {@see IntersectionT::of()}: flatten nested
+     * members of the same composite kind, dedupe by {@see canonicalKey()}, sort — so `A|B` and
+     * `B|A` yield the same byte-stable survivors. Each caller collapses an empty/single result
+     * back to a concrete type itself.
      *
      * @param  list<DType>  $members
      * @param  class-string<IntersectionT|UnionT>  $composite  the wrapper kind to flatten through

@@ -5,14 +5,12 @@ declare(strict_types=1);
 namespace Docuccino\Core\Support;
 
 /**
- * The single "short class name" helper: the last namespace segment of an FQCN
- * (or the input, if unqualified). Shared across throw-frame labels, the engine's
- * self label, constant-value rendering, component naming and operationId
- * derivation — every site that shorts an FQCN for display must do it identically,
- * so a private copy in each risked drift.
+ * The one "short class name" helper. Throw-frame labels, the engine's self label, constant rendering,
+ * component naming and operationId derivation all short an FQCN for display and must do it
+ * identically, so they all come here rather than keeping private copies that drift.
  *
- * Public (not `@internal`): a pure, stable string helper that built-in integrations use directly
- * rather than inlining a copy to dodge the arch-test allow-list (see IntegrationsArchTest).
+ * Public, not `@internal` — built-in integrations use it directly instead of inlining a copy to dodge
+ * the arch-test allow-list.
  */
 final class Fqcn
 {

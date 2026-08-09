@@ -5,8 +5,7 @@ declare(strict_types=1);
 namespace Docuccino\Core\Emit;
 
 /**
- * Provenance emission level (design §4). Applies to UIR emission; the OAS emitters always
- * drop provenance entirely regardless of this setting.
+ * How much provenance UIR emission keeps. The OAS emitters drop it entirely whatever this says.
  */
 enum ProvenanceLevel: string
 {

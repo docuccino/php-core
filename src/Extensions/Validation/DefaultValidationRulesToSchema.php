@@ -11,12 +11,11 @@ use Docuccino\Core\Extensions\Contracts\SchemaContext;
 use Docuccino\Core\Extensions\Contracts\ValidationRulesToSchema;
 
 /**
- * The default {@see ValidationRulesToSchema}: a pure, vocabulary-free chain driver. It builds a
- * request object schema by feeding each field's rules — in the order they are given — through the
- * {@see RuleTransformer} chain (first `supports()` wins). It knows no rule names: the meaning and
- * effect-ordering of rules live entirely in the transformer set an adapter supplies (Laravel's
- * FormRequest integration ships its own; a Symfony adapter would ship a different one). A rule no
- * transformer handles becomes an info diagnostic and leaves the field permissive.
+ * The default {@see ValidationRulesToSchema}: a pure, vocabulary-free chain driver. It feeds each
+ * field's rules, in the order given, through the {@see RuleTransformer} chain (first `supports()`
+ * wins) and knows no rule names itself — meaning and effect-ordering live entirely in the transformer
+ * set an adapter supplies. A rule nothing handles becomes an info diagnostic and leaves the field
+ * permissive.
  */
 final readonly class DefaultValidationRulesToSchema implements ValidationRulesToSchema
 {

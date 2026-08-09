@@ -8,14 +8,12 @@ use Docuccino\Core\Inference\SourceLocation;
 use Docuccino\Core\Support\Hydrate;
 
 /**
- * A project-root-relative source location for the provenance trail. Never used as
- * an identity input.
+ * A project-root-relative source location for the provenance trail. Never an identity input.
  *
- * Deliberately distinct from {@see SourceLocation}: that is the inference engine's
- * raw, absolute-path finding (file + line + byte `pos`, used for engine-internal
- * ordering); this is the emitted, project-root-relative `provenance.source`
- * (file + line + human `symbol`). {@see fromLocation()} is the single crossing
- * point that owns the absolute→relative path normalization.
+ * Not the same thing as {@see SourceLocation}, which is the engine's raw absolute-path finding
+ * (file + line + byte `pos`, for engine-internal ordering). This is the emitted `provenance.source`
+ * (file + line + human `symbol`), and {@see fromLocation()} is the one crossing point that owns the
+ * absolute→relative normalisation.
  */
 final readonly class Source
 {
@@ -26,9 +24,8 @@ final readonly class Source
     ) {}
 
     /**
-     * Convert an inference {@see SourceLocation} into a provenance source,
-     * normalizing the (absolute) engine file path to a project-root-relative one.
-     * A file already relative, or one outside `$projectRoot`, is kept verbatim.
+     * Converts an inference {@see SourceLocation} into a provenance source, relativising the engine's
+     * absolute path. Files already relative, or outside `$projectRoot`, are kept verbatim.
      */
     public static function fromLocation(SourceLocation $location, string $projectRoot, ?string $symbol = null): self
     {

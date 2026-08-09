@@ -13,12 +13,11 @@ use ReflectionEnumUnitCase;
 use Throwable;
 
 /**
- * Reflection over a PHP enum for schema mappers: the documentable case values (backing values for a
- * backed enum, case names otherwise) and any `#[CaseDescription]` prose keyed by that same value.
- * Reflecting an enum + its Docuccino attributes is framework-neutral, so it lives in core beside the
- * built-in {@see EnumSchema} mapper that drives it (the adapter's
- * Eloquent model mapper reads it too, for enum-cast columns). Totalising — a non-enum or reflection
- * failure yields empty results rather than throwing.
+ * Reflection over a PHP enum for schema mappers: documentable case values (backing values for a
+ * backed enum, case names otherwise) and `#[CaseDescription]` prose keyed by that same value. Lives
+ * in core beside the {@see EnumSchema} mapper that drives it; the adapter's Eloquent mapper reads it
+ * too, for enum-cast columns. Totalising — a non-enum or a reflection failure yields empty results
+ * rather than throwing.
  */
 final class EnumReflection
 {
@@ -34,8 +33,8 @@ final class EnumReflection
     }
 
     /**
-     * The case names of an enum, in declaration order — the {@see EnumT}
-     * `cases` contract (distinct from backing {@see values()}).
+     * The case names, in declaration order — the {@see EnumT} `cases` contract, distinct from the
+     * backing {@see values()}.
      *
      * @return list<string>
      */
@@ -45,13 +44,9 @@ final class EnumReflection
     }
 
     /**
-     * `#[CaseDescription]` prose keyed by the same value {@see values()} emits — so the map lines up
-     * with the schema's `enum` member for `x-enumDescriptions`. When a case carries no
-     * `#[CaseDescription]`, its docblock SUMMARY (the first prose paragraph) is used instead
-     * (the attribute always wins where both are present); a case with neither is omitted.
-     *
-     * The docblock summary is extracted with a lightweight first-paragraph reader (core stays free of
-     * the phpdoc-parser dependency — this is plain comment-marker stripping, not tag parsing).
+     * `#[CaseDescription]` prose keyed by the same value {@see values()} emits, so the map lines up
+     * with the schema's `enum` member for `x-enumDescriptions`. A case with no attribute falls back to
+     * its docblock summary (the attribute wins where both exist); a case with neither is omitted.
      *
      * @return array<string, string>
      */
@@ -85,9 +80,9 @@ final class EnumReflection
     }
 
     /**
-     * The first prose paragraph of a docblock (its summary), or null when there is none. Strips the
-     * `/** *​/` markers and per-line `*`, stops at the first blank line or `@tag` line, and collapses
-     * the paragraph to a single trimmed string — deterministic, no external parser.
+     * The first prose paragraph of a docblock, or null when there is none: strip the markers and
+     * per-line `*`, stop at the first blank or `@tag` line, collapse to one trimmed string. Hand-rolled
+     * so core stays free of the phpdoc-parser dependency — marker stripping, not tag parsing.
      */
     private static function docSummary(string|false $doc): ?string
     {
@@ -117,8 +112,8 @@ final class EnumReflection
     }
 
     /**
-     * The file the enum is declared in, or null when it is not reflectable (e.g. an internal enum).
-     * A fragment-cache dependency: an enum-cast column's schema changes when a case is added/removed.
+     * The file the enum is declared in, or null when it isn't reflectable (an internal enum, say). A
+     * fragment-cache dependency: adding or removing a case changes an enum-cast column's schema.
      */
     public static function file(string $fqcn): ?string
     {

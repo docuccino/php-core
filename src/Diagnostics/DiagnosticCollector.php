@@ -7,17 +7,14 @@ namespace Docuccino\Core\Diagnostics;
 use Docuccino\Core\Extensions\Contracts\DocumentTransformer;
 
 /**
- * The build's diagnostics aggregator: a small mutable sink that accepts diagnostics and returns
- * them either in insertion order ({@see all()}) or in a deterministic, byte-stable order
- * ({@see sorted()}, design §5: never time-based) — grouped by route signature, then by severity,
- * code and message — so CLI output and any `--embed-diagnostics` payload never reorder across runs.
- * Deterministic ordering is a core concern, so the whole aggregator lives here (it was formerly the
- * adapter-side `Pipeline\DiagnosticBag`; the two collapsed into this one type).
+ * The build's diagnostics sink. Returns them in insertion order ({@see all()}) or in a byte-stable
+ * order ({@see sorted()}) — never time-based — so CLI output and any `--embed-diagnostics` payload
+ * don't reorder between runs.
  *
- * It also backs the per-document diagnostics channel handed to {@see DocumentTransformer}s (via
- * DocumentContext): a whole-document transformer (e.g. the data-leakage lint) runs after assembly
- * and would otherwise have nowhere to report. Held (by reference) on a readonly context so a
- * transformer can report without the context itself becoming mutable.
+ * It also backs the per-document diagnostics channel {@see DocumentTransformer}s get via
+ * DocumentContext, since a whole-document transformer runs after assembly and would otherwise have
+ * nowhere to report. Held by reference on a readonly context, so transformers can report without
+ * making the context mutable.
  */
 final class DiagnosticCollector
 {
@@ -52,8 +49,7 @@ final class DiagnosticCollector
     }
 
     /**
-     * The diagnostics in deterministic order (design §5: never time-based) — grouped by route
-     * signature, then by severity, code and message.
+     * Grouped by route signature, then severity, code and message. Nothing time-based.
      *
      * @return list<Diagnostic>
      */

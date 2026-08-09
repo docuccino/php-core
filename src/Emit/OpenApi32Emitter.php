@@ -9,14 +9,14 @@ use Docuccino\Core\Canonical\CanonicalJsonSerializer;
 use Docuccino\Core\Document\UirDocument;
 
 /**
- * Emits a {@see UirDocument} as pure OpenAPI 3.2 (JSON or YAML): every `x-docuccino` member is
- * stripped, along with the UIR-only top-level `$schema` and `uir` version. Options may re-emit
- * ids as flat `x-docuccino-id` members and map schema mock hints to a faker member; provenance is
- * always dropped. The content layer (`x-docuccino.content`) has nowhere to live in OAS and is
- * dropped — `info.description`/tag descriptions already sit in standard fields.
+ * Emits a {@see UirDocument} as pure OpenAPI 3.2 (JSON or YAML): every `x-docuccino` member goes,
+ * along with the UIR-only top-level `$schema` and `uir`. Options can re-emit ids as flat
+ * `x-docuccino-id` members and map schema mock hints to a faker member; provenance always goes. So
+ * does the content layer — OAS has nowhere to put it, and `info.description`/tag descriptions already
+ * live in standard fields.
  *
- * Output flows through the shared canonical serializer, so 3.2 emission is byte-deterministic
- * and, with default options, round-trips losslessly against the x-docuccino-stripped UIR.
+ * Output flows through the shared canonical serializer, so 3.2 emission is byte-deterministic and,
+ * with default options, round-trips losslessly against the x-docuccino-stripped UIR.
  *
  * @internal
  */

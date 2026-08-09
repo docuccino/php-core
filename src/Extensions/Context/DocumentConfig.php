@@ -9,10 +9,9 @@ use Docuccino\Core\Support\Hydrate;
 use Docuccino\Core\Support\Json;
 
 /**
- * One document's resolved configuration (design §9). Framework-agnostic: the adapter builds
- * this from `config/docuccino.php`. Typed accessors cover what the pipeline and built-in
- * extensions read; the untouched `raw` bag keeps everything else (representation policies,
- * viewer, tag map …) available without modelling every key here in Phase 3a.
+ * One document's resolved configuration (design §9). Framework-agnostic — the adapter builds it
+ * from `config/docuccino.php`. Typed accessors cover what the pipeline and built-in extensions
+ * read; the untouched `raw` bag carries everything else, so not every key needs modelling here.
  */
 final readonly class DocumentConfig
 {
@@ -39,13 +38,13 @@ final readonly class DocumentConfig
         public array $routeInclude = [],
         public array $routeExclude = [],
         public mixed $routeFilter = null,
-        // Opt back into documenting routes whose resolved controller file lives under vendor/ (they
-        // are excluded by default, mirroring Laravel's `route:list --except-vendor`).
+        // Opt back into routes whose controller lives under vendor/ — excluded by default, mirroring
+        // Laravel's `route:list --except-vendor`.
         public bool $includeVendor = false,
         public ?string $authMiddleware = null,
         public string $errorResponses = 'none',
-        // How a 422 problem-details body models its `errors`: 'map' (field → messages, the default) or
-        // 'pointer-list' (a list of {detail, pointer} objects, RFC 9457 / JSON-Pointer style).
+        // How a 422 problem-details body models `errors`: 'map' (field → messages) or 'pointer-list'
+        // ({detail, pointer} objects, RFC 9457 style).
         public string $errorsShape = 'map',
         public array $overlays = [],
         public string $onRouteError = 'skeleton',
@@ -65,11 +64,10 @@ final readonly class DocumentConfig
     }
 
     /**
-     * How an operation with no `#[Group]` gets its default tag: `controller` (the controller's short
-     * name, `Controller` suffix stripped, then run through `tags.map`) or `none` (no default tag).
-     * Defaults to `controller` so an untagged API still groups sensibly (`tags.map` can then remap).
-     * An unknown value coerces to `controller`; the adapter surfaces that coercion as a config info
-     * diagnostic (`config.unknown-tag-strategy`) rather than swallowing it silently.
+     * How an operation with no `#[Group]` gets its default tag: `controller` (short controller name,
+     * `Controller` stripped, then through `tags.map`) or `none`. Defaults to `controller` so an
+     * untagged API still groups sensibly. An unknown value coerces to `controller` and the adapter
+     * reports that as a `config.unknown-tag-strategy` diagnostic rather than swallowing it.
      */
     public function tagDefaultStrategy(): string
     {
@@ -79,9 +77,8 @@ final readonly class DocumentConfig
     }
 
     /**
-     * The per-integration config sub-bag `integrations.<name>` (design §9), or `[]` when absent —
-     * the single home for an integration's document-level knobs (Sanctum modes/cookie, Passport
-     * url, Query Builder pagination terminals, API-resources wrapping …).
+     * The `integrations.<name>` sub-bag, or `[]` when absent — the one home for an integration's
+     * document-level knobs (Sanctum modes, Passport url, API-resources wrapping …).
      *
      * @return array<string, mixed>
      */
@@ -93,11 +90,9 @@ final readonly class DocumentConfig
     }
 
     /**
-     * Whether the integration keyed by $name is enabled for this document (design §9). Reads the
-     * per-integration `integrations.<name>.enabled` switch, coercing a non-bool to $default and
-     * falling back to the per-integration $default when the key is absent — so an integration that
-     * ships default-on stays on unless a document opts out, and a sensitive-by-activation integration
-     * (permission) stays off unless a document opts in.
+     * Whether `integrations.<name>.enabled` is on, falling back to (and coercing a non-bool to)
+     * $default. So a default-on integration stays on until a document opts out, and a sensitive one
+     * like permissions stays off until a document opts in.
      */
     public function integrationEnabled(string $name, bool $default): bool
     {
@@ -107,9 +102,8 @@ final readonly class DocumentConfig
     }
 
     /**
-     * Whether the document explicitly set `integrations.<name>.enabled` to a boolean (as opposed to
-     * leaving it to the per-integration default). Lets the discoverability diagnostic tell an
-     * opt-in-not-yet-taken (default-off, untouched) apart from a deliberate opt-out (`enabled => false`).
+     * Whether the document set `integrations.<name>.enabled` to a boolean itself. Lets the
+     * discoverability diagnostic tell an untaken opt-in from a deliberate `enabled => false`.
      */
     public function integrationEnabledExplicit(string $name): bool
     {
@@ -117,10 +111,9 @@ final readonly class DocumentConfig
     }
 
     /**
-     * A deterministic fingerprint of this document's configuration — the single owner of the
-     * config-hash (a fragment-cache key input, design §10, and the document's `configHash`). Folds
-     * the whole raw config bag through the order-insensitive {@see Json::stable()} encoder so key
-     * order cannot perturb the hash; falls back to the document key when the bag cannot be encoded.
+     * A deterministic fingerprint of this document's config — the sole owner of the config-hash (a
+     * fragment-cache key input and the document's `configHash`). Goes through {@see Json::stable()}
+     * so key order can't perturb it; falls back to the document key if the bag won't encode.
      */
     public function hash(): string
     {
@@ -130,9 +123,8 @@ final readonly class DocumentConfig
     }
 
     /**
-     * Document-level tag definitions from `tags.definitions`: each `{name, description?, weight?}`,
-     * sorted deterministically by ascending weight (default 0) then name, ready for the OAS
-     * top-level `tags` array. Malformed entries (no string `name`) are skipped.
+     * Tag definitions from `tags.definitions` (`{name, description?, weight?}`), sorted by ascending
+     * weight then name for the OAS top-level `tags` array. Entries with no string `name` are skipped.
      *
      * @return list<array{name: string, description?: string}>
      */
@@ -164,8 +156,8 @@ final readonly class DocumentConfig
     }
 
     /**
-     * The `security.schemes` map (name → OAS security-scheme object) for `components.securitySchemes`.
-     * Malformed entries (non-array values) are dropped so a typo can't break the document.
+     * The `security.schemes` map for `components.securitySchemes`. Non-array values are dropped so a
+     * typo can't break the document.
      *
      * @return array<string, array<string, mixed>>
      */
@@ -175,8 +167,8 @@ final readonly class DocumentConfig
     }
 
     /**
-     * The document-level security requirement from `security.document` (an OAS `security` array —
-     * a list of `{scheme: scopes[]}` requirement objects), or null when none is configured.
+     * The document-level requirement from `security.document` — an OAS `security` array of
+     * `{scheme: scopes[]}` objects — or null when unconfigured.
      *
      * @return list<array<string, mixed>>|null
      */
@@ -197,9 +189,8 @@ final readonly class DocumentConfig
     }
 
     /**
-     * The configured narrative-content directory from `content.dir` (the markdown tree the content
-     * compiler reads), or null when unset. Framework-agnostic: may be relative (the adapter resolves
-     * and confines it against the app base path) or absolute.
+     * The markdown tree the content compiler reads, from `content.dir`, or null when unset. May be
+     * relative — the adapter resolves and confines it against the app base path.
      */
     public function contentDir(): ?string
     {
@@ -210,9 +201,9 @@ final readonly class DocumentConfig
     }
 
     /**
-     * The configured export target from `export.path` (the file the `docuccino:export` artifact is
-     * written to and the viewer's `artifact` source reads back), defaulting to `docs/openapi.json`.
-     * Framework-agnostic: may be relative — the adapter resolves it against the app base path.
+     * Where `docuccino:export` writes and the viewer's `artifact` source reads, from `export.path`,
+     * defaulting to `docs/openapi.json`. May be relative — the adapter resolves it against the app
+     * base path.
      */
     public function exportPath(): string
     {

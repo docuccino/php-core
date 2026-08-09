@@ -15,17 +15,16 @@ use RecursiveIteratorIterator;
 use SplFileInfo;
 
 /**
- * Reads a document's `content.dir` markdown tree into a framework-neutral {@see CompiledContent}
- * (the filesystem-input half of the content pipeline — a second adapter or the reference CLI
- * compiles the identical tree; {@see ContentResolver} does the document-input half). Folders become default nav
- * groups; frontmatter (`title`, `slug`, `summary`, `tags`, and `nav.{group,order,hidden,type,ref}`)
- * overrides the derived values. Deterministic: files are read in sorted order and nothing time- or
- * machine-dependent enters a page (source paths are project-root-relative).
+ * Reads a document's `content.dir` markdown tree into a framework-neutral {@see CompiledContent} —
+ * the filesystem-input half of the content pipeline, with {@see ContentResolver} doing the
+ * document-input half. Folders become default nav groups; frontmatter (`title`, `slug`, `summary`,
+ * `tags`, `nav.{group,order,hidden,type,ref}`) overrides the derived values. Files are read in
+ * sorted order and nothing time- or machine-dependent reaches a page — source paths are
+ * project-root-relative — so the output is deterministic.
  *
- * A relative `content.dir` is confined to the app base path (security L2, like `#[DescriptionFromFile]`);
- * an absolute dir is trusted as-is (developer-authored config). A configured-but-missing directory is
- * a warning diagnostic; an unset or empty directory compiles to nothing (the document is unchanged —
- * no empty content key).
+ * A relative `content.dir` is confined to the app base path, same as `#[DescriptionFromFile]`; an
+ * absolute dir is trusted as developer-authored config. A configured-but-missing directory warns;
+ * an unset or empty one compiles to nothing, leaving no empty content key.
  *
  * @internal
  */
@@ -72,8 +71,7 @@ final readonly class ContentCompiler
     }
 
     /**
-     * A relative dir is confined to the base path; an absolute dir is used verbatim. Null means a
-     * confined relative path escaped the base.
+     * Relative dirs are confined to the base path, absolute ones used verbatim. Null = escaped.
      */
     private function resolveDir(string $configured): ?string
     {
@@ -115,7 +113,7 @@ final readonly class ContentCompiler
     }
 
     /**
-     * Every `*.md` file under $dir, absolute paths, sorted so the read order never affects output.
+     * Every `*.md` under $dir, absolute and sorted so read order can't affect output.
      *
      * @return list<string>
      */
@@ -138,7 +136,7 @@ final readonly class ContentCompiler
         return $files;
     }
 
-    /** The project-root-relative prefix for a source path: the dir relative to base, or '' when outside it. */
+    /** Project-root-relative prefix for source paths: the dir relative to base, '' when outside it. */
     private function sourcePrefix(string $dir): string
     {
         $base = rtrim($this->basePath, '/').'/';
@@ -153,13 +151,13 @@ final readonly class ContentCompiler
         return str_starts_with($absolute, $prefix) ? substr($absolute, strlen($prefix)) : basename($absolute);
     }
 
-    /** The slug for a file: its dir-relative path without the `.md` extension. */
+    /** A file's dir-relative path, minus the `.md`. */
     private function slugFromPath(string $relative): string
     {
         return preg_replace('/\.md$/', '', $relative) ?? $relative;
     }
 
-    /** The default group for a file: its immediate parent folder humanised, or null at the root. */
+    /** The parent folder humanised, or null at the root. */
     private function groupFromPath(string $relative): ?string
     {
         $dir = dirname($relative);

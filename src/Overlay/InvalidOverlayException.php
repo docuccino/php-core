@@ -7,10 +7,10 @@ namespace Docuccino\Core\Overlay;
 use RuntimeException;
 
 /**
- * Raised while parsing an overlay document that is structurally invalid — a missing/unsupported
- * `overlay` version, or an action carrying neither `update` nor `remove`. Selector problems are
- * NOT parse errors: an unsupported target selector surfaces as an error diagnostic at apply time
- * (design §"OpenAPI Overlay"), never a silent skip and never an exception.
+ * Raised when an overlay document is structurally invalid — a missing or unsupported `overlay`
+ * version, an action with neither `update` nor `remove`. Selector problems aren't parse errors: an
+ * unsupported target surfaces as an error diagnostic at apply time, never an exception and never a
+ * silent skip.
  */
 final class InvalidOverlayException extends RuntimeException
 {

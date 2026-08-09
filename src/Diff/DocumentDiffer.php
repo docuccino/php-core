@@ -11,22 +11,20 @@ use Docuccino\Core\Document\UirDocument;
 use Docuccino\Core\Support\Arr;
 
 /**
- * The semantic diff engine (plan §"Easy wins"/design §2): compares two {@see UirDocument}s by
- * their stable `x-docuccino.id`s, so a path-parameter rename (same op id) reads as no change while a
- * URI change reads as remove + add. It walks operations, their parameters/responses/request
- * bodies, named component schemas and content pages, delegating field-level schema comparison
- * to {@see SchemaComparator}, and classifies each {@see Change} as breaking or not.
+ * The semantic diff engine: compares two {@see UirDocument}s by their stable `x-docuccino.id`s,
+ * so a path-parameter rename (same op id) reads as no change while a URI change reads as
+ * remove + add. Walks operations, their parameters/responses/request bodies, named component
+ * schemas and content pages, delegating field-level schema comparison to
+ * {@see SchemaComparator}, and flags each {@see Change} breaking or not.
  *
- * Breaking rules (plan): removed operation/parameter/response, a status removed, a parameter
- * becoming required, an added required parameter, plus the schema-level rules SchemaComparator
- * owns (type narrowed/changed, enum value removed, required request property added). Additions,
- * description/prose edits, deprecations and provenance-only differences are non-breaking — and
- * because only modelled fields and schema structure are compared, a provenance-only delta
- * produces an empty changeset.
+ * Breaking: a removed operation/parameter/response/status, a parameter becoming required, an
+ * added required parameter, plus the schema-level rules SchemaComparator owns. Additions, prose
+ * edits and deprecations aren't — and since only modelled fields and schema structure are
+ * compared, a provenance-only delta yields an empty changeset.
  *
- * Identities carry an algorithm version (`op:v1:…`); two documents minted by different algo
- * versions cannot be paired safely, so the differ refuses with
- * {@see IncomparableDocumentsException} rather than mis-report.
+ * Identities carry an algorithm version (`op:v1:…`); documents minted by different algo versions
+ * can't be paired safely, so the differ throws {@see IncomparableDocumentsException} rather than
+ * mis-report.
  */
 final class DocumentDiffer
 {
@@ -132,10 +130,9 @@ final class DocumentDiffer
     }
 
     /**
-     * Diffs an operation's `security` requirements. Adding a requirement forces existing clients to
-     * satisfy authentication they did not before (breaking); removing one relaxes access (non-breaking).
-     * Each requirement is compared as a whole by its canonical JSON, so a reordered scheme map is not
-     * a change.
+     * Adding a `security` requirement forces clients to authenticate where they didn't before
+     * (breaking); removing one relaxes access. Requirements compare whole, by canonical JSON, so
+     * a reordered scheme map isn't a change.
      *
      * @param  list<Change>  $changes
      */
@@ -158,8 +155,7 @@ final class DocumentDiffer
     }
 
     /**
-     * A requirement's canonical key → the requirement itself, so added/removed requirements are set
-     * differences insensitive to declaration order and scheme-map key order.
+     * Canonical key → requirement, so added/removed are set differences insensitive to ordering.
      *
      * @return array<string, array<string, mixed>>
      */

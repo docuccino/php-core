@@ -5,13 +5,11 @@ declare(strict_types=1);
 namespace Docuccino\Core\Extensions\Validation;
 
 /**
- * One recovered validation rule for a field: its lower-cased name (`required`, `max`, `in`,
- * `enum`, `regex`, …) and its string parameters (`max:100` → `['100']`, `in:a,b` → `['a', 'b']`).
- *
- * Rules are recovered statically (never executed): the adapter folds a `'a|b:c'` string or a
- * `['a', 'b:c']` array — and `Rule::*` factory descriptors — into these. `note` carries optional
- * prose (an enum FQCN for a choice rule, or a reason a descriptor could not be fully folded) that a
- * transformer may surface in the schema description.
+ * One recovered validation rule: its lower-cased name and string parameters (`max:100` → `['100']`,
+ * `in:a,b` → `['a', 'b']`). Rules are recovered statically, never executed — the adapter folds a
+ * `'a|b:c'` string, a `['a', 'b:c']` array or a `Rule::*` descriptor into these. `note` carries
+ * optional prose a transformer may surface in the description: an enum FQCN for a choice rule, or why
+ * a descriptor couldn't be fully folded.
  */
 final readonly class ValidationRule
 {

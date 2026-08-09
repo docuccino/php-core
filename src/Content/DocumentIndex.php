@@ -67,8 +67,7 @@ final readonly class DocumentIndex
                 $operationId = $operation['operationId'] ?? null;
                 if (is_string($operationId) && $operationId !== '') {
                     if (isset($operationsById[$operationId])) {
-                        // Last-wins is deterministic but arbitrary: a ::operation{id="…"} directive
-                        // would resolve to whichever operation came last in path iteration.
+                        // Last-wins is deterministic but arbitrary — warn rather than pick silently.
                         $diagnostics[] = new Diagnostic(
                             severity: Severity::Warning,
                             code: 'content.duplicate-operation-id',
@@ -110,8 +109,8 @@ final readonly class DocumentIndex
     }
 
     /**
-     * Build-time warnings surfaced by indexing (currently: duplicate operationId collisions). The
-     * caller (content resolution) drains these into the document diagnostics.
+     * Warnings raised while indexing (so far: duplicate operationId collisions). Content resolution
+     * drains these into the document.
      *
      * @return list<Diagnostic>
      */
@@ -121,9 +120,8 @@ final readonly class DocumentIndex
     }
 
     /**
-     * Resolve an operation reference to its stable `op:` id. `$reference` is matched against
-     * `operationId` first, then against a `METHOD /path` signature (so unnamed routes are still
-     * addressable). Null when nothing matches.
+     * Matches `$reference` against `operationId` first, then a `METHOD /path` signature, so
+     * unnamed routes are still addressable. Null when nothing matches.
      */
     public function resolveOperation(string $reference): ?string
     {

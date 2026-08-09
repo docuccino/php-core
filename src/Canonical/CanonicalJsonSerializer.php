@@ -9,12 +9,11 @@ use RuntimeException;
 use stdClass;
 
 /**
- * Deterministic JSON writer (design §3.5): UTF-8, LF line endings, 2-space indent,
- * a trailing newline, minimal escaping, and shortest round-trip floats.
+ * Deterministic JSON writer: UTF-8, LF line endings, 2-space indent, trailing newline, minimal
+ * escaping, shortest round-trip floats.
  *
- * Member order is the caller's responsibility (see {@see Canonicalizer}); this writer
- * preserves the insertion order it is given. Empty objects must be passed as
- * {@see stdClass} so they serialize as `{}` rather than `[]`.
+ * Member order is the caller's job ({@see Canonicalizer}) — this writer keeps the insertion order
+ * it's given. Pass empty objects as {@see stdClass} so they serialize as `{}`, not `[]`.
  *
  * @internal
  */
@@ -44,15 +43,12 @@ final class CanonicalJsonSerializer
     }
 
     /**
-     * Encodes a float independent of the ambient `serialize_precision` ini (design §3.5:
-     * "shortest-round-trip floats"). `json_encode`'s float formatting is governed by that ini —
-     * so we pin it to `-1` (shortest string that round-trips) for the duration of the encode and
-     * restore it, making the bytes identical whether the host runs with `serialize_precision` at
-     * its default `-1`, at `17`, or anything else.
+     * `json_encode`'s float formatting follows the ambient `serialize_precision`, so we pin it to
+     * `-1` (shortest round-trip) for the encode and restore it — the bytes come out the same
+     * whatever the host is configured with.
      *
-     * Consequence of shortest-round-trip: an integer-valued float renders WITHOUT a decimal point
-     * (`10.0` → `10`), so it is byte-identical to the integer `10`. This is an accepted canonical
-     * normalisation — the canonical form does not distinguish `10.0` from `10`.
+     * Side effect: an integer-valued float loses its decimal point (`10.0` → `10`), so it's
+     * byte-identical to the int `10`. The canonical form doesn't distinguish the two.
      */
     private function encodeFloat(float $value): string
     {

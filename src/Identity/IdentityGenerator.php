@@ -8,15 +8,13 @@ use Docuccino\Core\Canonical\Canonicalizer;
 use Docuccino\Core\Canonical\CanonicalJsonSerializer;
 
 /**
- * Computes stable UIR identities (design §2).
+ * Computes stable UIR identities. Format: `<kind>:<algoVersion>:<hash>`, where `<hash>` is the first
+ * 16 characters (~80 bits) of the lowercase, unpadded base32 of a canonical input tuple's SHA-256 —
+ * which is what the schema's `nodeId` pattern expects. The document id is the one exception:
+ * `doc:<configKey>` verbatim, so the config key stays legible.
  *
- * Format: `<kind>:<algoVersion>:<hash>` where `<hash>` is the first 16 characters (~80 bits)
- * of the base32 (lowercase, no padding) encoding of the full SHA-256 of a canonical input
- * tuple — matching the worked-example id lengths and the schema's `nodeId` pattern (§2). The
- * document id is the sole exception: `doc:<configKey>` verbatim, so the human-readable config
- * key remains legible.
- *
- * Identity inputs never include file paths, line numbers or array positions.
+ * Identity inputs never include file paths, line numbers or array positions. Spec:
+ * docs/design/uir-and-extensions.md §2.
  *
  * @internal
  */
@@ -79,8 +77,8 @@ final readonly class IdentityGenerator
     }
 
     /**
-     * The positionally-normalised path template: each `{param}` replaced by `{p<index>}`
-     * left-to-right, so renaming a path parameter never breaks operation identity.
+     * Replaces each `{param}` with `{p<index>}` left to right, so renaming a path parameter never
+     * breaks operation identity.
      */
     public function normalizePathTemplate(string $template): string
     {

@@ -8,10 +8,10 @@ use Docuccino\Core\Canonical\Canonicalizer;
 use Docuccino\Core\Canonical\CanonicalJsonSerializer;
 
 /**
- * `contentHash` (design §1): SHA-256 (hex) over the canonical serialization of the document
- * with `x-docuccino.generator` and `x-docuccino.diagnostics` excluded, so tool upgrades and diagnostic
- * churn never dirty committed diffs. The `x-docuccino.document.contentHash` field is itself excluded —
- * a hash cannot be one of its own inputs, so the value is recomputable and stable across rewrites.
+ * `contentHash`: hex SHA-256 over the document's canonical serialization, minus
+ * `x-docuccino.generator` and `x-docuccino.diagnostics`, so tool upgrades and diagnostic churn don't
+ * dirty committed diffs. `x-docuccino.document.contentHash` is excluded too — a hash can't be one of
+ * its own inputs — which keeps the value recomputable and stable across rewrites.
  *
  * @internal
  */

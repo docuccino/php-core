@@ -5,30 +5,27 @@ declare(strict_types=1);
 namespace Docuccino\Core\Extensions\Context;
 
 /**
- * The per-document representation policy (design §Representation policies): it separates *what was
- * inferred* from *how it is expressed in the spec*. Each field is a keyword with a behaviour-
- * preserving default, so an absent config reproduces today's output byte-for-byte:
+ * The per-document representation policy: separates *what was inferred* from *how it's expressed in
+ * the spec*. Every keyword defaults to today's behaviour (see the constructor), so an absent config
+ * reproduces the same output byte-for-byte.
  *
- * - `operationId`: `route-name` (default) | `controller-method`.
- * - `enumNaming`: `none` (default) | `x-enumNames` | `x-enum-varnames` — codegen name hints
- *   emitted alongside the enum, never changing the `enum` member itself.
- * - `enumComponents`: `true` (default) | `false` — whether a reflectable enum hoists to a named
- *   `components.schemas` entry (deduped by FQCN identity) that properties and query-parameter item
- *   schemas `$ref`, vs inlining its `type`/`enum`/`x-enumDescriptions` at every use site. Hoisting is
- *   the better output (one canonical, described enum shared everywhere); `false` restores the inline
- *   expression byte-for-byte.
- * - `nullable`: `type-array` (default, `type: [x, null]`) | `anyof` (a `{type: null}` branch) —
- *   how a "single type plus null" union is expressed.
- * - `filterStyle` (Query Builder): `bracketed` (default — one flat `filter[status]` param each, and
- *   `fields[articles]` for sparse fieldsets) | `deepObject` (a single `filter` / `fields` object
- *   parameter, `style: deepObject, explode: true`) — how filter/field maps are expressed.
- * - `listStyle` (Query Builder): `comma` (default — a single comma-separated string parameter) |
- *   `array` (`style: form, explode: false`, `items` enum) — how `sort`/`include` lists are expressed.
- * - `resourceWrap` (API Resources): the document-level override of Laravel's top-level resource
- *   `data` wrapping (`integrations.api_resources.wrap`). `''` (default) defers to each resource's own
- *   static `$wrap`; `'disabled'` unwraps everything (the escape hatch for a global
- *   `JsonResource::withoutWrapping()`, which is not statically visible); any other value forces that
- *   wrap key. Only the top-level resource is ever wrapped — nested resources stay unwrapped.
+ * - `operationId`: `route-name` | `controller-method`.
+ * - `enumNaming`: `none` | `x-enumNames` | `x-enum-varnames` — codegen name hints emitted alongside
+ *   the enum; the `enum` members themselves never change.
+ * - `enumComponents`: whether a reflectable enum hoists to a named component (deduped by FQCN) that
+ *   use sites `$ref`, or is inlined at each one. Hoisting is the better output — one canonical,
+ *   described enum shared everywhere; `false` restores the inline form byte-for-byte.
+ * - `nullable`: how "single type plus null" is expressed — `type-array` (`type: [x, null]`) |
+ *   `anyof` (a `{type: null}` branch).
+ * - `filterStyle` (Query Builder): `bracketed` (flat `filter[status]` params, `fields[articles]` for
+ *   sparse fieldsets) | `deepObject` (one `filter`/`fields` object parameter, `explode: true`).
+ * - `listStyle` (Query Builder): how `sort`/`include` lists go out — `comma` (one comma-separated
+ *   string) | `array` (`style: form, explode: false` with an `items` enum).
+ * - `resourceWrap` (API Resources): document-level override of Laravel's top-level resource `data`
+ *   wrapping (`integrations.api_resources.wrap`). `''` defers to each resource's static `$wrap`;
+ *   `'disabled'` unwraps everything — the escape hatch for a global
+ *   `JsonResource::withoutWrapping()`, which isn't statically visible; anything else forces that
+ *   wrap key. Only the top-level resource is ever wrapped, never nested ones.
  */
 final readonly class RepresentationPolicy
 {
@@ -68,9 +65,8 @@ final readonly class RepresentationPolicy
     }
 
     /**
-     * Normalise the `integrations.api_resources.wrap` config to the `resourceWrap` keyword:
-     * `false` → disabled, `true` → the Laravel default `data`, a non-empty string → that key,
-     * anything else (null/unset) → `''` (defer to each resource's static `$wrap`).
+     * `integrations.api_resources.wrap` → the `resourceWrap` keyword: `false` → disabled, `true` →
+     * Laravel's default `data`, a non-empty string → that key, anything else → `''` (defer).
      */
     private static function normalizeWrap(mixed $wrap): string
     {

@@ -5,14 +5,12 @@ declare(strict_types=1);
 namespace Docuccino\Core\Extensions\Context;
 
 /**
- * The attributes discovered on a route's action, collected with method-over-class precedence
- * (design §7: a more specific target beats a less specific one). Generic over attribute
- * instances — it imports no concrete attribute class, so it stays framework- and
+ * The attributes discovered on a route's action, with method-over-class precedence. Generic over
+ * attribute instances — it imports no concrete attribute class, so it stays framework- and
  * attribute-package-agnostic while the adapter populates it from reflection.
  *
- * Precedence is preserved positionally: entries are appended most-specific-first (method
- * attributes before class attributes), so {@see first()} returns the most specific instance
- * and {@see all()} lists them most-specific-first.
+ * Precedence is positional: entries are appended most-specific first, so {@see first()} returns the
+ * most specific instance and {@see all()} lists them in that order.
  */
 final class AttributeSet
 {

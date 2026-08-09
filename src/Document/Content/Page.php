@@ -8,10 +8,10 @@ use Docuccino\Core\Provenance\ProvenanceRecord;
 use Docuccino\Core\Support\Hydrate;
 
 /**
- * One narrative page in `x-docuccino.content.pages`: a stable `page:` id (hashed from the slug so it
- * survives file moves), its slug/title/summary metadata, search-facet `tags`, the compiled markdown
- * `content` (with directives already resolved to stable ids), and provenance pointing at the source
- * file. Diff/SaaS changelogs key on the id, so prose edits are visible changes.
+ * One narrative page in `x-docuccino.content.pages`: a stable `page:` id hashed from the slug so it
+ * survives file moves, slug/title/summary metadata, search-facet `tags`, the compiled markdown with
+ * directives already resolved to stable ids, and provenance pointing at the source file. Changelogs
+ * key on the id, so prose edits show up as changes.
  *
  * @internal
  */

@@ -9,13 +9,13 @@ use Docuccino\Core\Document\Operation;
 use Docuccino\Core\Support\Hydrate;
 
 /**
- * The result of processing one route (design §5 / §10): the frozen operation, the OAS path it
- * belongs under, its HTTP method, the diagnostics raised while building it, and the transitive
- * closure of reusable component schemas AND response components it references (arch F7 — not merely
- * the ones it registered first). Carrying the referenced closure + diagnostics makes the fragment
- * the self-contained cache unit — a warm cache hit can reconstruct the operation, restore every
- * component it points at, and replay its diagnostics without touching the type engine, and can never
- * leave a dangling `$ref` when the route that first owned a shared component is removed.
+ * The result of processing one route: the frozen operation, its OAS path and HTTP method, the
+ * diagnostics raised while building it, and the transitive closure of component schemas and response
+ * components it *references* — not just the ones it happened to register first. Carrying that
+ * closure plus the diagnostics makes a fragment self-contained, so a warm cache hit reconstructs the
+ * operation, restores every component it points at and replays its diagnostics without the type
+ * engine — and can't leave a dangling `$ref` when the route that first owned a shared component goes
+ * away.
  *
  * @internal
  */

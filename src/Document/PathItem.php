@@ -15,8 +15,8 @@ use Docuccino\Core\Support\Hydrate;
 final readonly class PathItem
 {
     /**
-     * Canonical HTTP method order (design §3) — the single owner; the
-     * canonicaliser references this list rather than keeping its own copy.
+     * Canonical HTTP method order. The one owner — the canonicaliser reads this list, it doesn't keep
+     * its own copy.
      *
      * @var list<string>
      */

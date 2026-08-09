@@ -5,15 +5,14 @@ declare(strict_types=1);
 namespace Docuccino\Core\Provenance;
 
 /**
- * Turns an absolute source file path into a stable, project-root-relative one for provenance
- * `source.file` (design §4 — provenance, never identity). A file under the supplied base path
- * relativises against it (the common case: `app/Http/Controllers/…`). A file *outside* base path —
- * a testbench workbench, path-repo packages — has no base to strip, so we walk up to the nearest
- * `composer.json` ancestor and relativise against that package root, keeping the path portable
- * regardless of where the repository is checked out (never an absolute, machine-specific path).
+ * Turns an absolute source path into a stable, project-root-relative one for provenance
+ * `source.file` — provenance only, never identity. Files under the supplied base path relativise
+ * against it (`app/Http/Controllers/…`). Files outside it — a testbench workbench, path-repo
+ * packages — have no base to strip, so we walk up to the nearest `composer.json` ancestor and
+ * relativise against that package root. Either way, no absolute machine-specific path escapes.
  *
- * The composer-ancestor walk is a pure, framework-neutral algorithm, so it lives in core: any
- * adapter constructs it with its own project base path (the Laravel adapter binds `base_path()`).
+ * The composer-ancestor walk is framework-neutral, so it lives in core; each adapter constructs it
+ * with its own base path (the Laravel one binds `base_path()`).
  */
 final readonly class RootRelativeSourcePathResolver implements SourcePathResolver
 {
@@ -39,8 +38,7 @@ final readonly class RootRelativeSourcePathResolver implements SourcePathResolve
     }
 
     /**
-     * The nearest ancestor directory that contains a `composer.json`, or null if none is found
-     * before reaching the filesystem root.
+     * Nearest ancestor holding a `composer.json`, or null if we hit the filesystem root first.
      */
     private function composerRoot(string $file): ?string
     {

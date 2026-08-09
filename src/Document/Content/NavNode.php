@@ -7,18 +7,17 @@ namespace Docuccino\Core\Document\Content;
 use Docuccino\Core\Support\Hydrate;
 
 /**
- * One node of the compiled navigation tree (`x-docuccino.content.nav`). The tree is the contract
- * every viewer/SaaS renders the sidebar from, so guides and API-reference sections interleave
- * Stripe-style in one deterministic structure.
+ * One node of the compiled navigation tree (`x-docuccino.content.nav`) — the contract every viewer
+ * renders its sidebar from, so guides and API reference interleave in one deterministic structure.
  *
- * Node `type` is one of:
- *  - `group`    — a section header with `children` (folder-derived by default, frontmatter-named);
- *  - `page`     — a link to a content page, `ref` = its `page:` id;
- *  - `operation`— a link to an API operation, `ref` = its stable `op:` id (resolved at assembly);
- *  - `tag`      — a link to an OAS tag, `ref` = the tag name.
+ * `type` is one of:
+ *  - `group`     — a section header with `children`, folder-derived unless frontmatter names it;
+ *  - `page`      — a content page, `ref` = its `page:` id;
+ *  - `operation` — an API operation, `ref` = its `op:` id (resolved at assembly);
+ *  - `tag`       — an OAS tag, `ref` = the tag name.
  *
- * `ref`/`title`/`children` are each emitted only when meaningful for the node's type, so the
- * serialization stays minimal and canonical.
+ * `ref`/`title`/`children` are each emitted only when they mean something for that type, keeping the
+ * serialization minimal.
  *
  * @internal
  */

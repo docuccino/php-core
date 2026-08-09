@@ -7,11 +7,10 @@ namespace Docuccino\Core\Diff\Policy;
 use Docuccino\Core\Diff\Changeset;
 
 /**
- * Semantic-versioning policy: a breaking changeset requires a major bump (per semver §4, a `0.y.z`
- * document being still-unstable, a breaking change there requires at least a minor bump). A
- * non-breaking changeset is always satisfied — recommending a minor/patch bump is advisory, not a
- * gate. An unparseable version on either side is a violation, so CI never green-lights a malformed
- * bump.
+ * Semantic-versioning policy: a breaking changeset needs a major bump — or, at `0.y.z` where the API
+ * is still unstable, at least a minor one. A non-breaking changeset always passes; recommending a
+ * minor/patch bump is advice, not a gate. An unparseable version on either side is a violation, so CI
+ * never green-lights a malformed bump.
  */
 final class SemverPolicy implements VersioningPolicy
 {
@@ -40,8 +39,7 @@ final class SemverPolicy implements VersioningPolicy
         [$oldMajor, $oldMinor] = $old;
         [$newMajor, $newMinor] = $new;
 
-        // Semver §4: while at 0.y.z the public API is unstable, so a breaking change is signalled by
-        // a minor bump; from 1.0.0 onwards a breaking change requires a major bump.
+        // At 0.y.z a breaking change is signalled by a minor bump; from 1.0.0 it needs a major.
         if ($oldMajor === 0) {
             if ($newMajor > 0 || $newMinor > $oldMinor) {
                 return PolicyVerdict::ok($this->name());

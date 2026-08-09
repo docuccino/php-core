@@ -12,16 +12,15 @@ use Docuccino\Core\Document\UirDocument;
 use Docuccino\Core\Support\Arr;
 
 /**
- * Downlevels pure OpenAPI 3.2 to 3.1 for toolchains that lag the 3.2 release. Each transform
- * is honest — lossy ones raise a warning collected into an {@see EmitReport}:
+ * Downlevels pure OpenAPI 3.2 to 3.1 for toolchains that lag the 3.2 release. Lossy transforms warn
+ * into an {@see EmitReport} rather than silently dropping things:
  *
- * - `openapi` is set to `3.1.1`;
- * - `jsonSchemaDialect`, when it is the 3.2 dialect base, is rewritten to the 3.1 base;
- * - the 3.2-only `query` HTTP method on any path item is dropped (warning);
+ * - `openapi` becomes `3.1.1`;
+ * - the 3.2 `jsonSchemaDialect` base is rewritten to the 3.1 base;
+ * - the 3.2-only `query` HTTP method is dropped (warning);
  * - the 3.2-only `additionalOperations` path-item member is dropped (warning).
  *
- * Everything else in 3.2 is a superset-compatible subset of 3.1's JSON Schema dialect and
- * passes through unchanged.
+ * The rest of 3.2 is compatible with 3.1's JSON Schema dialect and passes through unchanged.
  *
  * @internal
  */

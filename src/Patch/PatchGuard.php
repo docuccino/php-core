@@ -9,20 +9,19 @@ use Docuccino\Core\Provenance\Provenance;
 use Docuccino\Core\Provenance\ProvenanceRecord;
 
 /**
- * Field-level precedence arbiter (design §7). Every scalar write on a draft node goes through
- * one guard, which tracks the winning `(layer, producer)` per field:
+ * Field-level precedence arbiter — every scalar write on a draft node goes through one guard, which
+ * tracks the winning `(layer, producer)` per field:
  *
  * - unset field → accepted;
- * - a strictly higher `(layer, specificity)` → accepted, the displaced value appended to the
+ * - a strictly higher `(layer, specificity)` → accepted, and the displaced value is appended to the
  *   winner's `overrode` trail;
- * - a lower-or-equal contribution over an existing owner → {@see PatchResult::Shadowed} (the
- *   caller surfaces an info diagnostic); the shadowed value is discarded, never recorded;
- * - `null` value → {@see PatchResult::NoOp} ("not specified"); {@see Remove::value()} is a
- *   real write that resolves to field-absent on freeze.
+ * - lower-or-equal over an existing owner → {@see PatchResult::Shadowed} (the caller raises an info
+ *   diagnostic); the shadowed value is discarded, never recorded;
+ * - `null` → {@see PatchResult::NoOp}, meaning "not specified". {@see Remove::value()} is a real
+ *   write that resolves to field-absent on freeze.
  *
- * Provenance is reconstructed on demand: fields sharing a producer/layer/source/confidence
- * collapse into one record; only currently-winning fields yield records, so losers survive
- * solely inside `overrode`.
+ * Provenance is rebuilt on demand: fields sharing a producer/layer/source/confidence collapse into
+ * one record, and only winning fields yield records — losers survive solely inside `overrode`.
  *
  * @internal
  */
@@ -67,7 +66,7 @@ final class PatchGuard
         return isset($this->fields[$field]);
     }
 
-    /** The provenance `producer` of the currently-winning contribution for a field, or null if unset. */
+    /** The `producer` of the currently-winning contribution for a field, null if unset. */
     public function producerFor(string $field): ?string
     {
         return ($this->fields[$field] ?? null)?->winner->producer;
@@ -93,9 +92,7 @@ final class PatchGuard
         return $out;
     }
 
-    /**
-     * Provenance records for the currently-winning contributions, deterministically ordered.
-     */
+    /** Provenance records for the winning contributions, deterministically ordered. */
     public function provenance(): Provenance
     {
         /** @var array<string, array{contribution: Contribution, fields: list<string>, overrode: list<OverrodeEntry>}> $groups */

@@ -7,14 +7,13 @@ namespace Docuccino\Core\Support;
 use Docuccino\Core\Canonical\CanonicalJsonSerializer;
 
 /**
- * A deterministic, order-insensitive JSON encoder used for equality and fingerprinting (NOT for
- * canonical document emission — that is {@see CanonicalJsonSerializer}).
+ * A deterministic, order-insensitive JSON encoder for equality and fingerprinting. Not for canonical
+ * document emission — that's {@see CanonicalJsonSerializer}.
  *
- * Every array is re-keyed in ascending key order before encoding, so two structurally-equal values
- * encode to the same bytes regardless of insertion order. Numeric list keys (`0,1,2,…`) are already
- * ordered, so list element order is preserved. Objects collapse to their class-string (closures,
- * mappers … carry no stable serialisable identity), matching the config-hash behaviour this
- * consolidates.
+ * Arrays are re-keyed in ascending key order before encoding, so structurally-equal values encode to
+ * the same bytes whatever their insertion order. List keys (`0,1,2,…`) are already ordered, so element
+ * order survives. Objects collapse to their class-string, since closures and mappers have no stable
+ * serialisable identity.
  *
  * @internal
  */

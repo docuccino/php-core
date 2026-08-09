@@ -10,11 +10,10 @@ use Docuccino\Core\Identity\IdentityGenerator;
 use Docuccino\Core\Support\Json;
 
 /**
- * Accumulates the reusable schema/response components hoisted during a build, deduping
- * structurally-equal registrations and giving genuine name collisions a deterministic numeric
- * suffix plus a warning diagnostic (design §5 hoist/dedupe). The `schemaId` hint (an FQCN) is
- * remembered per component so the assembler can pin its diff identity via
- * {@see IdentityGenerator::namedSchemaId()}.
+ * Accumulates the reusable schema/response components hoisted during a build: structurally-equal
+ * registrations dedupe, genuine name collisions get a deterministic numeric suffix plus a warning.
+ * The `schemaId` hint (an FQCN) is remembered per component so the assembler can pin its diff
+ * identity via {@see IdentityGenerator::namedSchemaId()}.
  */
 final class ComponentRegistry
 {
@@ -29,27 +28,25 @@ final class ComponentRegistry
     private array $schemaIds = [];
 
     /**
-     * Names reserved for a schema identity before its body is materialised, so a self-reference
-     * discovered mid-expansion resolves to the same (possibly suffixed) name.
+     * Names reserved for a schema identity before its body exists, so a self-reference found
+     * mid-expansion resolves to the same (possibly suffixed) name.
      *
      * @var array<string, string> final name → schemaId
      */
     private array $reservedIds = [];
 
     /**
-     * Reusable response components (name → OAS response object) hoisted to `components.responses`
-     * — e.g. the shared `Problem*` responses a Problem Details preset references from many
-     * operations (design §6 error-response chain). Same hoist/dedupe discipline as schemas.
+     * Reusable response components for `components.responses` — e.g. the shared `Problem*` responses
+     * a Problem Details preset references from many operations.
      *
      * @var array<string, array<string, mixed>>
      */
     private array $responses = [];
 
     /**
-     * Security schemes contributed by integrations (name → OAS security-scheme object) — e.g. the
-     * Sanctum `bearer`/`apiKey` or Passport `oauth2` an integration auto-configures when the package
-     * is installed and no scheme was set in config. Merged UNDER config schemes by the assembler
-     * (explicit config wins). Same hoist/dedupe discipline as responses.
+     * Security schemes contributed by integrations, e.g. Sanctum `bearer` or Passport `oauth2` when
+     * the package is installed and config set no scheme. The assembler merges these under the config
+     * schemes, so explicit config wins.
      *
      * @var array<string, array<string, mixed>>
      */
@@ -72,23 +69,23 @@ final class ComponentRegistry
     }
 
     /**
-     * Register a named schema, returning the final component name (suffixed on genuine
-     * collision). A structurally-identical re-registration under the same name is deduped.
+     * Register a named schema, returning the final component name (suffixed on genuine collision).
+     * A structurally-identical re-registration under the same name is deduped.
      *
      * @param  array<string, mixed>  $schema
      */
     public function registerSchema(string $name, array $schema, ?string $schemaId = null): string
     {
         if ($schemaId !== null) {
-            // A component with this exact identity (e.g. the same class FQCN) already exists —
-            // reuse it so one class hoists to one component regardless of how often it is referenced.
+            // Same identity (same class FQCN) already registered — reuse it, so one class is one
+            // component however often it's referenced.
             $existing = array_search($schemaId, $this->schemaIds, true);
             if ($existing !== false) {
                 return (string) $existing;
             }
 
-            // Materialise into the name reserved up front for this identity (a self-referential
-            // class whose cycle-breaking $ref was already handed out during expansion).
+            // Materialise into the name reserved up front for a self-referential class whose
+            // cycle-breaking $ref went out during expansion.
             $reserved = array_search($schemaId, $this->reservedIds, true);
             if ($reserved !== false) {
                 $reserved = (string) $reserved;
@@ -142,11 +139,11 @@ final class ComponentRegistry
     }
 
     /**
-     * Reserve (and return) the final component name for a schema identity before its body is built,
-     * so a self-reference discovered mid-expansion can point its `$ref` at the exact name — including
-     * any collision suffix — the schema will materialise under. The registry is the single owner of
-     * component naming: reserving the same identity twice returns the same name, and a reserved name
-     * occupies the namespace so a different identity is suffixed past it.
+     * Reserve the final component name for a schema identity before its body is built, so a
+     * self-reference found mid-expansion can `$ref` the exact name — collision suffix included —
+     * that the schema will materialise under. The registry is the sole owner of component naming:
+     * reserving one identity twice gives the same name, and a reservation occupies the namespace so
+     * a different identity gets suffixed past it.
      */
     public function reserveSchemaName(string $name, string $schemaId): string
     {
@@ -168,8 +165,8 @@ final class ComponentRegistry
             $final = $name.'_'.$n;
         }
 
-        // A reserved schema is always its own component (it is being expanded because something
-        // references it), so a suffix here is a genuine collision — warn as the register path does.
+        // A reserved schema is always its own component — something references it — so a suffix here
+        // means a genuine collision. Warn like the register path does.
         if ($final !== $name) {
             $this->diagnostics[] = new Diagnostic(
                 severity: Severity::Warning,
@@ -198,9 +195,8 @@ final class ComponentRegistry
 
     /**
      * Register a named response component, returning the final component name (suffixed on genuine
-     * collision). A structurally-identical re-registration under the same name is deduped, so one
-     * shared response (e.g. `ProblemUnauthenticated`) hoists once regardless of how many operations
-     * reference it.
+     * collision). A shared response like `ProblemUnauthenticated` dedupes to one hoist however many
+     * operations reference it.
      *
      * @param  array<string, mixed>  $response
      */
@@ -210,10 +206,8 @@ final class ComponentRegistry
     }
 
     /**
-     * Register a security scheme an integration auto-configured, returning the final component name.
-     * A structurally-identical re-registration under the same name dedupes, so many operations
-     * sharing one scheme (`sanctum`, `passport`) hoist it once; the returned name is what an
-     * operation's `security` requirement references.
+     * Register a security scheme an integration auto-configured; the returned name is what an
+     * operation's `security` requirement references. Dedupes, so a shared `sanctum` hoists once.
      *
      * @param  array<string, mixed>  $definition
      */
@@ -224,9 +218,8 @@ final class ComponentRegistry
 
     /**
      * Hoist a named body into a component bucket, deduping a structurally-equal body and suffixing a
-     * genuine collision (with a warning). Shared by the response path and mirrors the schema path's
-     * hoist/dedupe discipline; schemas additionally reserve names for self-reference cycles, so they
-     * keep a specialised variant in {@see registerSchema()}.
+     * genuine collision. Schemas need name reservation for self-reference cycles, so they keep their
+     * own variant in {@see registerSchema()}.
      *
      * @param  array<string, array<string, mixed>>  $bucket
      * @param  array<string, mixed>  $body
@@ -266,10 +259,9 @@ final class ComponentRegistry
     }
 
     /**
-     * A restorable snapshot of the whole registry, so a route that fails mid-pipeline after
-     * registering components can be rolled back — leaving no orphaned schemas/responses/diagnostics
-     * (or leaked name reservations) from a route that never made it into the document
-     * (design §5 isolated try/catch).
+     * A restorable snapshot of the whole registry: a route that fails mid-pipeline after registering
+     * components rolls back, so it leaves no orphaned components, diagnostics or leaked name
+     * reservations behind.
      *
      * @return array{schemas: array<string, array<string, mixed>>, schemaIds: array<string, string>, reservedIds: array<string, string>, responses: array<string, array<string, mixed>>, securitySchemes: array<string, array<string, mixed>>, diagnostics: list<Diagnostic>}
      */
@@ -339,8 +331,8 @@ final class ComponentRegistry
     }
 
     /**
-     * Record a diagnostic raised while building components (e.g. a validation rule no transformer
-     * handled). The assembler folds these into the document's diagnostic channel.
+     * Record a diagnostic raised while building components, e.g. a validation rule no transformer
+     * handled. The assembler folds these into the document's diagnostic channel.
      */
     public function addDiagnostic(Diagnostic $diagnostic): void
     {

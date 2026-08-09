@@ -18,21 +18,16 @@ use Docuccino\Core\Support\Fqcn;
 
 /**
  * A reflection-rich enum → schema mapper that supersedes the case-names-only {@see EnumTypeToSchema}
- * (it runs earlier in the chain). It documents a backed enum by its backing values (an integer schema
- * for an int-backed enum), attaches `#[CaseDescription]` prose as `x-enumDescriptions`, and honours
- * the `enums.naming` policy (`x-enumNames`/`x-enum-varnames`, off by default). A pure enum still lists
- * its case names, so it never regresses the plainer mapper. Reading `#[CaseDescription]` + the
- * representation naming policy is framework-neutral, so this is a core built-in mapper.
+ * by running earlier in the chain: it documents a backed enum by its backing values (an integer
+ * schema for an int-backed one), attaches `#[CaseDescription]` prose as `x-enumDescriptions`, and
+ * honours the `enums.naming` policy. A pure enum still lists its case names, so it never regresses
+ * the plainer mapper. All framework-neutral, hence a core built-in.
  *
- * Under the `enums.components` policy (default on), a reflectable enum is hoisted to a named
- * `components.schemas` entry — named by its short class name / `#[SchemaName]`, pinned to its FQCN
- * diff identity via {@see SchemaIdentity} + the {@see ComponentRegistry}
- * (deduped, so one enum → one component shared by every property and query-parameter item that uses it,
- * with its `x-enumDescriptions` carried once). The nullable composition of a `$ref` is handled honestly
- * by {@see UnionTypeToSchema} (a `$ref` cannot carry `type: [x, null]`, so it becomes an
- * `anyOf: [{$ref}, {type: null}]` under both nullable policies). With the policy off — or an enum that
- * is not reflectable here (no autoloadable definition to name/pin) — the schema stays inline, byte-for-
- * byte as before.
+ * Under `enums.components` (default on) a reflectable enum hoists to a named component via
+ * {@see SchemaIdentity} + the {@see ComponentRegistry}, deduped by FQCN identity — so one enum is one
+ * described schema shared by every property and query-parameter item using it. Making a `$ref`
+ * nullable is {@see UnionTypeToSchema}'s job: a `$ref` can't carry `type: [x, null]`, so it becomes
+ * `anyOf: [{$ref}, {type: null}]` under both nullable policies.
  */
 #[ExtensionOrder(priority: Priorities::EARLY)]
 final class EnumSchema implements TypeToSchema
@@ -48,8 +43,8 @@ final class EnumSchema implements TypeToSchema
             return null;
         }
 
-        // The enum's declaring file is a fragment-cache dependency: adding/removing a case changes
-        // this schema (design §10). Recorded even when reflection later falls back to DType cases.
+        // The enum's declaring file is a fragment-cache dependency — adding or removing a case changes
+        // this schema. Recorded even when reflection later falls back to the DType cases.
         $file = EnumReflection::file($type->fqcn);
         if ($file !== null) {
             $context->dependsOn($file);
@@ -57,8 +52,7 @@ final class EnumSchema implements TypeToSchema
 
         $values = EnumReflection::values($type->fqcn);
         if ($values === []) {
-            // The engine could not reflect the enum (e.g. it is not autoloadable here); fall back to
-            // the case names the DType carries.
+            // Not reflectable here (not autoloadable) — fall back to the DType's case names.
             $values = $type->cases;
         }
 
@@ -78,17 +72,15 @@ final class EnumSchema implements TypeToSchema
             $schema['x-enumDescriptions'] = $descriptions;
         }
 
-        // Codegen name hints (design §Representation policies): the case names, emitted alongside —
-        // never replacing — the value-bearing `enum` member. Default `none` emits nothing.
+        // Codegen name hints: case names emitted alongside — never replacing — the value-bearing
+        // `enum` member. Default `none` emits nothing.
         $naming = $context->representation()->enumNaming;
         if (($naming === 'x-enumNames' || $naming === 'x-enum-varnames') && $type->cases !== []) {
             $schema[$naming] = $type->cases;
         }
 
-        // Hoist to a named component (default), so one enum is a single canonical, described schema
-        // that properties and query-parameter item schemas $ref — deduped by FQCN identity. Only a
-        // reflectable enum is hoisted: an un-autoloadable one has no honest name/identity to pin, so
-        // it stays inline. Policy off restores the inline expression byte-for-byte.
+        // Only a reflectable enum hoists — an un-autoloadable one has no honest name or identity to
+        // pin, so it stays inline, as does everything when the policy is off.
         if ($context->representation()->enumComponents && enum_exists($type->fqcn)) {
             $name = SchemaIdentity::name($type->fqcn) ?? Fqcn::short($type->fqcn);
             $id = SchemaIdentity::id($type->fqcn) ?? $type->fqcn;

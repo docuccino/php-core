@@ -8,19 +8,18 @@ use Docuccino\Core\Support\Arr;
 use Docuccino\Core\Support\Hydrate;
 
 /**
- * Field-level schema comparison with breaking-change classification (design/plan breaking
- * rules). `$ref`s are compared opaquely (by target string) — a referenced component schema's
- * internal changes are reported once, where that component is diffed by identity — so nothing
- * is double-counted and no ref resolution or cycle handling is needed.
+ * Field-level schema comparison with breaking-change classification. `$ref`s compare opaquely, by
+ * target string — the referenced component's own changes are reported once, where that component
+ * is diffed by identity — so nothing double-counts and no ref resolution or cycle handling is
+ * needed.
  *
- * Breaking here: a type narrowed/changed or constraint added; an enum value removed or an enum
- * constraint introduced; a required property added to a *request* schema; a property removed from a
- * *response* schema (a field consumers relied on receiving vanishes); a `format` tightened on a
- * *request* schema (added or changed — stricter input validation). Non-breaking: type widened, enum
- * value added, required removed, description edits, property added, a property removed from a request
- * schema (the client simply stops sending it), a format removed or any format change on a response.
- * `required` on non-request schemas (response/component, usage context unknown) is reported but
- * classed non-breaking — a documented judgment call.
+ * Breaking: a type narrowed/changed or a constraint added; an enum value removed or an enum
+ * introduced; a required property added to a *request* schema; a property removed from a
+ * *response* schema; a `format` added or changed on a *request* schema (stricter input).
+ * Non-breaking: type widened, enum value added, required removed, description edits, property
+ * added, a property removed from a request schema (the client just stops sending it), a format
+ * removed or any format change on a response. `required` on a response/component schema — usage
+ * context unknown — is reported but classed non-breaking; that's a judgment call, not an oversight.
  */
 final class SchemaComparator
 {
@@ -112,8 +111,8 @@ final class SchemaComparator
             return;
         }
 
-        // A format added or changed on a request schema tightens the values the API will accept —
-        // breaking. Removing a format widens (non-breaking); on a response, format is descriptive.
+        // On a request, a format added or changed tightens what the API accepts. Removing one
+        // widens; on a response format is only descriptive.
         $breaking = $request && $newFormat !== null;
 
         $changes[] = $this->change(ChangeKind::Changed, $id, $path.'.format', $breaking, 'schema.format-changed', 'format', $oldFormat, $newFormat);
@@ -200,8 +199,8 @@ final class SchemaComparator
             $propPath = $path.'.properties.'.$name;
 
             if (! isset($newProps[$name])) {
-                // Removing a property a response used to return breaks consumers reading it; on a
-                // request schema the client simply stops sending it (non-breaking).
+                // Losing a response property breaks whoever read it; on a request the client
+                // just stops sending it.
                 $changes[] = $this->change(ChangeKind::Removed, $id, $propPath, ! $request, 'schema.property-removed', null, null, null);
 
                 continue;

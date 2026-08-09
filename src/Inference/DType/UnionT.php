@@ -5,13 +5,12 @@ declare(strict_types=1);
 namespace Docuccino\Core\Inference\DType;
 
 /**
- * A union of two or more member types. Construction is canonical: nested unions
- * are flattened, duplicate members collapsed, and the survivors sorted by
- * {@see DType::canonicalKey()} — so `A|B` and `B|A` serialize identically and
- * nullability always renders with `NullT` last.
+ * A union of two or more member types. Construction is canonical: nested unions flattened,
+ * duplicates collapsed, survivors sorted by {@see DType::canonicalKey()} — so `A|B` and `B|A`
+ * serialize identically and nullability always renders `NullT` last.
  *
- * Use {@see UnionT::of()} to build one; it collapses a single survivor back to
- * that member (a union is never of arity < 2).
+ * Build with {@see UnionT::of()}, which collapses a single survivor back to that member; a union
+ * never has arity < 2.
  */
 final readonly class UnionT extends DType
 {
@@ -23,8 +22,8 @@ final readonly class UnionT extends DType
     public function __construct(public array $members) {}
 
     /**
-     * Canonicalising factory. Returns the sole member when the union collapses
-     * to arity 1, or `UnknownT` when there are no members.
+     * Canonicalising factory: the sole member when the union collapses to arity 1, `UnknownT` when
+     * there are none.
      *
      * @param  list<DType>  $members
      */
@@ -57,10 +56,9 @@ final readonly class UnionT extends DType
     }
 
     /**
-     * This union with every member the predicate rejects removed (e.g. a `MissingValue`/`Optional`
-     * marker, or `null`). Re-canonicalises via {@see of()}, so a single survivor collapses to that
-     * member. Rejecting every member is treated as a no-op — the union is returned unchanged rather
-     * than an empty/unknown type, since a type made purely of markers has nothing to strip to.
+     * This union minus every member the predicate rejects (a `MissingValue`/`Optional` marker, say,
+     * or `null`), re-canonicalised via {@see of()}. Rejecting everything is a no-op: a type made
+     * purely of markers has nothing to strip to, so the union comes back unchanged.
      *
      * @param  callable(DType): bool  $reject
      */

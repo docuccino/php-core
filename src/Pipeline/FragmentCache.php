@@ -9,20 +9,17 @@ use Docuccino\Core\Extensions\Context\RouteDescriptor;
 use JsonException;
 
 /**
- * The OperationFragment cache (design §10): keys a route's built fragment on everything that could
- * change its output *except* the dependency files, then validates freshness by re-hashing the
- * stored dependency list. A hit therefore reconstructs the fragment without invoking the type
- * engine.
+ * The OperationFragment cache: keys a route's built fragment on everything that could change its
+ * output *except* the dependency files, then checks freshness by re-hashing the stored dependency
+ * list. A hit reconstructs the fragment without ever invoking the type engine.
  *
  * key = sha256(tool ver ‖ spec ver ‖ identity-algo ver ‖ doc configHash ‖ resolved extension
- * signature (FQCNs + owning package versions) ‖ route cache-signature (method+URI+resolved
- * action+normalised middleware)). The stored entry additionally records `sha256(each ActionAnalysis
- * + out-of-band dependency file)`; on lookup any changed/removed dependency invalidates the entry.
- * (TraceReport + {@see RouteDependencies} files merge into the
- * same list — the {@see put()} signature is the seam.)
+ * signature (FQCNs + owning package versions) ‖ route cache-signature (method + URI + resolved
+ * action + normalised middleware)). The entry also stores `sha256(each ActionAnalysis +
+ * out-of-band dependency file)`, so any changed or removed dependency invalidates it. TraceReport
+ * and {@see RouteDependencies} files merge into that one list — {@see put()} is the seam.
  *
- * Storage is a flat directory of `{key}.json` files written atomically (temp file + rename), with a
- * simple `enabled` off-switch.
+ * Storage is a flat directory of `{key}.json` files written atomically (temp file + rename).
  *
  * @internal
  */
@@ -36,7 +33,7 @@ final readonly class FragmentCache
         private string $identityVersion,
     ) {}
 
-    /** A no-op cache: every lookup misses and nothing is stored (design §10, the off-by-default state). */
+    /** A no-op cache — every lookup misses, nothing is stored. This is the default. */
     public static function disabled(): self
     {
         return new self(false, '', '', '', '');
@@ -64,8 +61,8 @@ final readonly class FragmentCache
     }
 
     /**
-     * Return the cached fragment when the entry exists and every recorded dependency file still
-     * hashes to its stored value; otherwise null (a miss, or an invalidated stale entry).
+     * The cached fragment, if the entry exists and every recorded dependency file still hashes to
+     * its stored value. Null otherwise — a miss and a stale entry are indistinguishable to callers.
      */
     public function get(string $key): ?OperationFragment
     {
@@ -163,8 +160,8 @@ final readonly class FragmentCache
             @mkdir($directory, 0755, true);
         }
 
-        // random_int (not bin2hex(random_bytes(…))): its int return type is unambiguous in every
-        // supported analyser version, and 63 bits of entropy beats the 32 it replaces.
+        // random_int over bin2hex(random_bytes(…)): unambiguous int return type for every analyser
+        // version we support, and 63 bits of entropy instead of 32.
         $temp = $file.'.'.getmypid().'.'.dechex(random_int(0, PHP_INT_MAX)).'.tmp';
         if (@file_put_contents($temp, $contents) === false) {
             return;

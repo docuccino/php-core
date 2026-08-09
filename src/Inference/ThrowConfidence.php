@@ -5,13 +5,12 @@ declare(strict_types=1);
 namespace Docuccino\Core\Inference;
 
 /**
- * How sure the engine is a {@see ThrownException} really escapes (Spike C):
+ * How sure the engine is a {@see ThrownException} really escapes:
  *
- *   - `certain`  — a literal `throw`, or a registry hit PHPStan corroborated
- *     with a matching explicit type;
- *   - `declared` — sourced from a `@throws` docblock or a Larastan stub;
- *   - `likely`   — a registry rescue of an implicit bare-`Throwable` forwarder
- *     (e.g. static `Model::findOrFail`) PHPStan did not corroborate.
+ *   - `certain`  — a literal `throw`, or a registry hit PHPStan corroborated with a matching type;
+ *   - `declared` — from a `@throws` docblock or a Larastan stub;
+ *   - `likely`   — a registry rescue of an implicit bare-`Throwable` forwarder (static
+ *     `Model::findOrFail`, say) that PHPStan didn't corroborate.
  */
 enum ThrowConfidence: string
 {
@@ -20,8 +19,7 @@ enum ThrowConfidence: string
     case Likely = 'likely';
 
     /**
-     * Precedence when deduplicating two findings of the same exception identity —
-     * a more certain finding wins.
+     * Precedence when deduplicating two findings of the same exception identity: more certain wins.
      */
     public function rank(): int
     {

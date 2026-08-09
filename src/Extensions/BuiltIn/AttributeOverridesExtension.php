@@ -74,9 +74,8 @@ final class AttributeOverridesExtension implements OperationExtension
 
     /**
      * Load a `#[DescriptionFromFile]` markdown file into the description, confined to the app base
-     * path (security L2): a path escaping the base is rejected with an error diagnostic and no read.
-     * A successfully read file joins the route's fragment-cache dependencies (design §10) so editing
-     * it invalidates the cached operation.
+     * path: a path escaping the base is rejected with an error diagnostic and never read. A file that
+     * is read joins the route's dependencies so editing it invalidates the cached operation.
      */
     private function applyDescriptionFromFile(OperationDraft $operation, RouteContext $context, string $path, Contribution $attribute): void
     {
@@ -102,9 +101,9 @@ final class AttributeOverridesExtension implements OperationExtension
     }
 
     /**
-     * The operationId the representation policy dictates: `route-name` (default) uses the route's
-     * name; `controller-method` derives `{ShortController}@{method}` from the action, falling back
-     * to the route name for closure routes with no class.
+     * The operationId the representation policy dictates: `route-name` uses the route's name,
+     * `controller-method` builds `{ShortController}@{method}` — falling back to the route name for a
+     * closure route with no class.
      */
     private function defaultOperationId(RouteContext $context): ?string
     {
@@ -137,9 +136,8 @@ final class AttributeOverridesExtension implements OperationExtension
             return $tags;
         }
 
-        // No #[Group]: fall back to a raw default tag from the controller short name (config-keyed
-        // `tags.default_strategy`, default `controller`), then run it through `tags.map` like any raw
-        // tag — so an untagged API still groups by controller and the map can remap it.
+        // No #[Group]: derive a raw default tag per `tags.default_strategy`, then run it through
+        // `tags.map` like any raw tag, so an untagged API still groups and the map can still remap.
         $default = $this->defaultTag($context);
 
         return $default === null ? [] : [$context->document->mapTag($default)];

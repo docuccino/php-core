@@ -12,9 +12,8 @@ use Docuccino\Core\Patch\PatchResult;
 use Docuccino\Core\Support\Hydrate;
 
 /**
- * A mutable OAS response builder, keyed in its parent operation by status. Description and
- * `$ref` are guarded; response content merges by media type, each media type owning one
- * {@see SchemaDraft} (design §7 collection-merge).
+ * A mutable OAS response builder, keyed in its parent operation by status. Description and `$ref`
+ * are guarded; content merges by media type, each media type owning one {@see SchemaDraft}.
  */
 final class ResponseDraft
 {
@@ -26,10 +25,9 @@ final class ResponseDraft
     private array $content = [];
 
     /**
-     * Per-media-type example bodies (an OAS media-type `example`, sibling of `schema`). Assembled by a
-     * producer from statically-known values only (literals, resolved status members) — never fabricated
-     * — and emitted verbatim: the canonicalizer keeps an `example` opaque, so insertion order is the
-     * producer's responsibility.
+     * Per-media-type example bodies (the OAS media-type `example`, sibling of `schema`). Producers
+     * build these from statically-known values only, never fabricated, and they're emitted verbatim
+     * — the canonicalizer treats an `example` as opaque, so insertion order is the producer's job.
      *
      * @var array<string, mixed>
      */
@@ -64,16 +62,15 @@ final class ResponseDraft
     }
 
     /**
-     * Attach an example body to a media type. Emitted only when that media type also carries a schema.
-     * First writer wins (a later producer does not overwrite an established example) so the result is
-     * order-stable regardless of extension evaluation order.
+     * Attach an example body to a media type; only emitted if that media type also carries a schema.
+     * First writer wins, so extension evaluation order can't change the result.
      */
     public function setExample(string $mediaType, mixed $example): void
     {
         $this->examples[$mediaType] ??= $example;
     }
 
-    /** The first registered media type (in insertion order), or `''` when the response has none. */
+    /** The first media type registered, or `''` when the response has none. */
     public function primaryMediaType(): string
     {
         return array_key_first($this->content) ?? '';
@@ -97,11 +94,9 @@ final class ResponseDraft
     }
 
     /**
-     * The underlying patch guard.
-     *
-     * @internal Not part of the frozen extension-author surface: it hands back the {@see PatchGuard}
-     * (itself `@internal`). Extensions read winning state through {@see producerFor()} /
-     * {@see resolvedField()} instead.
+     * @internal Not part of the frozen extension-author surface — it hands back the (also
+     * `@internal`) {@see PatchGuard}. Extensions read winning state via {@see producerFor()} /
+     * {@see resolvedField()}.
      */
     public function guard(): PatchGuard
     {

@@ -11,14 +11,14 @@ use Docuccino\Core\Extensions\Contracts\DocumentTransformer;
 use Docuccino\Core\Extensions\Document\UirDocumentDraft;
 
 /**
- * A framework-agnostic whole-document lint (design §Phase 4 — data-leakage pass): it scans every
- * emitted schema for property names matching the sensitive-field heuristics ({@see
- * SensitiveFieldLintOptions}) and reports a warning naming the exact schema/property JSON pointer —
- * catching an accidentally-exposed `password`/`remember_token`/`api_key` before it ships. It NEVER
- * mutates the document (diagnostics only). Operates purely on the emitted UIR (zero framework deps),
- * so the reference CLI and other-language producers run the identical rule; the Laravel adapter only
- * maps its `lint.leakage` config onto the options and registers it. First member of the growing
- * `Docuccino\Core\Lint` family (a second document-level rule slots in without reshaping).
+ * A whole-document data-leakage lint: scans every emitted schema for property names matching the
+ * sensitive-field heuristics ({@see SensitiveFieldLintOptions}) and warns with the exact
+ * schema/property JSON pointer, so an accidentally-exposed `password`/`remember_token`/`api_key`
+ * shows up before it ships. Diagnostics only — it never mutates the document.
+ *
+ * It reads only the emitted UIR, no framework deps, so the reference CLI and other-language
+ * producers run the identical rule; the Laravel adapter just maps `lint.leakage` config onto the
+ * options and registers it.
  */
 final class SensitiveFieldLint implements DocumentTransformer
 {
@@ -50,8 +50,8 @@ final class SensitiveFieldLint implements DocumentTransformer
     }
 
     /**
-     * Depth-first walk collecting every `properties` map key that matches a heuristic, with a JSON
-     * pointer to it (works uniformly for component schemas and inline ones).
+     * Depth-first collect of every `properties` key matching a heuristic, plus a JSON pointer to it.
+     * Component and inline schemas look the same from here.
      *
      * @param  list<string>  $path
      * @param  list<array{name: string, pointer: string, label: string}>  $findings
@@ -83,7 +83,7 @@ final class SensitiveFieldLint implements DocumentTransformer
         }
     }
 
-    /** The label of the first heuristic the (normalized) name matches, or null when it looks safe. */
+    /** Label of the first heuristic the normalised name matches, null when it looks safe. */
     private function match(string $name): ?string
     {
         $normalized = strtolower((string) preg_replace('/[^a-zA-Z0-9]/', '', $name));

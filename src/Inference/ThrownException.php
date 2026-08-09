@@ -5,14 +5,12 @@ declare(strict_types=1);
 namespace Docuccino\Core\Inference;
 
 /**
- * An exception the engine believes can escape an action (design §6).
+ * An exception the engine believes can escape an action.
  *
- * Identity is `(exceptionFqcn, httpStatusHint)` — two `abort()`s with statuses
- * 403 and 404 are two distinct API error responses and must never dedupe to one
- * (Spike C finding D). `httpStatusHint` is nullable: a bare `HttpException`
- * without a constant-foldable status has a known family but unknown status.
- * The engine stops at "exceptions + status hints"; response bodies are the
- * pipeline's job.
+ * Identity is `(exceptionFqcn, httpStatusHint)`: two `abort()`s with 403 and 404 are two distinct API
+ * error responses and must never dedupe into one. `httpStatusHint` is nullable — a bare
+ * `HttpException` with no constant-foldable status has a known family but an unknown status. The
+ * engine stops at exceptions plus status hints; response bodies are the pipeline's job.
  */
 final readonly class ThrownException
 {

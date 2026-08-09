@@ -9,18 +9,18 @@ use Docuccino\Core\Canonical\CanonicalJsonSerializer;
 use Docuccino\Core\Document\UirDocument;
 
 /**
- * Emits a {@see UirDocument} as canonical UIR JSON: the document is canonicalised
- * (member order, sorted keys, method/parameter order) and serialised deterministically.
+ * Emits a {@see UirDocument} as canonical UIR JSON — canonicalised (member order, sorted keys,
+ * method/parameter order) then serialised deterministically.
  *
- * Provenance emission honours {@see EmitOptions::$provenance} (design §4):
+ * How much provenance comes out is {@see EmitOptions::$provenance}:
  *
- * - `full` (the emitter default) — every provenance record, including its `overrode` trail;
- * - `winners` — the records are kept but each `overrode` list is dropped (source lines still
- *   churn, but the shadowed-value history does not bloat committed artifacts);
- * - `none` — provenance arrays are stripped from every `x-docuccino` member entirely.
+ * - `full` — every record, `overrode` trail included;
+ * - `winners` — records kept, each `overrode` list dropped, so shadowed-value history doesn't bloat
+ *   committed artifacts;
+ * - `none` — provenance stripped from every `x-docuccino` member.
  *
- * The default is `full`, so a plain `emit()` reproduces the committed goldens byte-for-byte;
- * the CLI selects `winners` for committed artifacts.
+ * `full` is the default, so a plain `emit()` reproduces the committed goldens byte-for-byte; the CLI
+ * picks `winners` for committed artifacts.
  *
  * @internal
  */
@@ -54,9 +54,7 @@ final readonly class UirEmitter implements Emitter
         return $this->serializer->serialize($this->canonicalizer->canonicalize($document));
     }
 
-    /**
-     * Walk the document, applying the provenance level to every `x-docuccino` member.
-     */
+    /** Applies the provenance level to every `x-docuccino` member in the tree. */
     private function levelProvenance(mixed $node, ProvenanceLevel $level): mixed
     {
         if (! is_array($node)) {
@@ -91,7 +89,7 @@ final readonly class UirEmitter implements Emitter
                 continue; // strip the provenance array entirely
             }
 
-            // Winners: keep every record but drop its `overrode` shadowed-value trail.
+            // Winners: keep the records, drop the shadowed-value trail.
             $out[$key] = is_array($value)
                 ? array_map($this->dropOverrode(...), $value)
                 : $value;

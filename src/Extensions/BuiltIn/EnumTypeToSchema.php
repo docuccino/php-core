@@ -11,10 +11,9 @@ use Docuccino\Core\Inference\DType\DType;
 use Docuccino\Core\Inference\DType\EnumT;
 
 /**
- * An enum → a string schema enumerating its case names, with the `x-enumDescriptions` hook
- * left for the enum/`#[CaseDescription]` integration to fill (Phase 4). In Phase 3a the engine
- * hands us case names only (not backing values), so the enum lists names at slightly reduced
- * confidence.
+ * An enum → a string schema listing its case names. The engine hands over names rather than backing
+ * values, hence the slightly reduced confidence; {@see EnumSchema} runs earlier and does better
+ * whenever the enum is reflectable.
  */
 final class EnumTypeToSchema implements TypeToSchema
 {
@@ -35,8 +34,7 @@ final class EnumTypeToSchema implements TypeToSchema
 
         $schema = ['type' => 'string', 'enum' => $type->cases];
 
-        // Codegen name hints (design §Representation policies): additive x-* members that never
-        // touch the `enum` member itself. Default `none` emits nothing.
+        // Codegen name hints: additive x-* members that never touch `enum` itself. Default emits nothing.
         $naming = $context->representation()->enumNaming;
         if ($naming === 'x-enumNames' || $naming === 'x-enum-varnames') {
             $schema[$naming] = $type->cases;

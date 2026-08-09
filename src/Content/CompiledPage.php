@@ -5,14 +5,13 @@ declare(strict_types=1);
 namespace Docuccino\Core\Content;
 
 /**
- * The compiled facts for one narrative page, produced by core's {@see ContentCompiler} (which reads
- * the markdown tree + frontmatter) and handed to the core {@see ContentResolver}. Compilation, id
- * assignment, directive resolution against the assembled document and nav-tree building all live in
- * core — the adapter only supplies the content directory path.
+ * The compiled facts for one narrative page: {@see ContentCompiler} reads the markdown tree and
+ * frontmatter, {@see ContentResolver} takes it from there. The adapter only supplies the content
+ * directory path.
  *
- * `navType` selects how the page appears in the nav tree: `page` (a link to itself), or `operation`
- * / `tag` (a reference node whose `navRef` resolves against the assembled document). `hidden` keeps
- * the page in the registry but drops it from the nav.
+ * `navType` picks how the page appears in the nav: `page` links to itself, `operation`/`tag` make a
+ * reference node whose `navRef` resolves against the assembled document. `hidden` keeps the page in
+ * the registry but out of the nav.
  *
  * @internal
  */

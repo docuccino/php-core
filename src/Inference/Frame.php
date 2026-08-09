@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace Docuccino\Core\Inference;
 
 /**
- * One frame of a {@see ThrownException}'s call chain: the symbol (e.g.
- * `App\Services\OrderService::reserve`) and where the hop occurred. Layer-3
- * descent emits multi-frame chains (Spike C).
+ * One frame of a {@see ThrownException}'s call chain: the symbol
+ * (`App\Services\OrderService::reserve`) and where the hop happened. Interprocedural descent produces
+ * multi-frame chains.
  */
 final readonly class Frame
 {

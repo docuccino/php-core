@@ -9,10 +9,9 @@ use Docuccino\Core\Diagnostics\DiagnosticCollector;
 use Docuccino\Core\Extensions\Contracts\DocumentTransformer;
 
 /**
- * The context handed to a {@see DocumentTransformer}: the document configuration, its resolved
- * identity, and a diagnostics sink so a whole-document transformer (e.g. the data-leakage lint) can
- * report findings into the build's diagnostics channel. Deliberately small in Phase 3a — grows as
- * whole-document extensions gain more to work with.
+ * The context handed to a {@see DocumentTransformer}: the document config, its resolved identity, and a
+ * diagnostics sink so a whole-document transformer like the data-leakage lint can report findings into
+ * the build's diagnostics channel.
  */
 final readonly class DocumentContext
 {

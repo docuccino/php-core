@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Docuccino\Core\Support;
 
 /**
- * Small array helpers for the JSON boundary, where decoded data is typed
- * `array<mixed, mixed>` but object members are always string-keyed.
+ * Small array helpers for the JSON boundary, where decoded data is `array<mixed, mixed>` but object
+ * members are always string-keyed.
  *
  * @internal
  */
@@ -28,8 +28,7 @@ final class Arr
     }
 
     /**
-     * The sorted, deduplicated union of two arrays' values, each coerced to a
-     * string. Used to walk both sides of a diff in a stable order.
+     * Sorted, deduped union of two arrays' values as strings — how a diff walks both sides stably.
      *
      * @param  list<int|string>  $a
      * @param  list<int|string>  $b
@@ -45,8 +44,7 @@ final class Arr
     }
 
     /**
-     * The value at a concrete key-path, or null when any segment is missing or a
-     * non-array is encountered mid-walk.
+     * The value at a key-path; null if a segment is missing or the walk hits a non-array.
      *
      * @param  array<array-key, mixed>  $document
      * @param  list<int|string>  $path

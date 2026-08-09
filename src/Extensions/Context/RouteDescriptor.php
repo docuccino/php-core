@@ -7,11 +7,9 @@ namespace Docuccino\Core\Extensions\Context;
 use Docuccino\Core\Extensions\Contracts\RouteResolver;
 
 /**
- * A framework-agnostic description of one discovered route, produced by a
- * {@see RouteResolver}. The action reference is opaque
- * (a `Class@method` string, a `Class` invokable, or the sentinel `Closure` for closure
- * routes) — the adapter's {@see RouteContext} carries the
- * resolved reflection.
+ * A framework-agnostic description of one discovered route, produced by a {@see RouteResolver}. The
+ * action reference is opaque — a `Class@method` string, an invokable `Class`, or the `Closure`
+ * sentinel; {@see RouteContext} carries the resolved reflection.
  */
 final readonly class RouteDescriptor
 {
@@ -47,11 +45,10 @@ final readonly class RouteDescriptor
     }
 
     /**
-     * Every documentable HTTP method this route answers (lower-case, deduped, `HEAD` dropped): a
-     * route registered for several verbs (`Route::match(['put','patch'], …)`) documents ONE
-     * operation per method (arch F8), so `PUT|PATCH` yields two operations under the same path and
-     * `GET|POST` correctly documents a query operation and a body operation. Falls back to the
-     * primary method when nothing documentable remains.
+     * Every documentable method this route answers (lower-case, deduped, `HEAD` dropped). A route
+     * registered for several verbs gets one operation per method, so `PUT|PATCH` yields two
+     * operations under the same path and `GET|POST` documents a query operation and a body operation.
+     * Falls back to the primary method when nothing documentable remains.
      *
      * @return list<string>
      */
@@ -78,11 +75,10 @@ final readonly class RouteDescriptor
     }
 
     /**
-     * The fragment-cache key input for this route (design §10) — NOT for humans (that is
-     * {@see signature()}). Beyond method + URI it folds in the resolved action target and the
-     * normalised middleware list, so re-pointing a route at a different controller, or adding /
-     * removing middleware (e.g. an auth guard that changes the documented security), invalidates the
-     * cached fragment even though the human signature is unchanged.
+     * The fragment-cache key input for this route — not for humans, that's {@see signature()}. Beyond
+     * method and URI it folds in the action target and normalised middleware, so re-pointing a route
+     * at another controller or changing middleware (an auth guard shifts the documented security)
+     * invalidates the fragment even though the human signature didn't move.
      */
     public function cacheSignature(): string
     {

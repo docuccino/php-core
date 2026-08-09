@@ -8,12 +8,12 @@ use Docuccino\Core\Extensions\Contracts\ExceptionToResponse;
 use Docuccino\Core\Provenance\Source;
 
 /**
- * A single producer's attempt to write one or more fields on a node: its precedence layer,
- * its provenance `producer` string, and optional source/confidence metadata.
+ * One producer's attempt to write fields on a node: its precedence layer, its provenance `producer`
+ * string, and optional source/confidence metadata.
  *
- * `specificity` breaks ties *within* a layer so a more specific target beats a less specific
- * one (design §7: method attribute > class attribute). Two contributions compare on the
- * `(layer, specificity)` tuple; a strictly-greater tuple overrides, equal or lower shadows.
+ * `specificity` breaks ties *within* a layer, so a method attribute beats a class attribute.
+ * Contributions compare on the `(layer, specificity)` tuple — strictly greater overrides, equal or
+ * lower shadows.
  */
 final readonly class Contribution
 {
@@ -61,10 +61,9 @@ final readonly class Contribution
     }
 
     /**
-     * Build a contribution for a producer named at runtime (e.g. the winning
-     * {@see ExceptionToResponse} mapper), mapping the producer
-     * string to its precedence layer so a `fallback`-produced response can still be overridden by a
-     * later `inference`/`integration` one.
+     * A contribution for a producer named at runtime — the winning {@see ExceptionToResponse} mapper,
+     * say. Maps the producer string back to its layer, so a `fallback`-produced response can still be
+     * overridden by a later `inference`/`integration` one.
      */
     public static function forProducer(string $producer, ?Source $source = null, ?float $confidence = null): self
     {
@@ -81,17 +80,13 @@ final readonly class Contribution
         return new self($layer, $producer, $source, $confidence);
     }
 
-    /**
-     * True when this contribution outranks the incumbent and should overwrite it.
-     */
+    /** True when this contribution outranks the incumbent and should overwrite it. */
     public function outranks(self $incumbent): bool
     {
         return [$this->layer->value, $this->specificity] > [$incumbent->layer->value, $incumbent->specificity];
     }
 
-    /**
-     * A stable key grouping fields that belong to the same provenance record.
-     */
+    /** A stable key grouping fields that belong to the same provenance record. */
     public function recordKey(): string
     {
         $source = $this->source?->toArray();

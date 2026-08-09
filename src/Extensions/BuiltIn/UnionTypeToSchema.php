@@ -12,9 +12,8 @@ use Docuccino\Core\Inference\DType\NullT;
 use Docuccino\Core\Inference\DType\UnionT;
 
 /**
- * A union → nullable type-array when it is a single type plus null (`type: [string, null]`,
- * the JSON Schema 2020-12 idiom), otherwise `anyOf` of its members (with a `{type: null}`
- * branch appended when nullable).
+ * A union → a nullable type-array when it's a single type plus null (`type: [string, null]`, the JSON
+ * Schema 2020-12 idiom), else an `anyOf` of its members with a `{type: null}` branch when nullable.
  */
 final class UnionTypeToSchema implements TypeToSchema
 {
@@ -66,15 +65,14 @@ final class UnionTypeToSchema implements TypeToSchema
     {
         $type = $schema['type'] ?? null;
 
-        // `type-array` (default) folds null into a simple typed schema; `anyof` always expresses
-        // nullability as an explicit `{type: null}` branch (design §Representation policies).
+        // `type-array` folds null into a simple typed schema; `anyof` always uses an explicit branch.
         if ($policy !== 'anyof' && is_string($type)) {
             $schema['type'] = [$type, 'null'];
 
             return $schema;
         }
 
-        // Not a simple typed schema (a $ref or anyOf), or the anyof policy — express as a branch.
+        // Not a simple typed schema (a $ref or anyOf), or the anyof policy — use a branch.
         return ['anyOf' => [$schema, ['type' => 'null']]];
     }
 }

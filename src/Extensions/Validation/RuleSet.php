@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace Docuccino\Core\Extensions\Validation;
 
 /**
- * A recovered set of validation rules, keyed by field path. Keys use Laravel dot + wildcard
- * notation (`title`, `author.name`, `items.*.id`, `tags.*`); the builder turns those into nested
- * object/array schemas. Field insertion order is preserved so the emitted schema is deterministic.
+ * A recovered set of validation rules keyed by field path, in Laravel dot + wildcard notation
+ * (`author.name`, `items.*.id`), which the builder turns into nested object/array schemas. Field
+ * insertion order is preserved so the emitted schema is deterministic.
  */
 final readonly class RuleSet
 {

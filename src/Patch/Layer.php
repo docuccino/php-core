@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace Docuccino\Core\Patch;
 
 /**
- * The precedence layers (design §7). The backing integer is the precedence rank: a higher
- * value overrides a lower one. The lowercase case name is the `layer` string written into
- * provenance records and constrained by the UIR schema's `layer` enum.
+ * The precedence layers. The backing integer is the rank — higher overrides lower. The lowercase case
+ * name is the `layer` string written into provenance records, constrained by the UIR schema's `layer`
+ * enum.
  */
 enum Layer: int
 {
@@ -19,9 +19,7 @@ enum Layer: int
     case Overlay = 45;
     case Config = 50;
 
-    /**
-     * The provenance `layer` string for this layer.
-     */
+    /** The provenance `layer` string. */
     public function label(): string
     {
         return match ($this) {

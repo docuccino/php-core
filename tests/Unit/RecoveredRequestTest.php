@@ -57,7 +57,7 @@ it('hoists a source-class body to one component $ref-ed by every operation using
     $ref = ['$ref' => '#/components/schemas/CreateThing'];
     expect($opA->resolvedField('requestBody')['content']['application/json']['schema'])->toBe($ref)
         ->and($opB->resolvedField('requestBody')['content']['application/json']['schema'])->toBe($ref)
-        // Same source class across two operations → exactly one component (deduped by identity).
+        // Same source class across two operations gives exactly one component, deduped by identity.
         ->and(array_keys($components->schemas()))->toBe(['CreateThing'])
         ->and($components->schemas()['CreateThing'])->toBe($schema->schema);
 });
@@ -77,8 +77,8 @@ it('keeps the body inline when a #[BodyParameter] patches it at a higher layer (
     $components = new ComponentRegistry;
     $schema = objectSchema(['name' => ['type' => 'string']]);
 
-    // A source class IS present, but a #[BodyParameter] will patch a body property at the attribute
-    // layer — which cannot be expressed through a $ref — so this op keeps its body inline.
+    // A source class is present, but a #[BodyParameter] patches a body property at the attribute layer,
+    // which a $ref can't express — so this op keeps its body inline.
     $op = new OperationDraft;
     (new RecoveredRequest)->apply(
         $op,
@@ -100,8 +100,8 @@ it('emits two distinct components when a class is used as both request and respo
     $op = new OperationDraft;
     (new RecoveredRequest)->apply($op, requestContext($components), $requestBody, 'spatie-data', 'App\\Thing');
 
-    // Then the response side registers the same class's property-shape under its FQCN identity — a
-    // different body, so it is deterministically suffixed rather than dedupe-colliding by name.
+    // Then the response side registers the same class's property shape under its FQCN identity. It's a
+    // different body, so it gets a deterministic suffix rather than colliding by name.
     $responseName = $components->registerSchema('Thing', ['type' => 'object', 'properties' => ['id' => ['type' => 'integer']]], 'App\\Thing');
 
     expect($op->resolvedField('requestBody')['content']['application/json']['schema'])->toBe(['$ref' => '#/components/schemas/Thing'])
@@ -116,15 +116,14 @@ it('suffixes a THIRD distinct claimant past _2 (collision ordering beyond N=2)',
     $op = new OperationDraft;
     (new RecoveredRequest)->apply($op, requestContext($components), objectSchema(['name' => ['type' => 'string']]), 'spatie-data', 'App\\Thing');
 
-    // …then two further DISTINCT shapes claim it, so the suffix must keep counting deterministically
-    // rather than stopping at _2 (collision ordering was only ever proven to N=2).
+    // …then two further distinct shapes claim it, so the suffix keeps counting rather than stopping at _2.
     $second = $components->registerSchema('Thing', ['type' => 'object', 'properties' => ['id' => ['type' => 'integer']]], 'App\\Other\\Thing');
     $third = $components->registerSchema('Thing', ['type' => 'object', 'properties' => ['slug' => ['type' => 'string']]], 'App\\Third\\Thing');
 
     expect($second)->toBe('Thing_2')
         ->and($third)->toBe('Thing_3')
         ->and(array_keys($components->schemas()))->toBe(['Thing', 'Thing_2', 'Thing_3'])
-        // Re-registering an EXISTING identity still dedupes onto its own suffixed name, not a fourth.
+        // Re-registering an existing identity dedupes onto its own suffixed name, not a fourth.
         ->and($components->registerSchema('Thing', ['type' => 'object', 'properties' => ['slug' => ['type' => 'string']]], 'App\\Third\\Thing'))->toBe('Thing_3')
         // One warning per genuine collision (two), none for the dedupe.
         ->and($components->diagnostics())->toHaveCount(2);
@@ -148,10 +147,9 @@ it('gives a #[SchemaId]-pinned source class a pinned, rename-stable request iden
     $components = new ComponentRegistry;
     $schema = objectSchema(['name' => ['type' => 'string']]);
 
-    // PinnedRequestClass carries #[SchemaId('thing.v1')]. The request identity must honour the pin
-    // (like the response side does) — `thing.v1#request`, NOT `<FQCN>#request` — so it stays stable
-    // if the class is renamed, and the #request discriminator still keeps it distinct from the
-    // response-side `thing.v1` identity.
+    // PinnedRequestClass carries #[SchemaId('thing.v1')]. The request identity honours the pin the way the
+    // response side does — `thing.v1#request`, not `<FQCN>#request` — so it survives a class rename, and
+    // the `#request` discriminator keeps it distinct from the response-side `thing.v1`.
     $op = new OperationDraft;
     (new RecoveredRequest)->apply($op, requestContext($components), $schema, 'spatie-data', PinnedRequestClass::class);
 
