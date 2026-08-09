@@ -18,6 +18,9 @@ use Docuccino\Core\Support\Fqcn;
  *     display. A descriptor can also carry a `chain` of fluent calls made on it
  *     (`Rule::enum(Status::class)->only([Status::Active])`) via {@see withChainedCall()}, so
  *     builder-style narrowing survives the same fold;
+ *   - `instance`   — a `new X(...)` expression: the class FQCN plus its constant-foldable args. Like a
+ *     descriptor, the CALL is what the docs need — a rule object in a rules array is only
+ *     documentable by its class;
  *   - `array`      — an array of the above (per-item recursion);
  *   - `unknown`    — folding failed, with a reason.
  */
@@ -26,6 +29,8 @@ final readonly class ConstValue
     public const KIND_SCALAR = 'scalar';
 
     public const KIND_DESCRIPTOR = 'descriptor';
+
+    public const KIND_INSTANCE = 'instance';
 
     public const KIND_ARRAY = 'array';
 
@@ -44,6 +49,7 @@ final readonly class ConstValue
         public array $chain = [],
         public array $items = [],
         public ?string $reason = null,
+        public ?string $class = null,
     ) {}
 
     public static function scalar(string|int|float|bool|null $value): self
@@ -57,6 +63,14 @@ final readonly class ConstValue
     public static function descriptor(string $factory, array $args): self
     {
         return new self(self::KIND_DESCRIPTOR, factory: $factory, args: $args);
+    }
+
+    /**
+     * @param  list<ConstValue>  $args
+     */
+    public static function instance(string $class, array $args): self
+    {
+        return new self(self::KIND_INSTANCE, class: $class, args: $args);
     }
 
     /**
@@ -102,6 +116,11 @@ final readonly class ConstValue
         return $this->kind === self::KIND_DESCRIPTOR;
     }
 
+    public function isInstance(): bool
+    {
+        return $this->kind === self::KIND_INSTANCE;
+    }
+
     public function isArray(): bool
     {
         return $this->kind === self::KIND_ARRAY;
@@ -117,6 +136,11 @@ final readonly class ConstValue
                 self::shortFactory((string) $this->factory),
                 implode(', ', array_map(static fn (ConstValue $a): string => $a->render(), $this->args)),
                 $this->renderChain(),
+            ),
+            self::KIND_INSTANCE => sprintf(
+                'new %s(%s)',
+                Fqcn::short((string) $this->class),
+                implode(', ', array_map(static fn (ConstValue $a): string => $a->render(), $this->args)),
             ),
             self::KIND_ARRAY => sprintf(
                 '[%s]',
@@ -149,6 +173,11 @@ final readonly class ConstValue
         return match ($this->kind) {
             self::KIND_SCALAR => ['kind' => self::KIND_SCALAR, 'scalar' => $this->scalar],
             self::KIND_DESCRIPTOR => $this->descriptorToArray(),
+            self::KIND_INSTANCE => [
+                'kind' => self::KIND_INSTANCE,
+                'class' => $this->class,
+                'args' => array_map(static fn (ConstValue $a): array => $a->toArray(), $this->args),
+            ],
             self::KIND_ARRAY => [
                 'kind' => self::KIND_ARRAY,
                 'items' => array_map(static fn (ConstValue $i): array => $i->toArray(), $this->items),
@@ -193,6 +222,10 @@ final readonly class ConstValue
         return match ($kind) {
             self::KIND_SCALAR => self::scalar(self::scalarFrom($data['scalar'] ?? null)),
             self::KIND_DESCRIPTOR => self::descriptorFrom($data),
+            self::KIND_INSTANCE => self::instance(
+                is_string($data['class'] ?? null) ? $data['class'] : '',
+                self::listFrom($data['args'] ?? []),
+            ),
             self::KIND_ARRAY => self::array(self::listFrom($data['items'] ?? [])),
             default => self::unknown(is_string($data['reason'] ?? null) ? $data['reason'] : '?'),
         };

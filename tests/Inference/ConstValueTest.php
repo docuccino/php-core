@@ -70,6 +70,22 @@ it('round-trips an array of mixed const values', function (): void {
         ->and(ConstValue::fromArray($value->toArray())->toArray())->toBe($value->toArray());
 });
 
+it('folds a new expression into an instance value, shortening the class for display', function (): void {
+    $value = ConstValue::instance('App\\Rules\\Iban', [ConstValue::scalar('GB')]);
+
+    expect($value->isInstance())->toBeTrue()
+        ->and($value->class)->toBe('App\\Rules\\Iban')
+        ->and($value->render())->toBe("new Iban('GB')")
+        ->and(ConstValue::fromArray($value->toArray())->toArray())->toBe($value->toArray());
+});
+
+it('round-trips an instance value nested in an array', function (): void {
+    $value = ConstValue::array([ConstValue::scalar('required'), ConstValue::instance('App\\Rules\\Iban', [])]);
+
+    expect($value->render())->toBe("['required', new Iban()]")
+        ->and(ConstValue::fromArray($value->toArray())->toArray())->toBe($value->toArray());
+});
+
 it('renders scalar kinds distinctly', function (): void {
     expect(ConstValue::scalar(true)->render())->toBe('true')
         ->and(ConstValue::scalar(false)->render())->toBe('false')
