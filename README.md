@@ -4,9 +4,11 @@
 > Open issues and pull requests on the monorepo — commits pushed here are overwritten.
 
 The framework-agnostic heart of [Docuccino](https://docuccino.app): the UIR
-document model, canonicalizer, identity/hashing, JSON-Schema validator and the
-OpenAPI / UIR emitters. It has no framework dependency and is consumed by the
-framework adapters (e.g. `docuccino/laravel`).
+document model, canonicalizer, identity/hashing, JSON-Schema validator, the
+OpenAPI / UIR emitters and the phpdoc type grammar every adapter reads type
+strings and docblocks with. It has no framework dependency — and no
+static-analysis dependency — and is consumed by the framework adapters (e.g.
+`docuccino/laravel`).
 
 ## Install
 
