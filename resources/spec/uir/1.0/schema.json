@@ -1,0 +1,357 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spec.docuccino.app/uir/1.0/schema.json",
+  "title": "UIR Document",
+  "description": "Universal Intermediate Representation 1.0 (draft). An OAS 3.2-shaped document with one reserved member, `x-docuccino`, allowed on every object node. OAS structure is permitted structurally (objects with `x-*` passthrough); everything under `x-docuccino` is defined strictly. Determinism guarantee: no timestamp-like or otherwise non-deterministic members are defined anywhere, and the strict `x-docuccino` objects forbid additional members, so none can be introduced.",
+  "type": "object",
+  "required": ["uir", "openapi", "info", "paths"],
+  "x-canonicalOrder": ["$schema", "uir", "openapi", "jsonSchemaDialect", "info", "servers", "security", "tags", "paths", "webhooks", "components", "x-docuccino"],
+  "properties": {
+    "$schema": { "type": "string", "format": "uri" },
+    "uir": { "$ref": "#/$defs/semver" },
+    "openapi": { "type": "string", "pattern": "^3\\.\\d+(\\.\\d+)?$" },
+    "jsonSchemaDialect": { "type": "string" },
+    "info": { "$ref": "#/$defs/info" },
+    "servers": { "type": "array", "items": { "$ref": "#/$defs/server" } },
+    "security": { "type": "array", "items": { "type": "object" } },
+    "tags": { "type": "array", "items": { "$ref": "#/$defs/tag" } },
+    "paths": { "$ref": "#/$defs/paths" },
+    "webhooks": { "type": "object", "additionalProperties": { "$ref": "#/$defs/pathItem" } },
+    "components": { "$ref": "#/$defs/components" },
+    "x-docuccino": { "$ref": "#/$defs/docuccinoDocument" }
+  },
+  "patternProperties": { "^x-": true },
+  "additionalProperties": false,
+  "$defs": {
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-[0-9A-Za-z-.]+)?(?:\\+[0-9A-Za-z-.]+)?$"
+    },
+    "nodeId": {
+      "type": "string",
+      "pattern": "^(op|par|sch|res):v1:[0-9a-z]{16}$"
+    },
+    "docId": {
+      "type": "string",
+      "pattern": "^doc:.+$"
+    },
+    "pageId": {
+      "type": "string",
+      "pattern": "^page:v1:[0-9a-z]{16}$"
+    },
+    "producer": {
+      "type": "string",
+      "pattern": "^(inference|attribute|docblock|overlay|config|fallback|integration:[a-z0-9]([a-z0-9-]*[a-z0-9])?)$"
+    },
+    "layer": {
+      "enum": ["inference", "integration", "docblock", "attribute", "overlay", "config", "fallback"]
+    },
+    "info": {
+      "type": "object",
+      "x-canonicalOrder": ["title", "summary", "description", "termsOfService", "contact", "license", "version", "x-docuccino"],
+      "required": ["title", "version"],
+      "properties": {
+        "title": { "type": "string" },
+        "summary": { "type": "string" },
+        "description": { "type": "string" },
+        "termsOfService": { "type": "string" },
+        "contact": { "type": "object" },
+        "license": { "type": "object" },
+        "version": { "type": "string" },
+        "x-docuccino": { "$ref": "#/$defs/docuccinoNode" }
+      },
+      "patternProperties": { "^x-": true }
+    },
+    "server": {
+      "type": "object",
+      "x-canonicalOrder": ["url", "description", "variables", "x-docuccino"],
+      "required": ["url"],
+      "properties": {
+        "url": { "type": "string" },
+        "description": { "type": "string" },
+        "variables": { "type": "object" },
+        "x-docuccino": { "$ref": "#/$defs/docuccinoNode" }
+      },
+      "patternProperties": { "^x-": true }
+    },
+    "tag": {
+      "type": "object",
+      "x-canonicalOrder": ["name", "description", "externalDocs", "x-docuccino"],
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "externalDocs": { "type": "object" },
+        "x-docuccino": { "$ref": "#/$defs/docuccinoNode" }
+      },
+      "patternProperties": { "^x-": true }
+    },
+    "paths": {
+      "type": "object",
+      "propertyNames": { "pattern": "^/" },
+      "additionalProperties": { "$ref": "#/$defs/pathItem" }
+    },
+    "pathItem": {
+      "type": "object",
+      "x-canonicalOrder": ["x-docuccino", "$ref", "summary", "description", "servers", "parameters", "get", "put", "post", "delete", "options", "head", "patch", "trace", "query"],
+      "properties": {
+        "x-docuccino": { "$ref": "#/$defs/docuccinoNode" },
+        "$ref": { "type": "string" },
+        "summary": { "type": "string" },
+        "description": { "type": "string" },
+        "servers": { "type": "array", "items": { "$ref": "#/$defs/server" } },
+        "parameters": { "type": "array", "items": { "$ref": "#/$defs/parameter" } },
+        "get": { "$ref": "#/$defs/operation" },
+        "put": { "$ref": "#/$defs/operation" },
+        "post": { "$ref": "#/$defs/operation" },
+        "delete": { "$ref": "#/$defs/operation" },
+        "options": { "$ref": "#/$defs/operation" },
+        "head": { "$ref": "#/$defs/operation" },
+        "patch": { "$ref": "#/$defs/operation" },
+        "trace": { "$ref": "#/$defs/operation" },
+        "query": { "$ref": "#/$defs/operation" }
+      },
+      "patternProperties": { "^x-": true },
+      "additionalProperties": false
+    },
+    "operation": {
+      "type": "object",
+      "x-canonicalOrder": ["x-docuccino", "operationId", "summary", "description", "externalDocs", "deprecated", "tags", "security", "servers", "parameters", "requestBody", "responses", "callbacks"],
+      "properties": {
+        "x-docuccino": { "$ref": "#/$defs/docuccinoNode" },
+        "operationId": { "type": "string" },
+        "summary": { "type": "string" },
+        "description": { "type": "string" },
+        "externalDocs": { "type": "object" },
+        "deprecated": { "type": "boolean" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "security": { "type": "array", "items": { "type": "object" } },
+        "servers": { "type": "array", "items": { "$ref": "#/$defs/server" } },
+        "parameters": { "type": "array", "items": { "$ref": "#/$defs/parameter" } },
+        "requestBody": { "type": "object" },
+        "responses": { "type": "object", "additionalProperties": { "$ref": "#/$defs/response" } },
+        "callbacks": { "type": "object" }
+      },
+      "patternProperties": { "^x-": true },
+      "additionalProperties": false
+    },
+    "parameter": {
+      "type": "object",
+      "x-canonicalOrder": ["x-docuccino", "name", "in", "description", "required", "deprecated", "allowEmptyValue", "style", "explode", "allowReserved", "schema", "example", "examples", "content"],
+      "properties": {
+        "x-docuccino": { "$ref": "#/$defs/docuccinoNode" },
+        "$ref": { "type": "string" },
+        "name": { "type": "string" },
+        "in": { "enum": ["path", "query", "header", "cookie"] },
+        "description": { "type": "string" },
+        "required": { "type": "boolean" },
+        "deprecated": { "type": "boolean" },
+        "allowEmptyValue": { "type": "boolean" },
+        "style": { "type": "string" },
+        "explode": { "type": "boolean" },
+        "allowReserved": { "type": "boolean" },
+        "schema": { "$ref": "#/$defs/schema" },
+        "example": true,
+        "examples": { "type": "object" },
+        "content": { "type": "object" }
+      },
+      "patternProperties": { "^x-": true },
+      "additionalProperties": false
+    },
+    "response": {
+      "type": "object",
+      "x-canonicalOrder": ["x-docuccino", "$ref", "summary", "description", "headers", "content", "links"],
+      "properties": {
+        "x-docuccino": { "$ref": "#/$defs/docuccinoNode" },
+        "$ref": { "type": "string" },
+        "summary": { "type": "string" },
+        "description": { "type": "string" },
+        "headers": { "type": "object" },
+        "content": { "type": "object" },
+        "links": { "type": "object" }
+      },
+      "patternProperties": { "^x-": true },
+      "additionalProperties": false
+    },
+    "schema": {
+      "type": ["object", "boolean"],
+      "x-canonicalOrder": ["x-docuccino", "$ref", "type", "format", "enum", "const", "default", "items", "prefixItems", "properties", "required", "additionalProperties", "allOf", "anyOf", "oneOf", "not"],
+      "properties": {
+        "x-docuccino": { "$ref": "#/$defs/docuccinoNode" },
+        "properties": { "type": "object", "additionalProperties": { "$ref": "#/$defs/schema" } },
+        "patternProperties": { "type": "object", "additionalProperties": { "$ref": "#/$defs/schema" } },
+        "items": { "$ref": "#/$defs/schema" },
+        "prefixItems": { "type": "array", "items": { "$ref": "#/$defs/schema" } },
+        "allOf": { "type": "array", "items": { "$ref": "#/$defs/schema" } },
+        "anyOf": { "type": "array", "items": { "$ref": "#/$defs/schema" } },
+        "oneOf": { "type": "array", "items": { "$ref": "#/$defs/schema" } },
+        "not": { "$ref": "#/$defs/schema" }
+      },
+      "patternProperties": { "^x-": true },
+      "additionalProperties": true
+    },
+    "components": {
+      "type": "object",
+      "x-canonicalOrder": ["schemas", "responses", "parameters", "examples", "requestBodies", "headers", "securitySchemes", "links", "callbacks", "pathItems", "x-docuccino"],
+      "properties": {
+        "schemas": { "type": "object", "additionalProperties": { "$ref": "#/$defs/schema" } },
+        "responses": { "type": "object", "additionalProperties": { "$ref": "#/$defs/response" } },
+        "parameters": { "type": "object", "additionalProperties": { "$ref": "#/$defs/parameter" } },
+        "examples": { "type": "object" },
+        "requestBodies": { "type": "object" },
+        "headers": { "type": "object" },
+        "securitySchemes": { "type": "object" },
+        "links": { "type": "object" },
+        "callbacks": { "type": "object" },
+        "pathItems": { "type": "object", "additionalProperties": { "$ref": "#/$defs/pathItem" } },
+        "x-docuccino": { "$ref": "#/$defs/docuccinoNode" }
+      },
+      "patternProperties": { "^x-": true },
+      "additionalProperties": false
+    },
+    "docuccinoNode": {
+      "type": "object",
+      "description": "Node-level x-docuccino. Strictly closed (additionalProperties false) so no timestamp-like or non-deterministic members can be introduced, EXCEPT the `facts` container: integration-recorded semantic facts (representation-independent, e.g. a withTrashed route binding), whose contents are integration-defined and which consumers ignore when unknown. Facts carry no timestamps, preserving determinism.",
+      "x-canonicalOrder": ["id", "provenance", "mock", "facts"],
+      "properties": {
+        "id": { "$ref": "#/$defs/nodeId" },
+        "provenance": { "type": "array", "items": { "$ref": "#/$defs/provenanceRecord" } },
+        "mock": { "$ref": "#/$defs/mockHint" },
+        "facts": { "type": "object", "additionalProperties": true }
+      },
+      "additionalProperties": false
+    },
+    "docuccinoDocument": {
+      "type": "object",
+      "description": "Document-level x-docuccino. Strictly closed; carries no timestamps by design.",
+      "x-canonicalOrder": ["document", "generator", "content", "diagnostics"],
+      "properties": {
+        "document": { "$ref": "#/$defs/documentMeta" },
+        "generator": { "$ref": "#/$defs/generator" },
+        "content": { "$ref": "#/$defs/content" },
+        "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/diagnostic" } }
+      },
+      "additionalProperties": false
+    },
+    "documentMeta": {
+      "type": "object",
+      "x-canonicalOrder": ["id", "configHash", "contentHash"],
+      "required": ["id"],
+      "properties": {
+        "id": { "$ref": "#/$defs/docId" },
+        "configHash": { "type": "string" },
+        "contentHash": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "generator": {
+      "type": "object",
+      "x-canonicalOrder": ["name", "version", "specVersion"],
+      "required": ["name", "version", "specVersion"],
+      "properties": {
+        "name": { "type": "string" },
+        "version": { "type": "string" },
+        "specVersion": { "$ref": "#/$defs/semver" }
+      },
+      "additionalProperties": false
+    },
+    "content": {
+      "type": "object",
+      "description": "The narrative content layer: the compiled `pages` registry and the `nav` tree consumers render the sidebar from. Participates in contentHash, so a prose edit or a nav move is a visible (non-breaking) changelog entry.",
+      "x-canonicalOrder": ["pages", "nav"],
+      "properties": {
+        "pages": { "type": "array", "items": { "$ref": "#/$defs/page" } },
+        "nav": { "type": "array", "items": { "$ref": "#/$defs/navNode" } }
+      },
+      "additionalProperties": false
+    },
+    "page": {
+      "type": "object",
+      "x-canonicalOrder": ["id", "slug", "title", "summary", "order", "tags", "content", "provenance"],
+      "required": ["id", "slug"],
+      "properties": {
+        "id": { "$ref": "#/$defs/pageId" },
+        "slug": { "type": "string" },
+        "title": { "type": "string" },
+        "summary": { "type": "string" },
+        "order": { "type": "integer" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "content": { "type": "string" },
+        "provenance": { "type": "array", "items": { "$ref": "#/$defs/provenanceRecord" } }
+      },
+      "additionalProperties": false
+    },
+    "navNode": {
+      "type": "object",
+      "description": "One node of the compiled navigation tree. `group` nodes carry `children`; `page`/`operation` nodes reference a stable id via `ref` (a `page:`/`op:` id); `tag` nodes reference an OAS tag name. Broken operation/tag refs are diagnostics at assembly, never emitted silently.",
+      "x-canonicalOrder": ["type", "ref", "title", "children"],
+      "required": ["type"],
+      "properties": {
+        "type": { "enum": ["group", "page", "operation", "tag"] },
+        "ref": { "type": "string" },
+        "title": { "type": "string" },
+        "children": { "type": "array", "items": { "$ref": "#/$defs/navNode" } }
+      },
+      "additionalProperties": false
+    },
+    "provenanceRecord": {
+      "type": "object",
+      "x-canonicalOrder": ["producer", "layer", "fields", "source", "confidence", "overrode"],
+      "required": ["producer", "layer"],
+      "properties": {
+        "producer": { "$ref": "#/$defs/producer" },
+        "layer": { "$ref": "#/$defs/layer" },
+        "fields": { "type": "array", "items": { "type": "string" } },
+        "source": { "$ref": "#/$defs/sourceRecord" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "overrode": { "type": "array", "items": { "$ref": "#/$defs/overrodeEntry" } }
+      },
+      "additionalProperties": false
+    },
+    "overrodeEntry": {
+      "type": "object",
+      "x-canonicalOrder": ["field", "value", "producer"],
+      "required": ["field"],
+      "properties": {
+        "field": { "type": "string" },
+        "value": true,
+        "producer": { "$ref": "#/$defs/producer" }
+      },
+      "additionalProperties": false
+    },
+    "sourceRecord": {
+      "type": "object",
+      "x-canonicalOrder": ["file", "line", "symbol"],
+      "required": ["file"],
+      "properties": {
+        "file": { "type": "string" },
+        "line": { "type": "integer", "minimum": 0 },
+        "symbol": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "mockHint": {
+      "type": "object",
+      "x-canonicalOrder": ["faker", "seedGroup"],
+      "properties": {
+        "faker": { "type": "string" },
+        "seedGroup": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "diagnostic": {
+      "type": "object",
+      "x-canonicalOrder": ["severity", "code", "message", "source", "routeSignature", "help"],
+      "required": ["severity", "code", "message"],
+      "properties": {
+        "severity": { "enum": ["error", "warning", "info", "hint"] },
+        "code": { "type": "string" },
+        "message": { "type": "string" },
+        "source": { "$ref": "#/$defs/sourceRecord" },
+        "routeSignature": { "type": "string" },
+        "help": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

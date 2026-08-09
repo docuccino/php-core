@@ -1,0 +1,333 @@
+{
+  "$schema": "https://spec.docuccino.app/uir/1.0/schema.json",
+  "uir": "1.0.0",
+  "openapi": "3.2.0",
+  "jsonSchemaDialect": "https://spec.openapis.org/oas/3.2/dialect/base",
+  "info": {
+    "title": "Kitchen Sink API",
+    "summary": "Every UIR surface in one document.",
+    "description": "Exercises the full UIR shape for the emitter/validator/diff battery.",
+    "version": "2.1.0"
+  },
+  "servers": [
+    {
+      "url": "https://{tenant}.example.com/{basePath}",
+      "description": "Tenant server",
+      "variables": {
+        "basePath": {
+          "enum": [
+            "v1",
+            "v2"
+          ],
+          "default": "v2"
+        },
+        "tenant": {
+          "default": "acme",
+          "description": "Tenant slug"
+        }
+      }
+    }
+  ],
+  "security": [
+    {
+      "apiKey": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Widgets",
+      "description": "Widget management",
+      "externalDocs": {
+        "description": "Widget guide",
+        "url": "https://docs.example.com/widgets"
+      }
+    }
+  ],
+  "paths": {
+    "/widgets/{id}": {
+      "parameters": [
+        {
+          "x-docuccino": {
+            "id": "par:v1:aaaaaaaaaaaaaaaa"
+          },
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "x-docuccino": {
+          "id": "op:v1:bbbbbbbbbbbbbbbb",
+          "provenance": [
+            {
+              "producer": "fallback",
+              "layer": "fallback",
+              "fields": [
+                "summary"
+              ],
+              "source": {
+                "file": "app/Http/WidgetController.php",
+                "line": 12
+              }
+            }
+          ]
+        },
+        "operationId": "widgets.show",
+        "summary": "Show a widget",
+        "externalDocs": {
+          "description": "Show endpoint",
+          "url": "https://docs.example.com/widgets/show"
+        },
+        "deprecated": true,
+        "tags": [
+          "Widgets"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "oauth2": [
+              "widgets:read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "precision",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "default": 0.25,
+              "multipleOf": 0.1,
+              "maximum": 1.5,
+              "minimum": 0.5
+            },
+            "example": 0.1
+          },
+          {
+            "x-docuccino": {
+              "id": "par:v1:cccccccccccccccc"
+            },
+            "name": "X-Trace-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "examples": {
+              "sample": {
+                "summary": "A trace id",
+                "value": "abc-123"
+              }
+            }
+          },
+          {
+            "name": "session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "x-docuccino": {
+              "id": "res:v1:dddddddddddddddd"
+            },
+            "description": "The widget",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Widget"
+                },
+                "examples": {
+                  "one": {
+                    "value": {
+                      "café": "oui",
+                      "id": "w1",
+                      "weight": 3.14,
+                      "日本語": "はい"
+                    }
+                  }
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Widget"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      },
+      "put": {
+        "x-docuccino": {
+          "id": "op:v1:eeeeeeeeeeeeeeee"
+        },
+        "operationId": "widgets.update",
+        "summary": "Replace a widget",
+        "tags": [
+          "Widgets"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Widget"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated"
+          }
+        }
+      },
+      "query": {
+        "x-docuccino": {
+          "id": "op:v1:ffffffffffffffff"
+        },
+        "operationId": "widgets.query",
+        "summary": "Query widgets via the 3.2 query method",
+        "tags": [
+          "Widgets"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "filter": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Query results"
+          }
+        }
+      }
+    }
+  },
+  "webhooks": {
+    "widgetCreated": {
+      "post": {
+        "x-docuccino": {
+          "id": "op:v1:1111111111111111"
+        },
+        "operationId": "widgets.webhook.created",
+        "summary": "Widget created event",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Widget"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Acknowledged"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Widget": {
+        "x-docuccino": {
+          "id": "sch:v1:2222222222222222"
+        },
+        "type": "object",
+        "properties": {
+          "café": {
+            "description": "A property whose name is a unicode grapheme",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "weight": {
+            "type": "number",
+            "format": "float",
+            "multipleOf": 0.01
+          },
+          "日本語": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    "securitySchemes": {
+      "apiKey": {
+        "in": "header",
+        "name": "X-Api-Key",
+        "type": "apiKey"
+      },
+      "oauth2": {
+        "flows": {
+          "authorizationCode": {
+            "authorizationUrl": "https://auth.example.com/authorize",
+            "scopes": {
+              "widgets:read": "Read widgets"
+            },
+            "tokenUrl": "https://auth.example.com/token"
+          }
+        },
+        "type": "oauth2"
+      }
+    }
+  },
+  "x-docuccino": {
+    "document": {
+      "id": "doc:kitchen-sink",
+      "configHash": "cfg-ks",
+      "contentHash": "606b62fbbc0845d2dea5cdd69160dc1cf5f4620fbe1189e49ba26850f94ac0be"
+    },
+    "generator": {
+      "name": "docuccino/laravel",
+      "version": "0.1.0",
+      "specVersion": "1.0.0"
+    },
+    "content": {
+      "pages": [
+        {
+          "id": "page:v1:3333333333333333",
+          "slug": "overview",
+          "title": "Overview",
+          "order": 1,
+          "content": "Welcome to the kitchen sink."
+        }
+      ]
+    },
+    "diagnostics": [
+      {
+        "severity": "info",
+        "code": "demo.info",
+        "message": "A sample diagnostic."
+      }
+    ]
+  }
+}

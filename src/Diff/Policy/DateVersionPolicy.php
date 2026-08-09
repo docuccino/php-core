@@ -1,0 +1,59 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Docuccino\Core\Diff\Policy;
+
+use Docuccino\Core\Diff\Changeset;
+
+/**
+ * Date-based versioning policy (the Stripe-style scheme): versions are `YYYY-MM-DD` dates, and a breaking
+ * changeset requires a new, strictly-later date version. A non-breaking changeset is satisfied by
+ * any date (including an unchanged one — additive changes ship without a version cut). An
+ * unparseable date on either side is a violation. A leading `YYYY-MM-DD` is required; any trailing
+ * suffix (e.g. `-preview`) is ignored for comparison, so `2026-08-01` and `2026-08-01-rc1`
+ * compare equal on the date.
+ */
+final class DateVersionPolicy implements VersioningPolicy
+{
+    public function name(): string
+    {
+        return 'date';
+    }
+
+    public function evaluate(Changeset $changes, string $oldVersion, string $newVersion): PolicyVerdict
+    {
+        $old = self::parse($oldVersion);
+        $new = self::parse($newVersion);
+
+        if ($old === null || $new === null) {
+            return PolicyVerdict::violation(
+                $this->name(),
+                'invalid-date-version',
+                sprintf('Both versions must begin with a YYYY-MM-DD date (got "%s" → "%s").', $oldVersion, $newVersion),
+            );
+        }
+
+        if (! $changes->isBreaking()) {
+            return PolicyVerdict::ok($this->name());
+        }
+
+        if ($new > $old) {
+            return PolicyVerdict::ok($this->name());
+        }
+
+        return PolicyVerdict::violation(
+            $this->name(),
+            'new-date-required',
+            sprintf('Breaking changes require a newer date version than %s (got %s).', $oldVersion, $newVersion),
+        );
+    }
+
+    /** The comparable `YYYY-MM-DD` prefix, or null when the string does not start with one. */
+    private static function parse(string $version): ?string
+    {
+        return preg_match('/^(\d{4})-(\d{2})-(\d{2})/', trim($version), $m) === 1
+            ? $m[1].'-'.$m[2].'-'.$m[3]
+            : null;
+    }
+}

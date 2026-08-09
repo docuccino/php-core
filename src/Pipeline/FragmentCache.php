@@ -1,0 +1,177 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Docuccino\Core\Pipeline;
+
+use Docuccino\Core\Extensions\Context\RouteDependencies;
+use Docuccino\Core\Extensions\Context\RouteDescriptor;
+use JsonException;
+
+/**
+ * The OperationFragment cache (design §10): keys a route's built fragment on everything that could
+ * change its output *except* the dependency files, then validates freshness by re-hashing the
+ * stored dependency list. A hit therefore reconstructs the fragment without invoking the type
+ * engine.
+ *
+ * key = sha256(tool ver ‖ spec ver ‖ identity-algo ver ‖ doc configHash ‖ resolved extension
+ * signature (FQCNs + owning package versions) ‖ route cache-signature (method+URI+resolved
+ * action+normalised middleware)). The stored entry additionally records `sha256(each ActionAnalysis
+ * + out-of-band dependency file)`; on lookup any changed/removed dependency invalidates the entry.
+ * (TraceReport + {@see RouteDependencies} files merge into the
+ * same list — the {@see put()} signature is the seam.)
+ *
+ * Storage is a flat directory of `{key}.json` files written atomically (temp file + rename), with a
+ * simple `enabled` off-switch.
+ *
+ * @internal
+ */
+final readonly class FragmentCache
+{
+    public function __construct(
+        private bool $enabled,
+        private string $path,
+        private string $toolVersion,
+        private string $specVersion,
+        private string $identityVersion,
+    ) {}
+
+    /** A no-op cache: every lookup misses and nothing is stored (design §10, the off-by-default state). */
+    public static function disabled(): self
+    {
+        return new self(false, '', '', '', '');
+    }
+
+    public function enabled(): bool
+    {
+        return $this->enabled;
+    }
+
+    /**
+     * @param  string  $routeSignature  the route cache-signature ({@see RouteDescriptor::cacheSignature()})
+     * @param  list<string>  $extensionSignature  resolved extension class-strings paired with owning package versions
+     */
+    public function key(string $routeSignature, string $configHash, array $extensionSignature): string
+    {
+        return hash('sha256', implode("\0", [
+            $this->toolVersion,
+            $this->specVersion,
+            $this->identityVersion,
+            $configHash,
+            implode(',', $extensionSignature),
+            $routeSignature,
+        ]));
+    }
+
+    /**
+     * Return the cached fragment when the entry exists and every recorded dependency file still
+     * hashes to its stored value; otherwise null (a miss, or an invalidated stale entry).
+     */
+    public function get(string $key): ?OperationFragment
+    {
+        if (! $this->enabled) {
+            return null;
+        }
+
+        $raw = @file_get_contents($this->file($key));
+        if ($raw === false) {
+            return null;
+        }
+
+        try {
+            /** @var array<string, mixed> $decoded */
+            $decoded = json_decode($raw, true, flags: JSON_THROW_ON_ERROR);
+        } catch (JsonException) {
+            return null;
+        }
+
+        $dependencies = is_array($decoded['dependencies'] ?? null) ? $decoded['dependencies'] : [];
+        if (! $this->dependenciesFresh($dependencies)) {
+            return null;
+        }
+
+        $fragment = $decoded['fragment'] ?? null;
+        if (! is_array($fragment)) {
+            return null;
+        }
+
+        /** @var array<string, mixed> $fragment */
+        return OperationFragment::fromArray($fragment);
+    }
+
+    /**
+     * @param  list<string>  $dependencyFiles  the ActionAnalysis dependency files for this route
+     */
+    public function put(string $key, OperationFragment $fragment, array $dependencyFiles): void
+    {
+        if (! $this->enabled) {
+            return;
+        }
+
+        $dependencies = [];
+        foreach (array_values(array_unique($dependencyFiles)) as $file) {
+            $hash = @hash_file('sha256', $file);
+            $dependencies[] = ['file' => $file, 'hash' => $hash === false ? '' : $hash];
+        }
+
+        try {
+            $payload = json_encode(
+                ['fragment' => $fragment->toArray(), 'dependencies' => $dependencies],
+                JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
+            );
+        } catch (JsonException) {
+            return;
+        }
+
+        $this->writeAtomically($this->file($key), $payload);
+    }
+
+    /**
+     * @param  array<array-key, mixed>  $dependencies
+     */
+    private function dependenciesFresh(array $dependencies): bool
+    {
+        foreach ($dependencies as $dependency) {
+            if (! is_array($dependency)) {
+                return false;
+            }
+
+            $file = $dependency['file'] ?? null;
+            $expected = $dependency['hash'] ?? null;
+            if (! is_string($file) || ! is_string($expected)) {
+                return false;
+            }
+
+            $current = @hash_file('sha256', $file);
+            if ($current === false || $current !== $expected) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private function file(string $key): string
+    {
+        return rtrim($this->path, '/').'/'.$key.'.json';
+    }
+
+    private function writeAtomically(string $file, string $contents): void
+    {
+        $directory = dirname($file);
+        if (! is_dir($directory)) {
+            @mkdir($directory, 0755, true);
+        }
+
+        // random_int (not bin2hex(random_bytes(…))): its int return type is unambiguous in every
+        // supported analyser version, and 63 bits of entropy beats the 32 it replaces.
+        $temp = $file.'.'.getmypid().'.'.dechex(random_int(0, PHP_INT_MAX)).'.tmp';
+        if (@file_put_contents($temp, $contents) === false) {
+            return;
+        }
+
+        if (! @rename($temp, $file)) {
+            @unlink($temp);
+        }
+    }
+}
