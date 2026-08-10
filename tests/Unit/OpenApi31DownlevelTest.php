@@ -7,7 +7,8 @@ use Docuccino\Core\Emit\EmitOptions;
 use Docuccino\Core\Emit\OpenApi31DownlevelEmitter;
 
 /**
- * A 3.2 document exercising both 3.2-only path-item constructs the downlevel emitter must drop.
+ * A 3.2 document exercising every 3.2-only construct the downlevel emitter must drop: both path-item
+ * ones, and the three Tag Object members.
  *
  * @return array<string, mixed>
  */
@@ -18,6 +19,10 @@ function documentWith32OnlyConstructs(): array
         'openapi' => '3.2.0',
         'jsonSchemaDialect' => 'https://spec.openapis.org/oas/3.2/dialect/base',
         'info' => ['title' => 'API', 'version' => '1.0.0'],
+        'tags' => [
+            ['name' => 'Billing', 'kind' => 'nav', 'summary' => 'Billing'],
+            ['name' => 'Invoices', 'description' => 'Bills.', 'parent' => 'Billing', 'kind' => 'nav'],
+        ],
         'paths' => [
             '/search' => [
                 'get' => ['operationId' => 'search.get', 'responses' => ['200' => ['description' => 'ok']]],
@@ -59,6 +64,40 @@ it('drops the 3.2-only additionalOperations member with a warning', function ():
 
     $codes = array_map(static fn ($d) => $d->code, $result->report->warnings());
     expect($codes)->toContain('downlevel.additional-operations');
+});
+
+it('drops each 3.2-only tag member with its own warning', function (string $member, string $code): void {
+    $result = $this->emitter->emitWithReport(UirDocument::fromArray(documentWith32OnlyConstructs()));
+
+    expect($result->output)->not->toContain('"'.$member.'"');
+
+    $codes = array_map(static fn ($d) => $d->code, $result->report->warnings());
+    expect($codes)->toContain($code);
+})->with([
+    'summary' => ['summary', 'downlevel.tag-summary'],
+    'parent' => ['parent', 'downlevel.tag-parent'],
+    'kind' => ['kind', 'downlevel.tag-kind'],
+]);
+
+it('warns once per tag per dropped member and names the tag', function (): void {
+    $result = $this->emitter->emitWithReport(UirDocument::fromArray(documentWith32OnlyConstructs()));
+
+    $tagWarnings = array_values(array_filter(
+        $result->report->warnings(),
+        static fn ($d) => str_starts_with($d->code, 'downlevel.tag-'),
+    ));
+
+    // Billing carries summary+kind, Invoices parent+kind.
+    expect(array_map(static fn ($d) => $d->code, $tagWarnings))
+        ->toBe(['downlevel.tag-summary', 'downlevel.tag-kind', 'downlevel.tag-parent', 'downlevel.tag-kind'])
+        ->and($tagWarnings[0]->message)->toContain('`Billing`')
+        ->and($tagWarnings[2]->message)->toContain('`Invoices`');
+});
+
+it('keeps the 3.1-valid tag members through the downlevel', function (): void {
+    $json = $this->emitter->emit(UirDocument::fromArray(documentWith32OnlyConstructs()));
+
+    expect($json)->toContain('"Invoices"')->toContain('Bills.');
 });
 
 it('keeps standard operations untouched through the downlevel', function (): void {

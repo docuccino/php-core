@@ -142,6 +142,24 @@ it('orders map keys by unicode code point, including multibyte keys', function (
     expect($order)->toBe(['A', 'Z', 'a', 'z', 'é', '日本語', '💡']);
 });
 
+it('orders tag members in OAS 3.2 Tag Object order and keeps declaration order of the list', function (): void {
+    $doc = [
+        'uir' => '1.0.0',
+        'openapi' => '3.2.0',
+        'info' => ['title' => 'T', 'version' => '1.0.0'],
+        'paths' => [],
+        'tags' => [
+            ['kind' => 'nav', 'parent' => 'Billing', 'description' => 'd', 'name' => 'Invoices', 'summary' => 's'],
+            ['name' => 'Billing'],
+        ],
+    ];
+
+    $canonical = $this->canonicalizer->canonicalize($doc);
+
+    expect(array_keys($canonical['tags'][0]))->toBe(['name', 'summary', 'description', 'parent', 'kind'])
+        ->and(array_column($canonical['tags'], 'name'))->toBe(['Invoices', 'Billing']);
+});
+
 it('passes unknown x-* members through verbatim but canonicalises known members', function (): void {
     $doc = [
         'openapi' => '3.2.0',

@@ -1,0 +1,121 @@
+{
+  "openapi": "3.0.4",
+  "info": {
+    "title": "Forms API",
+    "version": "1.0.0"
+  },
+  "tags": [
+    {
+      "name": "Forms",
+      "description": "Form management"
+    }
+  ],
+  "paths": {
+    "/api/v1/forms": {
+      "get": {
+        "operationId": "forms.index",
+        "summary": "List forms",
+        "tags": [
+          "Forms"
+        ],
+        "parameters": [
+          {
+            "name": "filter[status]",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "draft",
+                "published",
+                "archived"
+              ],
+              "x-enumDescriptions": {
+                "draft": "Not yet visible",
+                "published": "Live",
+                "archived": "Read-only"
+              }
+            }
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 15,
+              "maximum": 100,
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list of forms",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedFormData"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/ProblemUnauthenticated"
+          },
+          "422": {
+            "$ref": "#/components/responses/ProblemValidation"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "FormData": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
+      "PaginatedFormData": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FormData"
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "ProblemUnauthenticated": {
+        "description": "Unauthenticated",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      "ProblemValidation": {
+        "description": "Validation failed",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    }
+  }
+}

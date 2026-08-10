@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Docuccino\Core\Document\UirDocument;
 use Docuccino\Core\Emit\EmitOptions;
+use Docuccino\Core\Emit\OpenApi30DownlevelEmitter;
 use Docuccino\Core\Emit\OpenApi31DownlevelEmitter;
 use Docuccino\Core\Emit\OpenApi32Emitter;
 use Docuccino\Core\Emit\UirEmitter;
@@ -22,6 +23,7 @@ function goldenFixtures(): array
     return [
         'worked-example' => ['worked-example.json', 'worked-example'],
         'kitchen-sink' => ['kitchen-sink.uir.json', 'kitchen-sink'],
+        'tag-hierarchy' => ['tag-hierarchy.uir.json', 'tag-hierarchy'],
     ];
 }
 
@@ -41,6 +43,12 @@ it('emits OpenAPI 3.1 JSON byte-identical to the committed golden', function (st
     $document = UirDocument::fromArray(loadFixture($fixture));
 
     expect((new OpenApi31DownlevelEmitter)->emit($document))->toBe(loadGolden($base.'.openapi31.json'));
+})->with(goldenFixtures());
+
+it('emits OpenAPI 3.0 JSON byte-identical to the committed golden', function (string $fixture, string $base): void {
+    $document = UirDocument::fromArray(loadFixture($fixture));
+
+    expect((new OpenApi30DownlevelEmitter)->emit($document))->toBe(loadGolden($base.'.openapi30.json'));
 })->with(goldenFixtures());
 
 it('emits OpenAPI 3.2 YAML byte-identical to the committed golden', function (string $fixture, string $base): void {
@@ -63,4 +71,5 @@ it('is stable through a decode/re-encode round trip', function (string $fixture)
 })->with([
     'worked-example' => ['worked-example.json'],
     'kitchen-sink' => ['kitchen-sink.uir.json'],
+    'tag-hierarchy' => ['tag-hierarchy.uir.json'],
 ]);

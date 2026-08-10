@@ -1,0 +1,207 @@
+{
+  "openapi": "3.0.4",
+  "info": {
+    "title": "Downlevel API",
+    "description": "Every construct the 3.0 downlevel has to convert or degrade.",
+    "license": {
+      "name": "MIT",
+      "url": "https://spdx.org/licenses/MIT"
+    },
+    "version": "1.0.0"
+  },
+  "security": [
+    {
+      "apiKey": []
+    }
+  ],
+  "paths": {
+    "/things": {
+      "post": {
+        "operationId": "things.store",
+        "summary": "Create a thing",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 5
+            }
+          },
+          {
+            "name": "trace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "window",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "exclusiveMaximum": true,
+              "minimum": 0,
+              "exclusiveMinimum": true
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "A sibling beside a $ref",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Thing"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Thing"
+                },
+                "examples": {
+                  "one": {
+                    "value": {
+                      "kind": "widget",
+                      "schema": "a user value keyed like a schema position"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Status": {
+        "type": "string",
+        "enum": [
+          "draft",
+          "published"
+        ]
+      },
+      "Thing": {
+        "type": "object",
+        "properties": {
+          "avatar": {
+            "type": "string",
+            "format": "byte"
+          },
+          "branch": {},
+          "extras": {
+            "type": "object"
+          },
+          "flag": {
+            "type": "boolean",
+            "enum": [
+              true,
+              false
+            ]
+          },
+          "kind": {
+            "enum": [
+              "widget"
+            ]
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "nickname": {
+            "type": "string",
+            "maxLength": 20,
+            "nullable": true
+          },
+          "note": {
+            "type": "string",
+            "example": "already set"
+          },
+          "nothing": {
+            "nullable": true
+          },
+          "payload": {
+            "type": "string"
+          },
+          "score": {
+            "type": "integer",
+            "example": 1
+          },
+          "signature": {
+            "type": "string"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ],
+            "nullable": true
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Status"
+              }
+            ],
+            "nullable": true
+          },
+          "weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "apiKey": {
+        "in": "header",
+        "name": "X-Api-Key",
+        "type": "apiKey"
+      }
+    }
+  }
+}

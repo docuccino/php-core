@@ -1,0 +1,86 @@
+{
+  "$schema": "https://spec.docuccino.app/uir/1.0/schema.json",
+  "uir": "1.0.0",
+  "openapi": "3.2.0",
+  "jsonSchemaDialect": "https://spec.openapis.org/oas/3.2/dialect/base",
+  "info": {
+    "title": "Billing API",
+    "version": "2.0.0"
+  },
+  "tags": [
+    {
+      "kind": "nav",
+      "name": "Billing",
+      "summary": "Billing",
+      "description": "Everything money."
+    },
+    {
+      "parent": "Billing",
+      "name": "Invoices",
+      "kind": "nav",
+      "summary": "Invoices",
+      "externalDocs": {
+        "url": "https://docs.example.com/invoices",
+        "description": "Invoice guide"
+      }
+    },
+    {
+      "name": "Refunds",
+      "kind": "nav",
+      "parent": "Invoices",
+      "description": "Reversing a charge."
+    },
+    {
+      "name": "Partners",
+      "kind": "audience",
+      "summary": "Partner network"
+    },
+    {
+      "name": "Internal"
+    }
+  ],
+  "paths": {
+    "/api/v1/invoices": {
+      "get": {
+        "x-docuccino": {
+          "id": "op:v1:aaaaaaaaaaaaaaaa"
+        },
+        "operationId": "invoices.index",
+        "summary": "List invoices",
+        "tags": ["Invoices"],
+        "responses": {
+          "200": {
+            "x-docuccino": {
+              "id": "res:v1:bbbbbbbbbbbbbbbb"
+            },
+            "description": "A page of invoices",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": { "type": "integer" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "x-docuccino": {
+    "document": {
+      "id": "doc:default",
+      "configHash": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "generator": {
+      "name": "docuccino/core",
+      "version": "1.0.0",
+      "specVersion": "1.0.0"
+    }
+  }
+}

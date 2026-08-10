@@ -122,28 +122,55 @@ final readonly class DocumentConfig
         return hash('sha256', $stable === '' ? $this->key : $stable);
     }
 
+    /** Optional OAS 3.2 Tag Object members carried verbatim from a definition, in canonical order. */
+    private const array TAG_MEMBERS = ['summary', 'description', 'parent', 'kind'];
+
     /**
-     * Tag definitions from `tags.definitions` (`{name, description?, weight?}`), sorted by ascending
-     * weight then name for the OAS top-level `tags` array. Entries with no string `name` are skipped.
+     * Tag definitions from `tags.definitions` (`{name, summary?, description?, parent?, kind?,
+     * weight?}`), sorted by ascending weight then name for the OAS top-level `tags` array. Entries
+     * with no string `name` are skipped.
      *
-     * @return list<array{name: string, description?: string}>
+     * A `parent` naming no defined tag, or one that would close a cycle, is dropped so the emitted
+     * hierarchy is always a forest — {@see tagParentIssues()} reports each drop. Sorting happens
+     * before that pass, so neither the tags nor the drops depend on the order the definitions
+     * happen to be written in.
+     *
+     * @return list<array{name: string, summary?: string, description?: string, parent?: string, kind?: string}>
      */
     public function tagDefinitions(): array
     {
-        $definitions = $this->tags['definitions'] ?? null;
-        if (! is_array($definitions)) {
-            return [];
-        }
+        return $this->resolveTags()['tags'];
+    }
 
+    /**
+     * The parent links {@see tagDefinitions()} dropped — `cycle` separates a link that closed a loop
+     * from one naming a tag the document never defines. The adapter reports these as config
+     * diagnostics rather than failing the build.
+     *
+     * @return list<array{tag: string, parent: string, cycle: bool}>
+     */
+    public function tagParentIssues(): array
+    {
+        return $this->resolveTags()['issues'];
+    }
+
+    /**
+     * @return array{tags: list<array{name: string, summary?: string, description?: string, parent?: string, kind?: string}>, issues: list<array{tag: string, parent: string, cycle: bool}>}
+     */
+    private function resolveTags(): array
+    {
         $rows = [];
-        foreach ($definitions as $definition) {
-            if (! is_array($definition) || ! is_string($definition['name'] ?? null)) {
+        foreach (Hydrate::listOfMaps($this->tags['definitions'] ?? null) ?? [] as $definition) {
+            if (! is_string($definition['name'] ?? null)) {
                 continue;
             }
 
             $entry = ['name' => $definition['name']];
-            if (is_string($definition['description'] ?? null)) {
-                $entry['description'] = $definition['description'];
+            foreach (self::TAG_MEMBERS as $member) {
+                $value = $definition[$member] ?? null;
+                if (is_string($value)) {
+                    $entry[$member] = $value;
+                }
             }
 
             $weight = $definition['weight'] ?? 0;
@@ -152,7 +179,70 @@ final readonly class DocumentConfig
 
         usort($rows, static fn (array $a, array $b): int => [$a['weight'], $a['entry']['name']] <=> [$b['weight'], $b['entry']['name']]);
 
-        return array_map(static fn (array $row): array => $row['entry'], $rows);
+        /** @var list<array{name: string, summary?: string, description?: string, parent?: string, kind?: string}> $tags */
+        $tags = array_map(static fn (array $row): array => $row['entry'], $rows);
+
+        return $this->linkTagParents($tags);
+    }
+
+    /**
+     * Keeps a `parent` only when it names a defined tag and does not close a cycle against the links
+     * already kept — walking up the accepted chain, which is acyclic by construction, decides that.
+     *
+     * @param  list<array{name: string, summary?: string, description?: string, parent?: string, kind?: string}>  $tags
+     * @return array{tags: list<array{name: string, summary?: string, description?: string, parent?: string, kind?: string}>, issues: list<array{tag: string, parent: string, cycle: bool}>}
+     */
+    private function linkTagParents(array $tags): array
+    {
+        $defined = [];
+        foreach ($tags as $tag) {
+            $defined[$tag['name']] = true;
+        }
+
+        $issues = [];
+        /** @var array<string, string> $accepted child name → parent name */
+        $accepted = [];
+
+        foreach ($tags as $index => $tag) {
+            $parent = $tag['parent'] ?? null;
+            if ($parent === null) {
+                continue;
+            }
+
+            $cycle = $this->reachesTag($parent, $tag['name'], $accepted);
+
+            if (! $cycle && isset($defined[$parent])) {
+                $accepted[$tag['name']] = $parent;
+
+                continue;
+            }
+
+            unset($tags[$index]['parent']);
+            $issues[] = ['tag' => $tag['name'], 'parent' => $parent, 'cycle' => $cycle];
+        }
+
+        return ['tags' => $tags, 'issues' => $issues];
+    }
+
+    /**
+     * Whether walking up from `$from` through the accepted links reaches `$target` (`$from` itself
+     * counts — a tag parented to itself is the shortest cycle there is).
+     *
+     * @param  array<string, string>  $accepted
+     */
+    private function reachesTag(string $from, string $target, array $accepted): bool
+    {
+        while (true) {
+            if ($from === $target) {
+                return true;
+            }
+
+            if (! isset($accepted[$from])) {
+                return false;
+            }
+
+            $from = $accepted[$from];
+        }
     }
 
     /**

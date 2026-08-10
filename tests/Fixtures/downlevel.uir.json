@@ -1,0 +1,124 @@
+{
+  "$schema": "https://spec.docuccino.app/uir/1.0/schema.json",
+  "uir": "1.0.0",
+  "openapi": "3.2.0",
+  "jsonSchemaDialect": "https://spec.openapis.org/oas/3.2/dialect/base",
+  "info": {
+    "title": "Downlevel API",
+    "summary": "A summary OpenAPI 3.0 has nowhere to put.",
+    "description": "Every construct the 3.0 downlevel has to convert or degrade.",
+    "license": { "name": "MIT", "identifier": "MIT" },
+    "version": "1.0.0"
+  },
+  "security": [
+    { "clientCert": [] },
+    { "apiKey": [], "clientCert": [] }
+  ],
+  "paths": {
+    "/things": {
+      "post": {
+        "operationId": "things.store",
+        "summary": "Create a thing",
+        "security": [
+          { "clientCert": [] }
+        ],
+        "parameters": [
+          {
+            "name": "trace",
+            "in": "query",
+            "required": false,
+            "schema": { "type": ["string", "null"], "$comment": "an annotation with no 3.0 home" }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": { "type": ["string", "integer"] }
+          },
+          {
+            "name": "window",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "exclusiveMinimum": 0, "exclusiveMaximum": 100 }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "minimum": 5, "exclusiveMinimum": 0 }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/Thing", "description": "A sibling beside a $ref" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Thing" },
+                "examples": {
+                  "one": { "value": { "kind": "widget", "schema": "a user value keyed like a schema position" } }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "webhooks": {
+    "thingCreated": {
+      "post": {
+        "operationId": "things.webhook.created",
+        "responses": { "200": { "description": "Acknowledged" } }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Thing": {
+        "type": "object",
+        "properties": {
+          "kind": { "const": "widget" },
+          "flag": { "type": "boolean", "const": true, "enum": [true, false] },
+          "payload": { "type": "string", "contentMediaType": "application/json" },
+          "avatar": { "type": "string", "contentEncoding": "base64" },
+          "signature": { "type": "string", "contentEncoding": "quoted-printable" },
+          "nothing": { "type": "null" },
+          "labels": { "type": "array", "prefixItems": [{ "type": "string" }, { "type": "integer" }], "items": { "type": "string" } },
+          "extras": { "type": "object", "patternProperties": { "^x-": { "type": "string" } }, "unevaluatedProperties": false },
+          "branch": { "if": { "type": "string" }, "then": { "maxLength": 4 }, "else": { "type": "integer" } },
+          "status": { "anyOf": [{ "$ref": "#/components/schemas/Status" }, { "type": "null" }] },
+          "size": { "anyOf": [{ "type": "string" }, { "type": "integer" }, { "type": "null" }] },
+          "nickname": { "anyOf": [{ "type": "string", "maxLength": 20 }, { "type": "null" }] },
+          "weight": { "type": ["number", "string"], "anyOf": [{ "type": "number" }, { "type": "string" }] },
+          "score": { "type": "integer", "examples": [1, 2, 3] },
+          "note": { "type": "string", "examples": ["hello"], "example": "already set" }
+        }
+      },
+      "Status": {
+        "type": "string",
+        "enum": ["draft", "published"]
+      }
+    },
+    "securitySchemes": {
+      "apiKey": { "type": "apiKey", "name": "X-Api-Key", "in": "header" },
+      "clientCert": { "type": "mutualTLS", "description": "Client certificate authentication" }
+    },
+    "pathItems": {
+      "Shared": {
+        "get": { "operationId": "shared.get", "responses": { "200": { "description": "ok" } } }
+      }
+    }
+  },
+  "x-docuccino": {
+    "document": { "id": "doc:downlevel", "configHash": "cfg-downlevel", "contentHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" },
+    "generator": { "name": "docuccino/laravel", "version": "0.1.0", "specVersion": "1.0.0" }
+  }
+}

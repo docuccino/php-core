@@ -163,8 +163,11 @@ final class Canonicalizer
     {
         return $this->object($node, fn (array $tag) => $this->build($tag, [
             'name' => $this->keep(...),
+            'summary' => $this->keep(...),
             'description' => $this->keep(...),
             'externalDocs' => $this->canonicalizeExternalDocs(...),
+            'parent' => $this->keep(...),
+            'kind' => $this->keep(...),
             'x-docuccino' => $this->canonicalizeDocuccino(...),
         ]));
     }

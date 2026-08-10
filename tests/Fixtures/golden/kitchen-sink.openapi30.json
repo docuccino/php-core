@@ -1,0 +1,214 @@
+{
+  "openapi": "3.0.4",
+  "info": {
+    "title": "Kitchen Sink API",
+    "description": "Exercises the full UIR shape for the emitter/validator/diff battery.",
+    "version": "2.1.0"
+  },
+  "servers": [
+    {
+      "url": "https://{tenant}.example.com/{basePath}",
+      "description": "Tenant server",
+      "variables": {
+        "basePath": {
+          "enum": [
+            "v1",
+            "v2"
+          ],
+          "default": "v2"
+        },
+        "tenant": {
+          "default": "acme",
+          "description": "Tenant slug"
+        }
+      }
+    }
+  ],
+  "security": [
+    {
+      "apiKey": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Widgets",
+      "description": "Widget management",
+      "externalDocs": {
+        "description": "Widget guide",
+        "url": "https://docs.example.com/widgets"
+      }
+    }
+  ],
+  "paths": {
+    "/widgets/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "widgets.show",
+        "summary": "Show a widget",
+        "externalDocs": {
+          "description": "Show endpoint",
+          "url": "https://docs.example.com/widgets/show"
+        },
+        "deprecated": true,
+        "tags": [
+          "Widgets"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "oauth2": [
+              "widgets:read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "precision",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "default": 0.25,
+              "multipleOf": 0.1,
+              "maximum": 1.5,
+              "minimum": 0.5
+            },
+            "example": 0.1
+          },
+          {
+            "name": "X-Trace-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "examples": {
+              "sample": {
+                "summary": "A trace id",
+                "value": "abc-123"
+              }
+            }
+          },
+          {
+            "name": "session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The widget",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Widget"
+                },
+                "examples": {
+                  "one": {
+                    "value": {
+                      "café": "oui",
+                      "id": "w1",
+                      "weight": 3.14,
+                      "日本語": "はい"
+                    }
+                  }
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Widget"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      },
+      "put": {
+        "operationId": "widgets.update",
+        "summary": "Replace a widget",
+        "tags": [
+          "Widgets"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Widget"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Widget": {
+        "type": "object",
+        "properties": {
+          "café": {
+            "description": "A property whose name is a unicode grapheme",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "weight": {
+            "type": "number",
+            "format": "float",
+            "multipleOf": 0.01
+          },
+          "日本語": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    "securitySchemes": {
+      "apiKey": {
+        "in": "header",
+        "name": "X-Api-Key",
+        "type": "apiKey"
+      },
+      "oauth2": {
+        "flows": {
+          "authorizationCode": {
+            "authorizationUrl": "https://auth.example.com/authorize",
+            "scopes": {
+              "widgets:read": "Read widgets"
+            },
+            "tokenUrl": "https://auth.example.com/token"
+          }
+        },
+        "type": "oauth2"
+      }
+    }
+  }
+}

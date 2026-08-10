@@ -76,12 +76,16 @@
     },
     "tag": {
       "type": "object",
-      "x-canonicalOrder": ["name", "description", "externalDocs", "x-docuccino"],
+      "description": "An OAS 3.2 Tag Object. `parent` names another tag in this array (the emitter drops a parent that names no defined tag, and any link that would close a cycle); `kind` is a free-form machine-readable category (`nav`, `badge`, `audience` … ). Neither exists in OAS 3.1, so the 3.1 downlevel drops them with a warning.",
+      "x-canonicalOrder": ["name", "summary", "description", "externalDocs", "parent", "kind", "x-docuccino"],
       "required": ["name"],
       "properties": {
         "name": { "type": "string" },
+        "summary": { "type": "string" },
         "description": { "type": "string" },
         "externalDocs": { "type": "object" },
+        "parent": { "type": "string" },
+        "kind": { "type": "string" },
         "x-docuccino": { "$ref": "#/$defs/docuccinoNode" }
       },
       "patternProperties": { "^x-": true }

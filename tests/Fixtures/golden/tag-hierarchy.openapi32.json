@@ -1,0 +1,71 @@
+{
+  "openapi": "3.2.0",
+  "jsonSchemaDialect": "https://spec.openapis.org/oas/3.2/dialect/base",
+  "info": {
+    "title": "Billing API",
+    "version": "2.0.0"
+  },
+  "tags": [
+    {
+      "name": "Billing",
+      "summary": "Billing",
+      "description": "Everything money.",
+      "kind": "nav"
+    },
+    {
+      "name": "Invoices",
+      "summary": "Invoices",
+      "externalDocs": {
+        "description": "Invoice guide",
+        "url": "https://docs.example.com/invoices"
+      },
+      "parent": "Billing",
+      "kind": "nav"
+    },
+    {
+      "name": "Refunds",
+      "description": "Reversing a charge.",
+      "parent": "Invoices",
+      "kind": "nav"
+    },
+    {
+      "name": "Partners",
+      "summary": "Partner network",
+      "kind": "audience"
+    },
+    {
+      "name": "Internal"
+    }
+  ],
+  "paths": {
+    "/api/v1/invoices": {
+      "get": {
+        "operationId": "invoices.index",
+        "summary": "List invoices",
+        "tags": [
+          "Invoices"
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of invoices",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "integer"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
