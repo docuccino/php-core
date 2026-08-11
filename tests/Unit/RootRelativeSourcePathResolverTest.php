@@ -9,7 +9,7 @@ use Docuccino\Core\Provenance\RootRelativeSourcePathResolver;
  * app files, composer-root-relative for files outside the base path (the workbench, path packages).
  */
 it('relativises a file under the base path', function (): void {
-    $corePackage = dirname(__DIR__, 2); // packages/core
+    $corePackage = dirname(__DIR__, 2); // php/core
     $file = $corePackage.'/src/Provenance/RootRelativeSourcePathResolver.php';
 
     $resolver = new RootRelativeSourcePathResolver($corePackage);
@@ -21,7 +21,7 @@ it('falls back to the nearest composer.json root for files outside the base path
     $corePackage = dirname(__DIR__, 2);
     $file = $corePackage.'/src/Provenance/RootRelativeSourcePathResolver.php';
 
-    // A base path that does not contain the file forces the composer-root walk; packages/core
+    // A base path that does not contain the file forces the composer-root walk; php/core
     // carries its own composer.json, so the path stays portable rather than absolute.
     $resolver = new RootRelativeSourcePathResolver('/definitely/not/the/base/path');
 

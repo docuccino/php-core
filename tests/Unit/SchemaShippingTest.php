@@ -9,8 +9,8 @@ use Docuccino\Core\Validation\Validator;
  * (vendor/) install, not only from the monorepo checkout. Regression coverage so a
  * monorepo-relative `dirname(__DIR__, 4)` path can never ship again.
  */
-it('resolves the default schema path package-relative, inside packages/core/resources', function (): void {
-    $corePackage = dirname(__DIR__, 2); // packages/core
+it('resolves the default schema path package-relative, inside php/core/resources', function (): void {
+    $corePackage = dirname(__DIR__, 2); // php/core
 
     expect(Validator::defaultSchemaPath())
         ->toBe($corePackage.'/resources/spec/uir/1.0/schema.json')
@@ -25,7 +25,7 @@ it('ships a byte-identical copy of the canonical authoring schema (drift guard)'
     $shipped = dirname(__DIR__, 2).'/resources/spec/uir/1.0/schema.json';
 
     expect(is_file($canonical))->toBeTrue('canonical schema missing under spec/uir/1.0')
-        ->and(is_file($shipped))->toBeTrue('shipped schema missing under packages/core/resources — run composer sync-schema');
+        ->and(is_file($shipped))->toBeTrue('shipped schema missing under php/core/resources — run composer sync-schema');
 
     // Byte equality: `composer sync-schema` copies one to the other, this proves they never drifted.
     expect(hash_file('sha256', $shipped))->toBe(hash_file('sha256', $canonical));
