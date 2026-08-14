@@ -7,7 +7,7 @@ namespace Docuccino\Core\Inference;
 /**
  * The framework-agnostic inference boundary. Implementations embed a real type system (see
  * `docuccino/inference-phpstan`) but expose only serializable {@see DType\DType} results — never a
- * PHPStan `Type` — so results cross worker and cache boundaries unchanged. Design detail:
+ * PHPStan `Type` — so results serialize and cross process boundaries unchanged. Design detail:
  * docs/design/inference-embedding.md §4.
  *
  * Every method is total: never throw out of one. On internal failure, return a well-formed result

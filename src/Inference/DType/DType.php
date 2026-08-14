@@ -10,8 +10,8 @@ use InvalidArgumentException;
 
 /**
  * The closed set of framework-agnostic types the inference engine speaks. Every {@see TypeEngine}
- * result is expressed in these — never a PHPStan `Type` — so results survive worker and cache
- * boundaries. Design detail: docs/design/inference-embedding.md §5.
+ * result is expressed in these — never a PHPStan `Type` — so results survive serialization and a
+ * process boundary. Design detail: docs/design/inference-embedding.md §5.
  *
  * `toArray()`/`fromArray()` round-trip losslessly and are path-free (no absolute paths leak into
  * a DType), so identical code always serializes to identical bytes. Class *definition* provenance
