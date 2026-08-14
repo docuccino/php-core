@@ -205,11 +205,20 @@ final class RouteContext
     /**
      * Drive an interprocedural {@see TraceVisitor} walk from the action, recording the walk's transitive
      * dependency files. Trace through here rather than calling the engine directly, or those
-     * dependencies go unrecorded — see {@see dependencies()}.
+     * dependencies go unrecorded — see {@see dependencies()}. For any other root, {@see traceFrom()}.
      */
     public function trace(TraceVisitor $visitor): TraceReport
     {
-        $report = $this->engine->trace($this->actionRef, $visitor);
+        return $this->traceFrom($this->actionRef, $visitor);
+    }
+
+    /**
+     * The same walk from a root the action body doesn't reach — the constructor of an injected query
+     * object, a closure passed to a facade. Files are recorded as for {@see trace()}.
+     */
+    public function traceFrom(ActionRef $root, TraceVisitor $visitor): TraceReport
+    {
+        $report = $this->engine->trace($root, $visitor);
 
         $this->dependencies->addFiles($report->dependencyFiles);
 

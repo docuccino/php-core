@@ -6,10 +6,12 @@ use Docuccino\Attributes\BodyParameter;
 use Docuccino\Core\Draft\OperationDraft;
 use Docuccino\Core\Extensions\Context\AttributeSet;
 use Docuccino\Core\Extensions\Context\DocumentConfig;
+use Docuccino\Core\Extensions\Context\RepresentationPolicy;
 use Docuccino\Core\Extensions\Context\RouteContext;
 use Docuccino\Core\Extensions\Context\RouteDescriptor;
 use Docuccino\Core\Extensions\Schema\ComponentRegistry;
 use Docuccino\Core\Extensions\Validation\RecoveredRequest;
+use Docuccino\Core\Extensions\Validation\RequestSchemaBuilder;
 use Docuccino\Core\Extensions\Validation\ValidationSchema;
 use Docuccino\Core\Inference\ActionRef;
 use Docuccino\Core\Inference\NullTypeEngine;
@@ -168,3 +170,85 @@ it('does not hoist for read verbs (query parameters, never a body)', function ()
         ->and($components->schemas())->toBe([])
         ->and($op->hasParameter('query', 'q'))->toBeTrue();
 });
+
+/**
+ * Dataset over every shape the read-verb flattener has to handle. `filter.radius_lat` in validator
+ * syntax IS `filter[radius_lat]` on the wire, so a nested field is a bracketed leaf parameter — but a
+ * `*` segment has no bracketed name, so that subtree stays one container parameter and gets the
+ * `deepObject`/`explode` styling that documents bracketed nesting.
+ */
+it('expresses validated query fields as bracketed leaves, stopping at an array node', function (array $fields, array $expected): void {
+    $builder = new RequestSchemaBuilder;
+    foreach ($fields as $path => $spec) {
+        $field = $builder->field($path);
+        $field->setType($spec[0]);
+        if ($spec[1]) {
+            $field->markRequired();
+        }
+    }
+
+    $op = new OperationDraft;
+    (new RecoveredRequest)->apply(
+        $op,
+        requestContext(new ComponentRegistry, method: 'GET'),
+        new ValidationSchema($builder->build(new RepresentationPolicy)),
+        'inline-rules',
+    );
+
+    $actual = [];
+    foreach ($op->freeze()->parameters as $parameter) {
+        $frozen = $parameter->toArray();
+        unset($frozen['x-docuccino'], $frozen['in'], $frozen['name']);
+        if (is_array($frozen['schema'] ?? null)) {
+            unset($frozen['schema']['x-docuccino']);
+        }
+        $actual[(string) $parameter->name] = $frozen;
+    }
+
+    expect($actual)->toBe($expected);
+})->with([
+    'flat leaf' => [
+        ['q' => ['string', false]],
+        ['q' => ['required' => false, 'schema' => ['type' => 'string']]],
+    ],
+    'one-level nested' => [
+        ['filter.radius_lat' => ['number', false]],
+        ['filter[radius_lat]' => ['required' => false, 'schema' => ['type' => 'number']]],
+    ],
+    'two-level nested' => [
+        ['a.b.c' => ['string', false]],
+        ['a[b][c]' => ['required' => false, 'schema' => ['type' => 'string']]],
+    ],
+    'per-leaf required' => [
+        ['filter.a' => ['string', true], 'filter.b' => ['string', false]],
+        [
+            'filter[a]' => ['required' => true, 'schema' => ['type' => 'string']],
+            'filter[b]' => ['required' => false, 'schema' => ['type' => 'string']],
+        ],
+    ],
+    'array node stays one styled container' => [
+        ['items.*.id' => ['integer', true]],
+        ['items' => [
+            'required' => false,
+            'schema' => ['type' => 'array', 'items' => ['type' => 'object', 'properties' => ['id' => ['type' => 'integer']], 'required' => ['id']]],
+            'style' => 'deepObject',
+            'explode' => true,
+        ]],
+    ],
+    'shapeless object stays one styled container' => [
+        ['meta' => ['object', false]],
+        ['meta' => ['required' => false, 'schema' => ['type' => 'object'], 'style' => 'deepObject', 'explode' => true]],
+    ],
+    // A list of scalars is styled too, and has to be: `form`/`explode` would document `?tags=a&tags=b`,
+    // which PHP parses as the single value `b`. `deepObject` is `?tags[0]=a&tags[1]=b` — what the
+    // validator actually reads.
+    'scalar array stays one styled container' => [
+        ['tags' => ['array', false], 'tags.*' => ['string', false]],
+        ['tags' => [
+            'required' => false,
+            'schema' => ['type' => 'array', 'items' => ['type' => 'string']],
+            'style' => 'deepObject',
+            'explode' => true,
+        ]],
+    ],
+]);

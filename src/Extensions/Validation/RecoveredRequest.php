@@ -99,20 +99,9 @@ final class RecoveredRequest
 
     private function applyQueryParameters(OperationDraft $operation, ValidationSchema $result, Contribution $contribution): void
     {
-        $properties = $result->schema['properties'] ?? null;
-        if (! is_array($properties)) {
-            return;
-        }
-
-        $required = is_array($result->schema['required'] ?? null) ? $result->schema['required'] : [];
-
-        foreach ($properties as $name => $schema) {
-            if (! is_string($name) || ! is_array($schema)) {
-                continue;
-            }
-
+        foreach (self::queryLeaves($result->schema, '') as [$name, $schema, $required]) {
             $parameter = $operation->parameter('query', $name);
-            $parameter->setRequired(in_array($name, $required, true), $contribution);
+            $parameter->setRequired($required, $contribution);
 
             $description = $schema['description'] ?? null;
             if (is_string($description)) {
@@ -120,9 +109,75 @@ final class RecoveredRequest
                 unset($schema['description']);
             }
 
+            // A container can't be named as a bracketed leaf, so it has to say on the parameter itself
+            // that its members are bracketed — form (the query default) would document `?id=` for what is
+            // really `?items[0][id]=`.
+            if (self::isContainer($schema)) {
+                $parameter->set('style', 'deepObject', $contribution);
+                $parameter->set('explode', true, $contribution);
+            }
+
             foreach ($schema as $keyword => $value) {
                 $parameter->schema()->set((string) $keyword, $value, $contribution);
             }
         }
+    }
+
+    /**
+     * The query parameters an object schema flattens to, as `[name, schema, required]`. A nested field is
+     * a bracketed leaf, because `filter.radius_lat` in validator syntax IS `filter[radius_lat]` on the
+     * wire — which also puts it on the same parameter identity a bracketing integration writes, so the
+     * two merge instead of duplicating.
+     *
+     * @param  array<array-key, mixed>  $schema
+     * @return list<array{0: string, 1: array<array-key, mixed>, 2: bool}>
+     */
+    private static function queryLeaves(array $schema, string $prefix): array
+    {
+        $properties = $schema['properties'] ?? null;
+        if (! is_array($properties)) {
+            return [];
+        }
+
+        $required = is_array($schema['required'] ?? null) ? $schema['required'] : [];
+
+        $leaves = [];
+        foreach ($properties as $key => $child) {
+            if (! is_string($key) || ! is_array($child)) {
+                continue;
+            }
+
+            $name = $prefix === '' ? $key : $prefix.'['.$key.']';
+
+            $members = $child['properties'] ?? null;
+            if (is_array($members) && $members !== []) {
+                foreach (self::queryLeaves($child, $name) as $leaf) {
+                    $leaves[] = $leaf;
+                }
+
+                continue;
+            }
+
+            $leaves[] = [$name, $child, in_array($key, $required, true)];
+        }
+
+        return $leaves;
+    }
+
+    /**
+     * Whether a schema describes a structure whose members ride in the query string as brackets.
+     *
+     * @param  array<array-key, mixed>  $schema
+     */
+    private static function isContainer(array $schema): bool
+    {
+        if (isset($schema['properties']) || isset($schema['items'])) {
+            return true;
+        }
+
+        $type = $schema['type'] ?? null;
+        $types = is_array($type) ? $type : [$type];
+
+        return in_array('object', $types, true) || in_array('array', $types, true);
     }
 }

@@ -14,15 +14,33 @@ use Docuccino\Core\Support\Hydrate;
 /**
  * A mutable OAS response builder, keyed in its parent operation by status. Description and `$ref`
  * are guarded; content merges by media type, each media type owning one {@see SchemaDraft}.
+ * Content under a bodyless status is dropped ({@see BODYLESS_STATUS}).
  */
 final class ResponseDraft
 {
+    /**
+     * Statuses RFC 9110 forbids content on: 1xx, 204, 205 and 304, plus the OAS `1XX` range key. Every
+     * producer registers response content here, so enforcing it once at the write means none of them
+     * can document a body the wire cannot carry — inference folding `response()->json(null, 204)` to a
+     * `null` payload, an attribute or an integration naming a bodyless status directly. `$/D` so a
+     * trailing newline can't sneak past the anchor.
+     */
+    private const BODYLESS_STATUS = '/^(1\d\d|1XX|204|205|304)$/D';
+
     private readonly PatchGuard $guard;
 
     /**
      * @var array<string, SchemaDraft>
      */
     private array $content = [];
+
+    /**
+     * The detached drafts {@see content()} hands out under a bodyless status, kept only so a media type
+     * still maps to one draft per response rather than a fresh one per call.
+     *
+     * @var array<string, SchemaDraft>
+     */
+    private array $discarded = [];
 
     /**
      * Per-media-type example bodies (the OAS media-type `example`, sibling of `schema`). Producers
@@ -58,7 +76,23 @@ final class ResponseDraft
 
     public function content(string $mediaType): SchemaDraft
     {
+        // A bodyless status hands back a detached draft: callers write into it as usual, but nothing
+        // survives to the frozen response — including its media type, so the response stays id-less
+        // exactly as an always-empty `noContent()` 204 did.
+        if ($this->isBodyless()) {
+            return $this->discarded[$mediaType] ??= new SchemaDraft;
+        }
+
         return $this->content[$mediaType] ??= new SchemaDraft;
+    }
+
+    /**
+     * Whether HTTP forbids this response a body ({@see BODYLESS_STATUS}) — ask before converting a payload,
+     * since a component hoisted for content that then gets dropped is left orphaned.
+     */
+    public function isBodyless(): bool
+    {
+        return preg_match(self::BODYLESS_STATUS, $this->status) === 1;
     }
 
     /**
