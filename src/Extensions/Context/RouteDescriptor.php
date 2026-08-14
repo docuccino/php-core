@@ -16,6 +16,8 @@ final readonly class RouteDescriptor
     /**
      * @param  list<string>  $methods  upper-case HTTP methods (a route may answer several)
      * @param  string  $uri  the route template, always leading-slashed (`/api/forms/{form}`)
+     * @param  string|null  $name  the route's name — the default `operationId`, so it is folded into
+     *                             {@see cacheSignature()} too
      * @param  string|null  $action  the resolved action target (`Class@method`, an invokable class,
      *                               or the `Closure` sentinel) — folded into {@see cacheSignature()}
      * @param  list<string>  $middleware  the route's fully-gathered middleware, in effect order
@@ -76,9 +78,11 @@ final readonly class RouteDescriptor
 
     /**
      * The fragment-cache key input for this route — not for humans, that's {@see signature()}. Beyond
-     * method and URI it folds in the action target and normalised middleware, so re-pointing a route
-     * at another controller or changing middleware (an auth guard shifts the documented security)
-     * invalidates the fragment even though the human signature didn't move.
+     * method and URI it folds in the name, the action target and normalised middleware, so renaming a
+     * route (the name is the default `operationId`), re-pointing it at another controller or changing
+     * middleware (an auth guard shifts the documented security) invalidates the fragment even though
+     * the human signature didn't move. The name is folded unconditionally: no route file changes when
+     * `routes/api.php` renames one, and a rename only ever invalidates the route it renamed.
      */
     public function cacheSignature(): string
     {
@@ -90,6 +94,7 @@ final readonly class RouteDescriptor
         return implode("\0", [
             strtoupper($this->primaryMethod()),
             $this->uri,
+            $this->name ?? '',
             $this->action ?? '',
             implode(',', $middleware),
             implode(',', $this->cacheInputs),

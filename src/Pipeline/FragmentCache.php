@@ -6,6 +6,7 @@ namespace Docuccino\Core\Pipeline;
 
 use Docuccino\Core\Extensions\Context\RouteDependencies;
 use Docuccino\Core\Extensions\Context\RouteDescriptor;
+use Docuccino\Core\Support\GeneratedDirectory;
 use JsonException;
 
 /**
@@ -14,12 +15,15 @@ use JsonException;
  * list. A hit reconstructs the fragment without ever invoking the type engine.
  *
  * key = sha256(tool ver ‖ spec ver ‖ identity-algo ver ‖ doc configHash ‖ resolved extension
- * signature (FQCNs + owning package versions) ‖ route cache-signature (method + URI + resolved
- * action + normalised middleware)). The entry also stores `sha256(each ActionAnalysis +
+ * signature (FQCNs + owning package versions) ‖ route cache-signature (method + URI + name +
+ * resolved action + normalised middleware)). The entry also stores `sha256(each ActionAnalysis +
  * out-of-band dependency file)`, so any changed or removed dependency invalidates it. TraceReport
  * and {@see RouteDependencies} files merge into that one list — {@see put()} is the seam.
  *
  * Storage is a flat directory of `{key}.json` files written atomically (temp file + rename).
+ *
+ * Dependency hashing goes through {@see FileDigests}, so one build hashes each file once — one cache
+ * instance is one build's worth of memo, and callers get a fresh one per build.
  *
  * @internal
  */
@@ -31,6 +35,7 @@ final readonly class FragmentCache
         private string $toolVersion,
         private string $specVersion,
         private string $identityVersion,
+        private FileDigests $digests = new FileDigests,
     ) {}
 
     /** A no-op cache — every lookup misses, nothing is stored. This is the default. */
@@ -107,7 +112,7 @@ final readonly class FragmentCache
 
         $dependencies = [];
         foreach (array_values(array_unique($dependencyFiles)) as $file) {
-            $hash = @hash_file('sha256', $file);
+            $hash = $this->digests->of($file);
             $dependencies[] = ['file' => $file, 'hash' => $hash === false ? '' : $hash];
         }
 
@@ -139,7 +144,7 @@ final readonly class FragmentCache
                 return false;
             }
 
-            $current = @hash_file('sha256', $file);
+            $current = $this->digests->of($file);
             if ($current === false || $current !== $expected) {
                 return false;
             }
@@ -155,10 +160,7 @@ final readonly class FragmentCache
 
     private function writeAtomically(string $file, string $contents): void
     {
-        $directory = dirname($file);
-        if (! is_dir($directory)) {
-            @mkdir($directory, 0755, true);
-        }
+        GeneratedDirectory::ensure(dirname($file));
 
         // random_int over bin2hex(random_bytes(…)): unambiguous int return type for every analyser
         // version we support, and 63 bits of entropy instead of 32.
