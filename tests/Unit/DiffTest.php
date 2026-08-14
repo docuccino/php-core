@@ -7,7 +7,10 @@ use Docuccino\Core\Diff\Changeset;
 use Docuccino\Core\Diff\ChangesetRenderer;
 use Docuccino\Core\Diff\DocumentDiffer;
 use Docuccino\Core\Diff\IncomparableDocumentsException;
+use Docuccino\Core\Diff\Pairing;
 use Docuccino\Core\Document\UirDocument;
+use Docuccino\Core\Emit\EmitOptions;
+use Docuccino\Core\Emit\OpenApi32Emitter;
 
 /**
  * @param  array<string, mixed>  $old
@@ -59,6 +62,83 @@ it('refuses to diff documents built with different identity-algorithm versions',
     $new['paths']['/api/v1/forms/{id}']['get']['x-docuccino']['id'] = 'op:v2:aaaaaaaaaaaaaaaa';
 
     expect(fn () => diffOf(diffBase(), $new))->toThrow(IncomparableDocumentsException::class);
+});
+
+// --- Pairing ----------------------------------------------------------------
+
+/**
+ * `diffBase()` as a COMMITTED ARTIFACT: run through the real OAS emitter, which strips every
+ * `x-docuccino` member (it carries provenance, which has no business in a published spec) unless asked
+ * to keep node ids as a flat `x-docuccino-id`. This is what a user actually diffs against.
+ *
+ * @return array<string, mixed>
+ */
+function diffBaseArtifact(bool $keepIds = false): array
+{
+    $options = $keepIds ? (new EmitOptions)->withKeepIds() : new EmitOptions;
+    /** @var array<string, mixed> $decoded */
+    $decoded = json_decode((new OpenApi32Emitter)->emit(UirDocument::fromArray(diffBase()), $options), true);
+
+    return $decoded;
+}
+
+it('reports no API churn for an emitted artifact against the document it came from', function (): void {
+    // The advertised workflow: `docuccino:diff <committed OpenAPI artifact>` against a freshly built
+    // document. The artifact carries no identities and the fresh document does, so pairing by id would put
+    // the two sides in disjoint key spaces and report every operation removed AND re-added. The only thing
+    // left is the content pages, which live under the document `x-docuccino` and genuinely cannot survive
+    // OAS emission — a real absence, not a phantom one.
+    $changeset = diffOf(diffBaseArtifact(), diffBase());
+
+    expect(array_keys(changesByCode($changeset)))->toBe(['page.added'])
+        ->and($changeset->pairing)->toBe(Pairing::Structural);
+});
+
+it('still finds a real change through structural pairing', function (): void {
+    // Degrading must not blind the diff — only rename-detection is lost.
+    $new = diffBase();
+    $new['paths']['/api/v1/forms/{id}']['get']['parameters'][1]['required'] = true;
+
+    expect(array_keys(changesByCode(diffOf(diffBaseArtifact(), $new))))->toContain('parameter.became-required');
+});
+
+it('pairs by identity when the artifact kept its ids', function (): void {
+    // What `docuccino:export` writes by default: each node id re-emitted flat, which is enough to pair
+    // on — so the rename that reads as remove + add above stays cosmetic here.
+    $renamed = diffBase();
+    $renamed['paths']['/api/v1/forms/{formId}'] = $renamed['paths']['/api/v1/forms/{id}'];
+    unset($renamed['paths']['/api/v1/forms/{id}']);
+
+    $changeset = diffOf(diffBaseArtifact(keepIds: true), $renamed);
+
+    expect($changeset->pairing)->toBe(Pairing::Identity)
+        ->and(array_keys(changesByCode($changeset)))->not->toContain('operation.removed');
+});
+
+it('reads the flat id even where the nested member is gone', function (): void {
+    // The emitter writes `x-docuccino-id`, never the nested object — so this is the only identity an
+    // OpenAPI artifact can carry, and the differ has to know it.
+    $artifact = diffBaseArtifact(keepIds: true);
+    $operation = $artifact['paths']['/api/v1/forms/{id}']['get'];
+
+    expect($operation)->toHaveKey('x-docuccino-id')
+        ->and($operation)->not->toHaveKey('x-docuccino')
+        ->and($operation['x-docuccino-id'])->toBe('op:v1:aaaaaaaaaaaaaaaa');
+});
+
+it('reports the pairing it used in toArray', function (): void {
+    expect(diffOf(diffBase(), diffBase())->toArray()['pairing'])->toBe('identity')
+        ->and(diffOf(diffBaseArtifact(), diffBase())->toArray()['pairing'])->toBe('structural');
+});
+
+it('renders a note when it had to pair structurally', function (): void {
+    $rendered = (new ChangesetRenderer)->render(diffOf(diffBaseArtifact(), diffBase()));
+
+    expect($rendered)->toContain('paired by method + path')
+        ->and($rendered)->toContain('Re-export the artifact');
+
+    // …and never when it paired by identity, so the note stays a signal.
+    expect((new ChangesetRenderer)->render(diffOf(diffBase(), diffBase())))->toBe("No API changes.\n");
 });
 
 // --- Breaking rules ---------------------------------------------------------

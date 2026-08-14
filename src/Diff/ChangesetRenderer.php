@@ -12,6 +12,13 @@ namespace Docuccino\Core\Diff;
  */
 final class ChangesetRenderer
 {
+    /**
+     * Printed whenever pairing fell back to method + path. Never a silent downgrade: without it a reader
+     * has no way to tell a real rename from an artifact that simply carried no identities.
+     */
+    private const string PAIRING_NOTE = "Note: an artifact carries no Docuccino identities, so nodes were paired by method + path.\n"
+        ."A renamed path parameter will read as a removal plus an addition. Re-export the artifact to pair by identity.\n\n";
+
     private const string MARK_ADDED = '+';
 
     private const string MARK_REMOVED = '-';
@@ -20,8 +27,10 @@ final class ChangesetRenderer
 
     public function render(Changeset $changeset): string
     {
+        $note = $changeset->pairing === Pairing::Structural ? self::PAIRING_NOTE : '';
+
         if ($changeset->isEmpty()) {
-            return "No API changes.\n";
+            return $note."No API changes.\n";
         }
 
         $breaking = $changeset->breakingChanges();
@@ -45,7 +54,7 @@ final class ChangesetRenderer
             }
         }
 
-        return implode("\n", $lines)."\n";
+        return $note.implode("\n", $lines)."\n";
     }
 
     private function summaryLine(Changeset $changeset): string

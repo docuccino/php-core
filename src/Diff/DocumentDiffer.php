@@ -29,6 +29,10 @@ use Docuccino\Core\Support\Arr;
  * Identities carry an algorithm version (`op:v1:…`); documents minted by different algo versions
  * can't be paired safely, so the differ throws {@see IncomparableDocumentsException} rather than
  * mis-report.
+ *
+ * Identity pairing needs identities on BOTH sides. An artifact exported with ids dropped, or a spec from
+ * another tool, has none, so the differ falls back to method + path on both sides and reports which it
+ * used ({@see Pairing}) — see {@see pairing()} for why the one-sided case can't be paired by id at all.
  */
 final class DocumentDiffer
 {
@@ -38,35 +42,47 @@ final class DocumentDiffer
 
     public function diff(UirDocument $old, UirDocument $new): Changeset
     {
-        $this->assertComparable($old, $new);
+        $pairing = $this->pairing($old, $new);
 
         /** @var list<Change> $changes */
         $changes = [];
 
-        $this->diffOperations($old, $new, $changes);
-        $this->diffComponentSchemas($old, $new, $changes);
+        $this->diffOperations($old, $new, $changes, $pairing);
+        $this->diffComponentSchemas($old, $new, $changes, $pairing);
         $this->diffPages($old, $new, $changes);
 
         usort($changes, static fn (Change $a, Change $b): int => $a->sortKey() <=> $b->sortKey());
 
-        return new Changeset($changes);
+        return new Changeset($changes, $pairing);
     }
 
-    private function assertComparable(UirDocument $old, UirDocument $new): void
+    /**
+     * One side carrying identities and the other not is the shape an artifact exported with `--drop-ids`
+     * makes (and every artifact written before ids were kept by default). Pairing it against a freshly
+     * built document by id would put the two sides in disjoint key spaces, reporting every operation
+     * removed AND re-added. Falling back to method + path on both sides is what every other OpenAPI
+     * differ does: weaker (a rename reads as remove + add) but never phantom.
+     */
+    private function pairing(UirDocument $old, UirDocument $new): Pairing
     {
         $oldAlgo = $this->firstAlgoVersion($old);
         $newAlgo = $this->firstAlgoVersion($new);
 
-        if ($oldAlgo !== null && $newAlgo !== null && $oldAlgo !== $newAlgo) {
+        if ($oldAlgo === null || $newAlgo === null) {
+            return Pairing::Structural;
+        }
+
+        if ($oldAlgo !== $newAlgo) {
             throw IncomparableDocumentsException::algoMismatch($oldAlgo, $newAlgo);
         }
+
+        return Pairing::Identity;
     }
 
     private function firstAlgoVersion(UirDocument $document): ?string
     {
         foreach ($this->operations($document) as [$op]) {
-            $id = $op->docuccino?->id;
-            $algo = self::algoVersionOf($id);
+            $algo = self::algoVersionOf(self::operationId($op));
             if ($algo !== null) {
                 return $algo;
             }
@@ -88,10 +104,10 @@ final class DocumentDiffer
     /**
      * @param  list<Change>  $changes
      */
-    private function diffOperations(UirDocument $old, UirDocument $new, array &$changes): void
+    private function diffOperations(UirDocument $old, UirDocument $new, array &$changes, Pairing $pairing): void
     {
-        $oldOps = $this->indexOperations($old);
-        $newOps = $this->indexOperations($new);
+        $oldOps = $this->indexOperations($old, $pairing);
+        $newOps = $this->indexOperations($new, $pairing);
         $oldRefs = ComponentResponses::of($old);
         $newRefs = ComponentResponses::of($new);
 
@@ -104,7 +120,7 @@ final class DocumentDiffer
             } elseif (! $inOld) {
                 $changes[] = new Change(ChangeKind::Added, ChangeTarget::Operation, $key, $this->display($newOps[$key]), false, 'operation.added');
             } else {
-                $this->diffOperationPair($key, $oldOps[$key], $newOps[$key], $oldRefs, $newRefs, $changes);
+                $this->diffOperationPair($key, $oldOps[$key], $newOps[$key], $oldRefs, $newRefs, $changes, $pairing);
             }
         }
     }
@@ -114,7 +130,7 @@ final class DocumentDiffer
      * @param  array{path: string, method: string, op: Operation}  $new
      * @param  list<Change>  $changes
      */
-    private function diffOperationPair(string $id, array $old, array $new, ComponentResponses $oldRefs, ComponentResponses $newRefs, array &$changes): void
+    private function diffOperationPair(string $id, array $old, array $new, ComponentResponses $oldRefs, ComponentResponses $newRefs, array &$changes, Pairing $pairing): void
     {
         $path = $this->display($new);
         $oldOp = $old['op'];
@@ -130,7 +146,7 @@ final class DocumentDiffer
         }
 
         $this->diffSecurity($id, $path, $oldOp, $newOp, $changes);
-        $this->diffParameters($id, $path, $oldOp, $newOp, $changes);
+        $this->diffParameters($id, $path, $oldOp, $newOp, $changes, $pairing);
         $this->diffResponses($id, $path, $oldOp, $newOp, $oldRefs, $newRefs, $changes);
         $this->diffRequestBody($id, $path, $oldOp, $newOp, $changes);
     }
@@ -182,10 +198,10 @@ final class DocumentDiffer
     /**
      * @param  list<Change>  $changes
      */
-    private function diffParameters(string $opId, string $path, Operation $old, Operation $new, array &$changes): void
+    private function diffParameters(string $opId, string $path, Operation $old, Operation $new, array &$changes, Pairing $pairing): void
     {
-        $oldParams = $this->indexParameters($old);
-        $newParams = $this->indexParameters($new);
+        $oldParams = $this->indexParameters($old, $pairing);
+        $newParams = $this->indexParameters($new, $pairing);
 
         foreach (Arr::sortedUnion(array_keys($oldParams), array_keys($newParams)) as $key) {
             $inOld = array_key_exists($key, $oldParams);
@@ -306,10 +322,10 @@ final class DocumentDiffer
     /**
      * @param  list<Change>  $changes
      */
-    private function diffComponentSchemas(UirDocument $old, UirDocument $new, array &$changes): void
+    private function diffComponentSchemas(UirDocument $old, UirDocument $new, array &$changes, Pairing $pairing): void
     {
-        $oldSchemas = $this->indexComponentSchemas($old);
-        $newSchemas = $this->indexComponentSchemas($new);
+        $oldSchemas = $this->indexComponentSchemas($old, $pairing);
+        $newSchemas = $this->indexComponentSchemas($new, $pairing);
 
         foreach (Arr::sortedUnion(array_keys($oldSchemas), array_keys($newSchemas)) as $key) {
             $inOld = array_key_exists($key, $oldSchemas);
@@ -369,17 +385,34 @@ final class DocumentDiffer
     /**
      * @return array<string, array{path: string, method: string, op: Operation}>
      */
-    private function indexOperations(UirDocument $document): array
+    private function indexOperations(UirDocument $document, Pairing $pairing): array
     {
         $out = [];
 
         foreach ($this->operations($document) as [$op, $method, $path]) {
-            $id = $op->docuccino?->id;
+            $id = $pairing === Pairing::Identity ? self::operationId($op) : null;
             $key = $id ?? '_'.strtoupper($method).' '.$path;
             $out[$key] = ['path' => $path, 'method' => $method, 'op' => $op];
         }
 
         return $out;
+    }
+
+    /**
+     * An operation's identity: the UIR `x-docuccino.id`, or the flat `x-docuccino-id` an OpenAPI export
+     * writes in its place when asked to keep ids (the nested member never survives OAS emission, since it
+     * also carries provenance). `rest` holds every member the model doesn't name, extensions included.
+     */
+    private static function operationId(Operation $operation): ?string
+    {
+        $id = $operation->docuccino?->id;
+        if ($id !== null) {
+            return $id;
+        }
+
+        $flat = $operation->rest['x-docuccino-id'] ?? null;
+
+        return is_string($flat) && $flat !== '' ? $flat : null;
     }
 
     /**
@@ -401,12 +434,12 @@ final class DocumentDiffer
     /**
      * @return array<string, Parameter>
      */
-    private function indexParameters(Operation $op): array
+    private function indexParameters(Operation $op, Pairing $pairing): array
     {
         $out = [];
 
         foreach ($op->parameters as $param) {
-            $id = $param->docuccino?->id;
+            $id = $pairing === Pairing::Identity ? $param->docuccino?->id : null;
             $key = $id ?? self::paramLabel($param);
             $out[$key] = $param;
         }
@@ -417,7 +450,7 @@ final class DocumentDiffer
     /**
      * @return array<string, array{name: string, schema: array<string, mixed>}>
      */
-    private function indexComponentSchemas(UirDocument $document): array
+    private function indexComponentSchemas(UirDocument $document, Pairing $pairing): array
     {
         $out = [];
 
@@ -428,7 +461,7 @@ final class DocumentDiffer
 
         foreach ($components->schemas as $name => $schema) {
             $data = $schema->toArray();
-            $id = self::schemaId($data);
+            $id = $pairing === Pairing::Identity ? self::schemaId($data) : null;
             $key = $id ?? 'name:'.$name;
             $out[$key] = ['name' => (string) $name, 'schema' => $data];
         }
