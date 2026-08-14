@@ -317,6 +317,108 @@ it('classifies a parameter becoming optional as non-breaking', function (): void
     expect($changes['parameter.became-optional']->breaking)->toBeFalse();
 });
 
+// --- Hoisted error bodies ($ref responses) ---------------------------------
+
+/**
+ * The `diffBase()` document with its two 404-carrying operations' bodies hoisted into one
+ * `components.responses` entry, exactly as the shared-error transformer writes it.
+ *
+ * @param  array<string, mixed>  $body  the shared 404 body
+ * @return array<string, mixed>
+ */
+function diffHoisted404(array $body): array
+{
+    $doc = diffBase404();
+    $doc['components']['responses'] = ['Error404' => $body];
+
+    foreach ([['/api/v1/forms/{id}', 'get'], ['/api/v1/forms', 'get']] as [$path, $method]) {
+        $doc['paths'][$path][$method]['responses']['404'] = [
+            'x-docuccino' => $doc['paths'][$path][$method]['responses']['404']['x-docuccino'],
+            '$ref' => '#/components/responses/Error404',
+        ];
+    }
+
+    return $doc;
+}
+
+/**
+ * `diffBase()` plus a second operation, both stating the same inline 404 body — the pre-hoist shape.
+ *
+ * @return array<string, mixed>
+ */
+function diffBase404(): array
+{
+    $body = [
+        'description' => 'Not found',
+        'content' => ['application/json' => ['schema' => ['type' => 'object', 'properties' => ['message' => ['type' => 'string']]]]],
+    ];
+
+    $doc = diffBase();
+    $doc['paths']['/api/v1/forms/{id}']['get']['responses']['404'] = ['x-docuccino' => ['id' => 'res:v1:1111111111111111']] + $body;
+    $doc['paths']['/api/v1/forms']['get'] = [
+        'x-docuccino' => ['id' => 'op:v1:3333333333333333'],
+        'operationId' => 'forms.index',
+        'responses' => [
+            '200' => ['description' => 'Forms'],
+            '404' => ['x-docuccino' => ['id' => 'res:v1:2222222222222222']] + $body,
+        ],
+    ];
+
+    return $doc;
+}
+
+it('reports nothing when an inline error body hoists to a shared component', function (): void {
+    $inline = diffBase404();
+    $hoisted = diffHoisted404($inline['paths']['/api/v1/forms']['get']['responses']['404']);
+    unset($hoisted['components']['responses']['Error404']['x-docuccino']);
+
+    expect(diffOf($inline, $hoisted)->isEmpty())->toBeTrue();
+    expect(diffOf($hoisted, $inline)->isEmpty())->toBeTrue();
+});
+
+it('reports a change to a shared error body against every operation that refs it', function (): void {
+    $old = diffHoisted404([
+        'description' => 'Not found',
+        'content' => ['application/json' => ['schema' => ['type' => 'object', 'properties' => ['message' => ['type' => 'string']]]]],
+    ]);
+    $new = diffHoisted404([
+        'description' => 'Not found',
+        'content' => ['application/json' => ['schema' => ['type' => 'object', 'properties' => ['msg' => ['type' => 'string']]]]],
+    ]);
+
+    $changeset = diffOf($old, $new);
+    $removed = array_filter($changeset->changes, static fn (Change $c): bool => $c->code === 'schema.property-removed');
+
+    expect($changeset->isBreaking())->toBeTrue();
+    expect($removed)->toHaveCount(2);
+    $ids = array_map(static fn (Change $c): string => $c->id, array_values($removed));
+    sort($ids);
+    expect($ids)->toBe(['res:v1:1111111111111111', 'res:v1:2222222222222222']);
+});
+
+it('reports nothing when a shared error body only moves component name', function (): void {
+    $body = [
+        'description' => 'Not found',
+        'content' => ['application/json' => ['schema' => ['type' => 'object', 'properties' => ['message' => ['type' => 'string']]]]],
+    ];
+
+    $old = diffHoisted404($body);
+    $new = $old;
+    $new['components']['responses'] = ['Error404_2' => $body];
+    foreach ([['/api/v1/forms/{id}', 'get'], ['/api/v1/forms', 'get']] as [$path, $method]) {
+        $new['paths'][$path][$method]['responses']['404']['$ref'] = '#/components/responses/Error404_2';
+    }
+
+    expect(diffOf($old, $new)->isEmpty())->toBeTrue();
+});
+
+it('reports nothing for a response ref naming a component neither side declares', function (): void {
+    $dangling = diffHoisted404([]);
+    unset($dangling['components']['responses']);
+
+    expect(diffOf($dangling, $dangling)->isEmpty())->toBeTrue();
+});
+
 // --- Determinism, model and rendering --------------------------------------
 
 it('produces a deterministic toArray with breaking-first ordering', function (): void {

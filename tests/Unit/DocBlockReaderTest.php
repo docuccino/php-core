@@ -69,3 +69,39 @@ it('returns no properties for a docblock without @property tags', function (?str
     'empty' => ['/** */'],
     'null' => [null],
 ]);
+
+it('enumerates @param tags as an ordered name => {type, description} map', function (): void {
+    // A promoted constructor property states its precise type here and nowhere else, so this is how a
+    // `list<T>` behind a native `array` is found.
+    $doc = "/**\n * Builds one.\n *\n * @param  list<ErrorDetailData>|Optional  \$errors  The failures.\n * @param  string  \$title\n */";
+
+    $params = (new DocBlockReader)->params($doc);
+
+    expect(array_keys($params))->toBe(['errors', 'title'])
+        // A union comes back parenthesised and spaced, which is the parser's own rendering of the node it
+        // built — TypeStringParser reads it straight back, so it is normalised rather than mangled.
+        ->and($params['errors'])->toBe(['type' => '(list<ErrorDetailData> | Optional)', 'description' => 'The failures.'])
+        ->and($params['title'])->toBe(['type' => 'string', 'description' => null]);
+});
+
+it('keeps the first declaration of a duplicated @param name', function (): void {
+    expect((new DocBlockReader)->params("/**\n * @param int \$id\n * @param string \$id\n */"))
+        ->toBe(['id' => ['type' => 'int', 'description' => null]]);
+});
+
+it('returns no params for a docblock without @param tags', function (?string $doc): void {
+    expect((new DocBlockReader)->params($doc))->toBe([]);
+})->with([
+    'prose only' => ["/**\n * Just prose.\n */"],
+    'empty' => ['/** */'],
+    'null' => [null],
+]);
+
+it('reads the first @var type, and null when there is none', function (): void {
+    $reader = new DocBlockReader;
+
+    expect($reader->varType("/**\n * @var list<ErrorDetailData>\n */"))->toBe('list<ErrorDetailData>')
+        ->and($reader->varType("/**\n * @var int\n * @var string\n */"))->toBe('int')
+        ->and($reader->varType("/**\n * Just prose.\n */"))->toBeNull()
+        ->and($reader->varType(null))->toBeNull();
+});

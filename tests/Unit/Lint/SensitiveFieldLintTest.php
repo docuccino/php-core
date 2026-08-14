@@ -92,3 +92,87 @@ it('scans inline schemas, not only components', function (): void {
     expect($findings)->toHaveCount(1)
         ->and($findings[0]->message)->toContain('an API key');
 });
+
+// --- Value scan (known credential shapes) -----------------------------------
+
+/**
+ * A schema whose published example carries `$value` under an innocent member name — the case a
+ * name-only heuristic cannot see.
+ */
+function schemaWithExample(mixed $value): array
+{
+    return ['components' => ['schemas' => ['Model' => [
+        'type' => 'object',
+        'properties' => ['type' => ['type' => 'string']],
+        'example' => ['type' => $value],
+    ]]]];
+}
+
+it('warns on each known credential shape appearing in a published value', function (string $value, string $label): void {
+    $findings = lintFindings(schemaWithExample($value));
+
+    expect($findings)->toHaveCount(1);
+    expect($findings[0]->severity)->toBe(Severity::Warning)
+        ->and($findings[0]->code)->toBe('lint.data-leakage')
+        ->and($findings[0]->message)->toContain($label)
+        ->and($findings[0]->message)->toContain('#/components/schemas/Model/example/type')
+        // The diagnostic must never echo the secret — that just moves it into the build log.
+        ->and($findings[0]->message)->not->toContain($value);
+})->with([
+    // The Stripe samples are assembled rather than written out: a literal of that shape trips
+    // GitHub's push protection, which cannot tell a fixture from a live key — and shouldn't try.
+    'PEM private key' => ["-----BEGIN RSA PRIVATE KEY-----\nMIIB\n-----END RSA PRIVATE KEY-----", 'a PEM private key'],
+    'bare PEM private key' => ['-----BEGIN PRIVATE KEY-----MIIB', 'a PEM private key'],
+    'AWS long-term key id' => ['AKIAIOSFODNN7EXAMPLE', 'an AWS access key id'],
+    'AWS session key id' => ['ASIAIOSFODNN7EXAMPLE', 'an AWS access key id'],
+    'GitHub PAT (classic)' => ['ghp_16C7e42F292c6912E7710c838347Ae178B4a', 'a GitHub token'],
+    'GitHub fine-grained PAT' => ['github_pat_11ABCDEFG0abcdefghijkl_mnopqrstuvwxyz', 'a GitHub token'],
+    'Stripe live secret key' => ['sk_live_'.str_repeat('A', 24), 'a live Stripe secret key'],
+    'Stripe live restricted key' => ['rk_live_'.str_repeat('B', 24), 'a live Stripe secret key'],
+    'Slack bot token' => ['xoxb-123456789012-abcdefghijkl', 'a Slack token'],
+    'Slack user token' => ['xoxp-123456789012-abcdefghijkl', 'a Slack token'],
+    'JWT' => ['eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.dBjftJeZ4CVPmB92K27uhbUJU1p1r_wW1gFWFOEjXk', 'a JWT'],
+    'URL userinfo' => ['https://svc:s3cr3t@db.example.com/reports', 'a URL with embedded credentials'],
+]);
+
+it('does not warn on ordinary published values', function (mixed $value): void {
+    expect(lintFindings(schemaWithExample($value)))->toBe([]);
+})->with([
+    'uuid' => ['9b2e4f7c-1d3a-4b5c-8e6f-0a1b2c3d4e5f'],
+    'ulid' => ['01ARZ3NDEKTSV4RRFFQ69G5FAV'],
+    'sha256' => ['e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'],
+    'base64 sample payload' => ['aGVsbG8gd29ybGQgdGhpcyBpcyBhIHNhbXBsZSBwYXlsb2Fk'],
+    'problem type url' => ['https://httpstatuses.io/403'],
+    'url with port' => ['https://api.example.com:8443/v1/forms'],
+    'stripe test key' => ['sk_test_'.str_repeat('C', 24)],
+    'bearer prose' => ['Bearer <token>'],
+    'integer' => [42],
+    'null' => [null],
+]);
+
+it('scans every published-value member, not only example', function (string $key): void {
+    $document = ['components' => ['schemas' => ['Model' => [$key => 'AKIAIOSFODNN7EXAMPLE']]]];
+
+    $findings = lintFindings($document);
+    expect($findings)->toHaveCount(1)
+        ->and($findings[0]->message)->toContain('#/components/schemas/Model/'.$key);
+})->with(['example', 'const', 'default']);
+
+it('points at the exact leaf inside a nested examples map or enum list', function (): void {
+    $document = ['components' => ['schemas' => ['Model' => [
+        'examples' => ['first' => ['value' => ['token' => 'AKIAIOSFODNN7EXAMPLE']]],
+        'enum' => ['ok', 'xoxb-123456789012-abcdefghijkl'],
+    ]]]];
+
+    $pointers = array_map(static fn (object $d): string => (string) $d->message, lintFindings($document));
+
+    expect($pointers)->toHaveCount(2);
+    expect($pointers[0])->toContain('#/components/schemas/Model/examples/first/value/token');
+    expect($pointers[1])->toContain('#/components/schemas/Model/enum/1');
+});
+
+it('silences a leaked value by pointer via the safelist', function (): void {
+    $options = new SensitiveFieldLintOptions(allow: ['#/components/schemas/Model/example/type']);
+
+    expect(lintFindings(schemaWithExample('AKIAIOSFODNN7EXAMPLE'), $options))->toBe([]);
+});

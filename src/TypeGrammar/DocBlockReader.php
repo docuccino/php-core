@@ -7,8 +7,8 @@ namespace Docuccino\Core\TypeGrammar;
 use PHPStan\PhpDocParser\Ast\PhpDoc\PhpDocTextNode;
 
 /**
- * The one docblock reader: prose, `@example`, `@property` tags, and the OAS summary/description split,
- * all through the shared {@see PhpDocParserStack} so there's a single grammar.
+ * The one docblock reader: prose, `@example`, `@property`/`@param`/`@var` tags, and the OAS
+ * summary/description split, all through the shared {@see PhpDocParserStack} so there's a single grammar.
  */
 final class DocBlockReader
 {
@@ -65,6 +65,55 @@ final class DocBlockReader
         }
 
         return $out;
+    }
+
+    /**
+     * The `@param` tags a docblock declares, as an ordered `name => {type, description}` map. A promoted
+     * constructor property writes its precise type here rather than in a `@var`, so this is where a `list<T>`
+     * behind a native `array` is found. A duplicate name keeps its first declaration.
+     *
+     * @return array<string, array{type: string, description: ?string}>
+     */
+    public function params(?string $docComment): array
+    {
+        $node = $this->stack->parseDocBlock($docComment);
+        if ($node === null) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($node->getParamTagValues() as $tag) {
+            $name = ltrim($tag->parameterName, '$');
+            if ($name === '' || isset($out[$name])) {
+                continue;
+            }
+
+            $description = trim($tag->description);
+            $out[$name] = [
+                'type' => (string) $tag->type,
+                'description' => $description === '' ? null : $description,
+            ];
+        }
+
+        return $out;
+    }
+
+    /** The first `@var` type a docblock states, or null. */
+    public function varType(?string $docComment): ?string
+    {
+        $node = $this->stack->parseDocBlock($docComment);
+        if ($node === null) {
+            return null;
+        }
+
+        foreach ($node->getVarTagValues() as $tag) {
+            $type = trim((string) $tag->type);
+            if ($type !== '') {
+                return $type;
+            }
+        }
+
+        return null;
     }
 
     /** The first `@example` value, or null. */

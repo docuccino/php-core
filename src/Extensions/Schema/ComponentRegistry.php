@@ -291,6 +291,20 @@ final class ComponentRegistry
     }
 
     /**
+     * Rolls only `components.responses` back to a snapshot's, leaving schemas and diagnostics alone.
+     * For an extension that asks a mapper for a shape and then inlines the content itself: the shared
+     * response the mapper registered would be an orphan (nothing `$ref`s it, and a warm cache — which
+     * re-registers only what an operation references — would never bring it back), while the schemas
+     * that inlined content points at must survive.
+     *
+     * @param  array{schemas: array<string, array<string, mixed>>, schemaIds: array<string, string>, reservedIds: array<string, string>, responses: array<string, array<string, mixed>>, securitySchemes: array<string, array<string, mixed>>, diagnostics: list<Diagnostic>}  $snapshot
+     */
+    public function restoreResponses(array $snapshot): void
+    {
+        $this->responses = $snapshot['responses'];
+    }
+
+    /**
      * @return array<string, array<string, mixed>>
      */
     public function schemas(): array

@@ -16,12 +16,19 @@ use Docuccino\Core\Extensions\Document\UirDocumentDraft;
  * schema/property JSON pointer, so an accidentally-exposed `password`/`remember_token`/`api_key`
  * shows up before it ships. Diagnostics only — it never mutates the document.
  *
+ * Illustrative values (`example`, `examples`, `const`, `enum`, `default`) are scanned too, against
+ * {@see CredentialShapes} — a name heuristic can't see a real secret folded from a class constant into
+ * an example under an innocent member name, and examples survive emit while provenance doesn't.
+ *
  * It reads only the emitted UIR, no framework deps, so the reference CLI and other-language
  * producers run the identical rule; the Laravel adapter just maps `lint.leakage` config onto the
  * options and registers it.
  */
 final class SensitiveFieldLint implements DocumentTransformer
 {
+    /** The members whose contents are published illustrative values rather than structure. */
+    private const VALUE_KEYS = ['example', 'examples', 'const', 'enum', 'default'];
+
     public function __construct(
         private readonly SensitiveFieldLintOptions $options = new SensitiveFieldLintOptions,
     ) {}
@@ -43,8 +50,12 @@ final class SensitiveFieldLint implements DocumentTransformer
             $context->report(new Diagnostic(
                 severity: Severity::Warning,
                 code: 'lint.data-leakage',
-                message: sprintf('Property "%s" (%s) looks like %s and may leak sensitive data.', $finding['name'], $finding['pointer'], $finding['label']),
-                help: 'Hide it (e.g. #[Hidden] / omit it from the resource) or, if intentional, safelist it under lint.leakage.allow.',
+                message: $finding['value']
+                    ? sprintf('The value at %s looks like %s and may be a real credential.', $finding['pointer'], $finding['label'])
+                    : sprintf('Property "%s" (%s) looks like %s and may leak sensitive data.', $finding['name'], $finding['pointer'], $finding['label']),
+                help: $finding['value']
+                    ? 'Replace the example with a placeholder or, if it is genuinely public, safelist the pointer under lint.leakage.allow.'
+                    : 'Hide it (e.g. #[Hidden] / omit it from the resource) or, if intentional, safelist it under lint.leakage.allow.',
             ));
         }
     }
@@ -54,7 +65,7 @@ final class SensitiveFieldLint implements DocumentTransformer
      * Component and inline schemas look the same from here.
      *
      * @param  list<string>  $path
-     * @param  list<array{name: string, pointer: string, label: string}>  $findings
+     * @param  list<array{name: string, pointer: string, label: string, value: bool}>  $findings
      */
     private function walk(mixed $node, array $path, array &$findings): void
     {
@@ -65,14 +76,21 @@ final class SensitiveFieldLint implements DocumentTransformer
         $properties = $node['properties'] ?? null;
         if (is_array($properties)) {
             foreach ($properties as $name => $schema) {
-                $label = $this->match((string) $name);
+                $label = $this->options->match((string) $name);
                 if ($label !== null) {
                     $findings[] = [
                         'name' => (string) $name,
                         'pointer' => '#/'.implode('/', [...$path, 'properties', (string) $name]),
                         'label' => $label,
+                        'value' => false,
                     ];
                 }
+            }
+        }
+
+        foreach (self::VALUE_KEYS as $key) {
+            if (array_key_exists($key, $node)) {
+                $this->scanValue($node[$key], $key, [...$path, $key], $findings);
             }
         }
 
@@ -83,21 +101,33 @@ final class SensitiveFieldLint implements DocumentTransformer
         }
     }
 
-    /** Label of the first heuristic the normalised name matches, null when it looks safe. */
-    private function match(string $name): ?string
+    /**
+     * Every leaf string under a published value, checked against the credential shapes. The finding
+     * names the member it sits under, never the matched text — a diagnostic that echoes the secret
+     * has only moved it into the build log.
+     *
+     * @param  list<string>  $path
+     * @param  list<array{name: string, pointer: string, label: string, value: bool}>  $findings
+     */
+    private function scanValue(mixed $value, string $name, array $path, array &$findings): void
     {
-        $normalized = strtolower((string) preg_replace('/[^a-zA-Z0-9]/', '', $name));
-        if ($normalized === '') {
-            return null;
-        }
-
-        foreach ($this->options->patterns as $token => $label) {
-            if ($token !== '' && str_contains($normalized, $token)) {
-                return $label;
+        if (is_array($value)) {
+            foreach ($value as $key => $child) {
+                $this->scanValue($child, (string) $key, [...$path, (string) $key], $findings);
             }
+
+            return;
         }
 
-        return null;
+        $label = is_string($value) ? CredentialShapes::label($value) : null;
+        if ($label !== null) {
+            $findings[] = [
+                'name' => $name,
+                'pointer' => '#/'.implode('/', $path),
+                'label' => $label,
+                'value' => true,
+            ];
+        }
     }
 
     private function silenced(string $name, string $pointer): bool

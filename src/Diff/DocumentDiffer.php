@@ -17,6 +17,10 @@ use Docuccino\Core\Support\Arr;
  * schemas and content pages, delegating field-level schema comparison to
  * {@see SchemaComparator}, and flags each {@see Change} breaking or not.
  *
+ * Responses are read through {@see ComponentResponses} on both sides, so where a body lives —
+ * inline or hoisted into `components.responses` — is not itself a change, while a shared body's
+ * content is compared under every operation that `$ref`s it.
+ *
  * Breaking: a removed operation/parameter/response/status, a parameter becoming required, an
  * added required parameter, plus the schema-level rules SchemaComparator owns. Additions, prose
  * edits and deprecations aren't — and since only modelled fields and schema structure are
@@ -88,6 +92,8 @@ final class DocumentDiffer
     {
         $oldOps = $this->indexOperations($old);
         $newOps = $this->indexOperations($new);
+        $oldRefs = ComponentResponses::of($old);
+        $newRefs = ComponentResponses::of($new);
 
         foreach (Arr::sortedUnion(array_keys($oldOps), array_keys($newOps)) as $key) {
             $inOld = array_key_exists($key, $oldOps);
@@ -98,7 +104,7 @@ final class DocumentDiffer
             } elseif (! $inOld) {
                 $changes[] = new Change(ChangeKind::Added, ChangeTarget::Operation, $key, $this->display($newOps[$key]), false, 'operation.added');
             } else {
-                $this->diffOperationPair($key, $oldOps[$key], $newOps[$key], $changes);
+                $this->diffOperationPair($key, $oldOps[$key], $newOps[$key], $oldRefs, $newRefs, $changes);
             }
         }
     }
@@ -108,7 +114,7 @@ final class DocumentDiffer
      * @param  array{path: string, method: string, op: Operation}  $new
      * @param  list<Change>  $changes
      */
-    private function diffOperationPair(string $id, array $old, array $new, array &$changes): void
+    private function diffOperationPair(string $id, array $old, array $new, ComponentResponses $oldRefs, ComponentResponses $newRefs, array &$changes): void
     {
         $path = $this->display($new);
         $oldOp = $old['op'];
@@ -125,7 +131,7 @@ final class DocumentDiffer
 
         $this->diffSecurity($id, $path, $oldOp, $newOp, $changes);
         $this->diffParameters($id, $path, $oldOp, $newOp, $changes);
-        $this->diffResponses($id, $path, $oldOp, $newOp, $changes);
+        $this->diffResponses($id, $path, $oldOp, $newOp, $oldRefs, $newRefs, $changes);
         $this->diffRequestBody($id, $path, $oldOp, $newOp, $changes);
     }
 
@@ -226,10 +232,10 @@ final class DocumentDiffer
     /**
      * @param  list<Change>  $changes
      */
-    private function diffResponses(string $opId, string $path, Operation $old, Operation $new, array &$changes): void
+    private function diffResponses(string $opId, string $path, Operation $old, Operation $new, ComponentResponses $oldRefs, ComponentResponses $newRefs, array &$changes): void
     {
-        $oldResponses = $old->responses;
-        $newResponses = $new->responses;
+        $oldResponses = array_map($oldRefs->resolve(...), $old->responses);
+        $newResponses = array_map($newRefs->resolve(...), $new->responses);
 
         foreach (Arr::sortedUnion(array_keys($oldResponses), array_keys($newResponses)) as $status) {
             $inOld = array_key_exists($status, $oldResponses);

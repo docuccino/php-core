@@ -56,4 +56,24 @@ final readonly class SensitiveFieldLintOptions
     {
         return new self($this->enabled, $this->allow, $this->patterns + $patterns);
     }
+
+    /**
+     * Label of the first heuristic the name matches, null when it looks safe. Names normalise to
+     * lower-case alphanumerics first, so `api_key`, `apiKey` and `API-KEY` all read as one token.
+     */
+    public function match(string $name): ?string
+    {
+        $normalized = strtolower((string) preg_replace('/[^a-zA-Z0-9]/', '', $name));
+        if ($normalized === '') {
+            return null;
+        }
+
+        foreach ($this->patterns as $token => $label) {
+            if ($token !== '' && str_contains($normalized, $token)) {
+                return $label;
+            }
+        }
+
+        return null;
+    }
 }

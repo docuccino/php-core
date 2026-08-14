@@ -12,6 +12,8 @@ namespace Docuccino\Core\Extensions\Context;
  * - `operationId`: `route-name` | `controller-method`.
  * - `enumNaming`: `none` | `x-enumNames` | `x-enum-varnames` — codegen name hints emitted alongside
  *   the enum; the `enum` members themselves never change.
+ * - `errorComponents`: whether an error response body repeated across operations hoists to one shared
+ *   `components.responses` entry each operation `$ref`s; `false` inlines every copy.
  * - `enumComponents`: whether a reflectable enum hoists to a named component (deduped by FQCN) that
  *   use sites `$ref`, or is inlined at each one. Hoisting is the better output — one canonical,
  *   described enum shared everywhere; `false` restores the inline form byte-for-byte.
@@ -40,6 +42,7 @@ final readonly class RepresentationPolicy
         public string $listStyle = 'comma',
         public string $resourceWrap = '',
         public bool $enumComponents = true,
+        public bool $errorComponents = true,
     ) {}
 
     /**
@@ -53,6 +56,9 @@ final readonly class RepresentationPolicy
         $enumNaming = is_array($enums) ? ($enums['naming'] ?? null) : null;
         $enumComponents = is_array($enums) ? ($enums['components'] ?? null) : null;
 
+        $errors = $representation['errors'] ?? null;
+        $errorComponents = is_array($errors) ? ($errors['components'] ?? null) : null;
+
         return new self(
             operationId: self::keyword($representation['operation_id'] ?? null, 'route-name'),
             enumNaming: self::keyword($enumNaming, 'none'),
@@ -61,6 +67,7 @@ final readonly class RepresentationPolicy
             listStyle: self::keyword($representation['lists'] ?? null, 'comma'),
             resourceWrap: self::normalizeWrap($resourceWrap),
             enumComponents: ! ($enumComponents === false),
+            errorComponents: ! ($errorComponents === false),
         );
     }
 
