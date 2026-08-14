@@ -5,6 +5,11 @@
 
 User-facing changes to `docuccino/core` — features, fixes, performance work and anything breaking —
 taken from the commit messages scoped `core`. Entries begin after v0.1.2; older history is in
-the [monorepo](https://github.com/docuccino/docuccino) git log.
+the [repository](https://github.com/docuccino/docuccino) git log.
 
-_No user-facing changes yet._
+## v0.3.0
+
+### Breaking changes
+
+- carry node identities into exported OpenAPI so the diff stays semantic ([#18](https://github.com/docuccino/docuccino/pull/18))
+  - `docuccino:export` writes an `x-docuccino-id` member on every node of an OpenAPI artifact. Re-exporting an existing artifact shows that as a one-time diff; pass `--drop-ids` for the previous bytes. Emitting through the library is unaffected — `OpenApi32Emitter::emit()` still drops every Docuccino member by default.
