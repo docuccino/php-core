@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Docuccino\Core\Diagnostics;
 
 use Docuccino\Core\Extensions\Contracts\DocumentTransformer;
+use Docuccino\Core\Provenance\Source;
 
 /**
  * The build's diagnostics sink. Returns them in insertion order ({@see all()}) or in a byte-stable
@@ -51,18 +52,39 @@ final class DiagnosticCollector
     /**
      * Grouped by route signature, then severity, code and message. Nothing time-based.
      *
+     * The key is TOTAL — it runs on to `source` and `help` — because two diagnostics agreeing down to
+     * the message are ordinary: one `#[DescriptionFromFile]` escape per controller says the same thing
+     * about a different file, and neither carries a route signature. A key that could not tell them
+     * apart left their order to insertion, which is discovery order.
+     *
      * @return list<Diagnostic>
      */
     public function sorted(): array
     {
         $diagnostics = $this->diagnostics;
 
-        usort($diagnostics, static function (Diagnostic $a, Diagnostic $b): int {
-            return [$a->routeSignature ?? '', self::rank($a->severity), $a->code, $a->message]
-                <=> [$b->routeSignature ?? '', self::rank($b->severity), $b->code, $b->message];
-        });
+        usort($diagnostics, static fn (Diagnostic $a, Diagnostic $b): int => self::key($a) <=> self::key($b));
 
         return $diagnostics;
+    }
+
+    /**
+     * @return list<mixed>
+     */
+    private static function key(Diagnostic $diagnostic): array
+    {
+        $source = $diagnostic->source ?? new Source('');
+
+        return [
+            $diagnostic->routeSignature ?? '',
+            self::rank($diagnostic->severity),
+            $diagnostic->code,
+            $diagnostic->message,
+            $source->file,
+            $source->line ?? -1,
+            $source->symbol ?? '',
+            $diagnostic->help ?? '',
+        ];
     }
 
     private static function rank(Severity $severity): int

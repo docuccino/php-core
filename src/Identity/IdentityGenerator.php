@@ -6,6 +6,7 @@ namespace Docuccino\Core\Identity;
 
 use Docuccino\Core\Canonical\Canonicalizer;
 use Docuccino\Core\Canonical\CanonicalJsonSerializer;
+use Docuccino\Core\Support\Json;
 
 /**
  * Computes stable UIR identities. Format: `<kind>:<algoVersion>:<hash>`, where `<hash>` is the first
@@ -34,13 +35,24 @@ final readonly class IdentityGenerator
         return 'doc:'.$configKey;
     }
 
-    public function operationId(string $documentId, string $method, string $pathTemplate): string
+    /**
+     * Two routes on one method and path but different hosts are two operations, so the host is part of
+     * the identity — but only when there is one, so a route that answers on every host keeps the id it
+     * has always had. A templated host normalises its `{param}` segments the same way a path does.
+     */
+    public function operationId(string $documentId, string $method, string $pathTemplate, ?string $host = null): string
     {
-        return $this->id('op', [
+        $tuple = [
             $documentId,
             strtoupper($method),
             $this->normalizePathTemplate($pathTemplate),
-        ]);
+        ];
+
+        if ($host !== null && $host !== '') {
+            $tuple[] = $this->normalizePathTemplate($host);
+        }
+
+        return $this->id('op', $tuple);
     }
 
     public function parameterId(string $operationId, string $in, string $name): string
@@ -64,6 +76,23 @@ final readonly class IdentityGenerator
         $structural = $this->canonicalizer->canonicalizeSchemaForIdentity($schema);
 
         return $this->id('sch', ['inline', $this->serializer->serialize($structural)]);
+    }
+
+    /**
+     * The identity of a schema published verbatim under a component name of its own, where the exact
+     * bytes are the thing being published: `$scope` is whatever else distinguishes this publication from
+     * another carrying the same bytes.
+     *
+     * {@see inlineSchemaId()} cannot serve here. It normalises annotations and `required` order away so
+     * an inline schema keeps its identity across a cosmetic edit — which is right for an inline schema
+     * and wrong for a component, because two components that differ at all are two published nodes and
+     * a differ that pairs components by id would otherwise see only one of them.
+     *
+     * @param  array<string, mixed>  $schema
+     */
+    public function publishedSchemaId(string $scope, array $schema): string
+    {
+        return $this->id('sch', [$scope, Json::stable($schema)]);
     }
 
     public function responseId(string $operationId, string $status, string $mediaType): string

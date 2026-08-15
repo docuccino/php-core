@@ -15,10 +15,27 @@ use Docuccino\Core\Canonical\CanonicalJsonSerializer;
  * order survives. Objects collapse to their class-string, since closures and mappers have no stable
  * serialisable identity.
  *
+ * Callers hand this arbitrary values — an extension's own properties, a schema an integration built —
+ * so the normalizer is TOTAL: anything `json_encode` would refuse is carried as a marker instead of
+ * making the encode fail, because a failed encode used to answer `''` for every such value and `''`
+ * is one fingerprint shared by all of them. The descent is bounded for the same reason: a
+ * self-referential array is a stack overflow, which is SIGSEGV with no message rather than an
+ * exception.
+ *
  * @internal
  */
 final class Json
 {
+    /**
+     * How deep the descent goes before it stops. Nothing encoded here is a document — these are
+     * fingerprints — so this only has to sit above any real structure, and it is far under
+     * `json_encode`'s own 512.
+     */
+    private const MAX_DEPTH = 128;
+
+    /** What stands in for a value below {@see MAX_DEPTH}. */
+    private const TRUNCATED = '@docuccino:depth';
+
     /** A stable string fingerprint of an arbitrary JSON-ish value; `''` when it cannot be encoded. */
     public static function stable(mixed $value): string
     {
@@ -27,19 +44,44 @@ final class Json
         return $encoded === false ? '' : $encoded;
     }
 
-    private static function normalize(mixed $value): mixed
+    private static function normalize(mixed $value, int $depth = 0): mixed
     {
         if (is_array($value)) {
+            if ($depth >= self::MAX_DEPTH) {
+                return self::TRUNCATED;
+            }
+
             $keys = array_keys($value);
             sort($keys);
             $out = [];
             foreach ($keys as $key) {
-                $out[(string) $key] = self::normalize($value[$key]);
+                $out[self::text((string) $key)] = self::normalize($value[$key], $depth + 1);
             }
 
             return $out;
         }
 
-        return is_object($value) ? $value::class : $value;
+        if (is_object($value)) {
+            return $value::class;
+        }
+
+        if (is_string($value)) {
+            return self::text($value);
+        }
+
+        if (is_float($value) && ! is_finite($value)) {
+            return is_nan($value) ? 'NAN' : ($value > 0 ? 'INF' : '-INF');
+        }
+
+        return is_resource($value) ? 'resource:'.get_resource_type($value) : $value;
+    }
+
+    /**
+     * A string `json_encode` will take. Bytes that are not valid UTF-8 make it fail, so they travel
+     * base64-encoded — two different blobs then still fingerprint differently, which is the whole job.
+     */
+    private static function text(string $value): string
+    {
+        return preg_match('//u', $value) === 1 ? $value : 'base64:'.base64_encode($value);
     }
 }

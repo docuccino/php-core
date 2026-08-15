@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Extensions;
 
+use BackedEnum;
+use Closure;
 use Composer\InstalledVersions;
 use Docuccino\Core\Extensions\Contracts\DocumentTransformer;
 use Docuccino\Core\Extensions\Contracts\EnvironmentDigestContributor;
@@ -18,8 +20,11 @@ use Docuccino\Core\Extensions\Contracts\RouteResolver;
 use Docuccino\Core\Extensions\Contracts\RuleTransformer;
 use Docuccino\Core\Extensions\Contracts\TypeToSchema;
 use Docuccino\Core\Extensions\Ordering\ExtensionSorter;
+use Docuccino\Core\Support\Json;
 use ReflectionClass;
+use ReflectionFunction;
 use Throwable;
+use UnitEnum;
 
 /**
  * The extension set for one build, partitioned by contract and pre-sorted within each partition by
@@ -30,6 +35,12 @@ use Throwable;
  */
 final readonly class ResolvedExtensions
 {
+    /** How deep {@see readable()} descends into a property before it stops. */
+    private const MAX_DEPTH = 64;
+
+    /** What stands in for a value below {@see MAX_DEPTH}. */
+    private const TRUNCATED = '@docuccino:depth';
+
     /**
      * Grouped by phase once, up front, so a build iterating phases per route doesn't re-filter the
      * whole list every time.
@@ -90,10 +101,8 @@ final readonly class ResolvedExtensions
     public function classSignature(): array
     {
         $classes = [];
-        foreach ([$this->routeResolvers, $this->operationExtensions, $this->typeToSchema, $this->exceptionToResponse, $this->documentTransformers, $this->ruleTransformers, $this->responseAnalysisTargets, $this->responseStatusResolvers, $this->payloadMediaTypeResolvers, $this->routeBindingSchemaResolvers, $this->environmentDigestContributors] as $partition) {
-            foreach ($partition as $extension) {
-                $classes[$extension::class] = true;
-            }
+        foreach ($this->instances() as $extension) {
+            $classes[$extension::class] = true;
         }
 
         $names = array_keys($classes);
@@ -103,21 +112,142 @@ final readonly class ResolvedExtensions
     }
 
     /**
-     * {@see classSignature()} with each class paired with its composer package's installed version,
-     * so upgrading a package that changes an extension's behaviour invalidates every fragment even
-     * though the class list didn't move. The lookup is tolerant: an unresolvable package contributes
-     * an empty version rather than failing the build.
+     * The fragment-cache's view of the extension set: one entry per resolved INSTANCE, each naming its
+     * class, its composer package's installed version and a digest of its own configuration. The
+     * version pairing means upgrading a package that changes an extension's behaviour invalidates every
+     * fragment even though the class list didn't move; the lookup is tolerant, and an unresolvable
+     * package contributes an empty version rather than failing the build.
+     *
+     * Per INSTANCE rather than per class because an extension is registered as an object as often as a
+     * class-string (`Docuccino::extend(new MyExtension(mode: 'a'))`), and two instances of one
+     * class configured differently are two different builds. Keyed by the class alone they were one
+     * entry, and a warm cache answered the second configuration with the first one's output.
      *
      * @return list<string>
      */
     public function cacheSignature(): array
     {
         $signature = [];
-        foreach ($this->classSignature() as $class) {
-            $signature[] = $class.'@'.self::packageVersion($class);
+        foreach ($this->instances() as $extension) {
+            $signature[] = $extension::class.'@'.self::packageVersion($extension::class).'#'.self::configurationDigest($extension);
         }
 
+        // Two instances configured alike contribute the same entry twice, which is what running an
+        // extension twice is — the count is part of the set.
+        sort($signature);
+
         return $signature;
+    }
+
+    /**
+     * Every resolved extension, once each however many contracts it satisfies.
+     *
+     * @return list<object>
+     */
+    private function instances(): array
+    {
+        $instances = [];
+        foreach ($this->partitions() as $partition) {
+            foreach ($partition as $extension) {
+                $instances[spl_object_id($extension)] = $extension;
+            }
+        }
+
+        return array_values($instances);
+    }
+
+    /**
+     * @return list<list<object>>
+     */
+    private function partitions(): array
+    {
+        return [$this->routeResolvers, $this->operationExtensions, $this->typeToSchema, $this->exceptionToResponse, $this->documentTransformers, $this->ruleTransformers, $this->responseAnalysisTargets, $this->responseStatusResolvers, $this->payloadMediaTypeResolvers, $this->routeBindingSchemaResolvers, $this->environmentDigestContributors];
+    }
+
+    /**
+     * A digest of one extension instance's own configuration: its properties, private and inherited
+     * ones included, keyed by where they were declared.
+     *
+     * What it sees is what configuration is made of: scalars, arrays of them, enum cases, and a closure
+     * by where it was written plus what it captured. What it does NOT see is a collaborator object's own
+     * fields — this deliberately does not descend into one, since an injected container would be an
+     * unbounded walk and a collaborator is a dependency rather than a setting. Two instances differing
+     * only inside such an object therefore still key alike; holding the setting itself is the fix.
+     *
+     * The digest leans on {@see Json::stable()} being TOTAL over what a property can hold. It used to
+     * answer `''` for anything `json_encode` refused — a binary blob, a resource, an INF — and `''` is
+     * one digest shared by every configuration holding one, which silently reopened the very cache
+     * collision this method closes. That is fixed at the sink, so an unencodable value now fingerprints
+     * as itself rather than as nothing.
+     */
+    private static function configurationDigest(object $extension): string
+    {
+        $state = [];
+        foreach (self::properties($extension) as $key => $value) {
+            $state[$key] = self::readable($value);
+        }
+
+        return $state === [] ? '' : substr(hash('sha256', Json::stable($state)), 0, 16);
+    }
+
+    /**
+     * An instance's readable property values, keyed `Declaring\Class::name`. Uninitialised typed
+     * properties have no value to read and static ones belong to the class, not the configuration.
+     *
+     * @return array<string, mixed>
+     */
+    private static function properties(object $extension): array
+    {
+        $values = [];
+        for ($class = new ReflectionClass($extension); $class !== false; $class = $class->getParentClass()) {
+            foreach ($class->getProperties() as $property) {
+                if ($property->isStatic() || ! $property->isInitialized($extension)) {
+                    continue;
+                }
+
+                $values[$property->getDeclaringClass()->getName().'::'.$property->getName()] = $property->getValue($extension);
+            }
+        }
+
+        return $values;
+    }
+
+    /**
+     * The two configuration values {@see Json::stable()} would flatten to a bare class name — an enum
+     * case, so `Mode::Strict` and `Mode::Loose` are not the same setting, and a closure, read as where
+     * it was written plus what it captured. Everything else is left to `Json::stable()`, which is why a
+     * collaborator object still collapses to its class.
+     *
+     * A closure's source position is an absolute path, which never leaves this method: the signature is
+     * a fragment-cache key and nothing else, so it is local to the machine that built the cache.
+     *
+     * The descent is bounded because a property may hold anything at all, `$a['self'] = &$a` included —
+     * and that is a stack overflow, which is SIGSEGV with no message. `Json::stable()` bounds its own
+     * walk for the same reason, but this one reaches the value first.
+     */
+    private static function readable(mixed $value, int $depth = 0): mixed
+    {
+        if (is_array($value)) {
+            return $depth >= self::MAX_DEPTH
+                ? self::TRUNCATED
+                : array_map(static fn (mixed $item): mixed => self::readable($item, $depth + 1), $value);
+        }
+
+        if ($value instanceof Closure) {
+            $function = new ReflectionFunction($value);
+
+            return [
+                'closure' => $function->getFileName().':'.$function->getStartLine().'-'.$function->getEndLine(),
+                'bound' => $function->getClosureScopeClass()?->getName(),
+                'captured' => self::readable($function->getStaticVariables(), $depth + 1),
+            ];
+        }
+
+        if ($value instanceof BackedEnum) {
+            return $value::class.'::'.$value->value;
+        }
+
+        return $value instanceof UnitEnum ? $value::class.'::'.$value->name : $value;
     }
 
     /**

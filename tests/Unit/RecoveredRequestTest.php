@@ -108,7 +108,11 @@ it('emits two distinct components when a class is used as both request and respo
 
     expect($op->resolvedField('requestBody')['content']['application/json']['schema'])->toBe(['$ref' => '#/components/schemas/Thing'])
         ->and($responseName)->toBe('Thing_2')
-        ->and(array_keys($components->schemas()))->toBe(['Thing', 'Thing_2']);
+        ->and(array_keys($components->schemas()))->toBe(['Thing', 'Thing_2'])
+        // Which slot each landed in is route order; what they PUBLISH as is not. `Thing` is the class's
+        // own shape whichever side registered first, and the sent shape says that it is one.
+        ->and($components->schemaRenames())->toBe(['Thing' => 'ThingRequest', 'Thing_2' => 'Thing'])
+        ->and($components->nameCollisions())->toBe([]);
 });
 
 it('suffixes a THIRD distinct claimant past _2 (collision ordering beyond N=2)', function (): void {
@@ -127,23 +131,30 @@ it('suffixes a THIRD distinct claimant past _2 (collision ordering beyond N=2)',
         ->and(array_keys($components->schemas()))->toBe(['Thing', 'Thing_2', 'Thing_3'])
         // Re-registering an existing identity dedupes onto its own suffixed name, not a fourth.
         ->and($components->registerSchema('Thing', ['type' => 'object', 'properties' => ['slug' => ['type' => 'string']]], 'App\\Third\\Thing'))->toBe('Thing_3')
-        // All three publish under a namespace-derived name, under ONE warning for the contested name.
-        ->and($components->schemaRenames())->toEqual(['Thing' => 'AppThing', 'Thing_2' => 'OtherThing', 'Thing_3' => 'ThirdThing'])
+        // The request shape says it is one, so only the two response shapes contested a name — and they
+        // publish off their namespaces, under ONE warning naming both.
+        ->and($components->schemaRenames())->toEqual(['Thing' => 'ThingRequest', 'Thing_2' => 'OtherThing', 'Thing_3' => 'ThirdThing'])
         ->and($components->nameCollisions())->toHaveCount(1);
 });
 
-it('shares one component when a class is used on both sides with an identical shape', function (): void {
+it('keeps two components when a class is used on both sides and the shapes happen to coincide', function (): void {
+    // The sent shape and the returned shape are two identities, and two bodies that happen to agree
+    // today are still two things an author can change independently. Collapsing them would hand the
+    // survivor whichever identity registered first — route order deciding which facet the one
+    // component means — so they stay apart and each publishes the name its own facet earns.
     $components = new ComponentRegistry;
     $shape = ['type' => 'object', 'properties' => ['name' => ['type' => 'string']], 'required' => ['name']];
 
     $op = new OperationDraft;
     (new RecoveredRequest)->apply($op, requestContext($components), new ValidationSchema($shape), 'spatie-data', 'App\\Thing');
 
-    // Structurally identical response registration collapses onto the request component (one schema).
     $responseName = $components->registerSchema('Thing', $shape, 'App\\Thing');
 
-    expect($responseName)->toBe('Thing')
-        ->and(array_keys($components->schemas()))->toBe(['Thing']);
+    expect($responseName)->toBe('Thing_2')
+        ->and(array_keys($components->schemas()))->toBe(['Thing', 'Thing_2'])
+        ->and($components->schemaIds())->toBe(['Thing' => 'App\\Thing#request', 'Thing_2' => 'App\\Thing'])
+        ->and($components->schemaRenames())->toBe(['Thing' => 'ThingRequest', 'Thing_2' => 'Thing'])
+        ->and($components->nameCollisions())->toBe([]);
 });
 
 it('gives a #[SchemaId]-pinned source class a pinned, rename-stable request identity', function (): void {

@@ -22,8 +22,9 @@ use Docuccino\Core\Overlay\OverlayDocument;
 /**
  * Merges operation fragments into a UIR document array: places operations under their path/method,
  * hoists and identifies components, stamps document identity + generator metadata, applies overlays
- * and document transformers, then computes the content hash. Duplicate operation identities (two
- * routes claiming one `GET /x`) are error diagnostics, never silent overwrites.
+ * and document transformers, then computes the content hash. Two operations contesting one slot —
+ * duplicate identities, or a path and method a fragment already holds — are error diagnostics, and the
+ * first claimant keeps the slot; nothing is ever silently overwritten.
  *
  * @internal
  */
@@ -96,13 +97,17 @@ final class Assembler
         }
 
         // Registry order is deterministic (routes process sorted) and the canonicalizer sorts keys.
-        $componentResponses = $components->responses();
+        $responseRenames = $components->responseRenames();
+        $componentResponses = ComponentNames::rekey($components->responses(), $responseRenames);
         if ($componentResponses !== []) {
             $componentsOut['responses'] = $componentResponses;
         }
 
-        // Explicit config schemes win over integration-contributed ones (Sanctum/Passport).
-        $securitySchemes = $document->securitySchemes() + $components->securitySchemes();
+        // Explicit config schemes win over integration-contributed ones (Sanctum/Passport). The
+        // renames are applied before the merge, so a config scheme of the same name is never rekeyed
+        // by a map that was derived from the registry alone.
+        $schemeRenames = $components->securitySchemeRenames();
+        $securitySchemes = $document->securitySchemes() + ComponentNames::rekey($components->securitySchemes(), $schemeRenames);
         if ($securitySchemes !== []) {
             $componentsOut['securitySchemes'] = $securitySchemes;
         }
@@ -111,9 +116,11 @@ final class Assembler
             $doc['components'] = $componentsOut;
         }
 
-        // Registration named components first-come; this is where the ones two classes contested take
-        // the namespace-derived names they are published under, references included.
+        // Registration named components first-come; this is where the ones two claimants contested take
+        // the names they are published under, references included.
         $doc = $this->publishSchemaNames($doc, $components->schemaRenames());
+        $doc = ComponentNames::rename($doc, $responseRenames, 'responses');
+        $doc = $this->publishSecuritySchemeNames($doc, $schemeRenames);
 
         $doc['x-docuccino'] = [
             'document' => ['id' => $documentId, 'configHash' => $document->hash()],
@@ -194,22 +201,59 @@ final class Assembler
     {
         $paths = [];
         $seenIds = [];
+        /** @var array<string, array<string, string>> $claimed */
+        $claimed = [];
 
         foreach ($fragments as $fragment) {
             $operationId = $fragment->operation->docuccino?->id;
+            $sharedWith = $operationId === null ? null : ($seenIds[$operationId] ?? null);
 
-            if ($operationId !== null && isset($seenIds[$operationId])) {
+            // Only when the two are genuinely different slots. An identity is a function of the method,
+            // the path SHAPE and the host, so a repeat on one path and method is the slot collision
+            // below said a second time — what reaches here is two paths whose parameters are merely
+            // named differently (`{user}` and `{id}` normalise alike), which loses no operation but
+            // leaves a semantic diff unable to tell the pair apart.
+            if ($sharedWith !== null && $sharedWith !== $fragment->path) {
                 $diagnostics[] = new Diagnostic(
                     severity: Severity::Error,
                     code: 'identity.duplicate-operation',
-                    message: sprintf('Two routes resolve to the same operation identity (%s); one shadows the other.', $operationId),
+                    message: sprintf(
+                        'Two routes resolve to the same operation identity (%s): %s and %s. A path parameter\'s name is not part of an identity, so a semantic diff pairs the two as one operation.',
+                        $operationId,
+                        $sharedWith,
+                        $fragment->path,
+                    ),
                     routeSignature: $fragment->routeSignature,
+                    help: 'Give one of them a path that differs by more than a parameter name.',
                 );
             }
             if ($operationId !== null) {
-                $seenIds[$operationId] = true;
+                $seenIds[$operationId] ??= $fragment->path;
             }
 
+            $holder = $claimed[$fragment->path][$fragment->method] ?? null;
+            if ($holder !== null) {
+                $diagnostics[] = new Diagnostic(
+                    severity: Severity::Error,
+                    code: 'paths.operation-collision',
+                    message: sprintf(
+                        'OpenAPI documents one operation per path and method, and %s %s is already held by %s; this route is not in the document.',
+                        strtoupper($fragment->method),
+                        $fragment->path,
+                        $holder,
+                    ),
+                    routeSignature: $fragment->routeSignature,
+                    // Two routes with the SAME signature are one route registered twice, and telling
+                    // that author about hosts is advice about something they do not have.
+                    help: $holder === $fragment->routeSignature
+                        ? 'The same route is registered twice — remove one of the registrations.'
+                        : 'Routes that differ only by host are separate APIs to a reader: give each host its own document and filter the routes into it.',
+                );
+
+                continue;
+            }
+
+            $claimed[$fragment->path][$fragment->method] = $fragment->routeSignature;
             $paths[$fragment->path][$fragment->method] = $fragment->operation->toArray();
         }
 
@@ -244,6 +288,76 @@ final class Assembler
         $doc['components'] = $components;
 
         return $doc;
+    }
+
+    /**
+     * Repoint the `security` requirements a security-scheme rename moved. A requirement names its
+     * scheme as a KEY rather than through a `$ref`, so no reference walk reaches it — this is the one
+     * shape that has to be rewritten by hand.
+     *
+     * @param  array<string, mixed>  $doc
+     * @param  array<string, string>  $renames
+     * @return array<string, mixed>
+     */
+    private function publishSecuritySchemeNames(array $doc, array $renames): array
+    {
+        if ($renames === []) {
+            return $doc;
+        }
+
+        if (is_array($doc['security'] ?? null)) {
+            $doc['security'] = self::rekeyRequirements($doc['security'], $renames);
+        }
+
+        $paths = $doc['paths'] ?? null;
+        if (! is_array($paths)) {
+            return $doc;
+        }
+
+        foreach ($paths as $path => $operations) {
+            if (! is_array($operations)) {
+                continue;
+            }
+
+            foreach ($operations as $method => $operation) {
+                if (! is_array($operation) || ! is_array($operation['security'] ?? null)) {
+                    continue;
+                }
+
+                $operation['security'] = self::rekeyRequirements($operation['security'], $renames);
+                $operations[$method] = $operation;
+            }
+
+            $paths[$path] = $operations;
+        }
+
+        $doc['paths'] = $paths;
+
+        return $doc;
+    }
+
+    /**
+     * @param  array<array-key, mixed>  $security
+     * @param  array<string, string>  $renames
+     * @return list<array<string, mixed>>
+     */
+    private static function rekeyRequirements(array $security, array $renames): array
+    {
+        $out = [];
+        foreach ($security as $requirement) {
+            if (! is_array($requirement)) {
+                continue;
+            }
+
+            $renamed = [];
+            foreach ($requirement as $name => $scopes) {
+                $renamed[$renames[(string) $name] ?? (string) $name] = $scopes;
+            }
+
+            $out[] = $renamed;
+        }
+
+        return $out;
     }
 
     /**

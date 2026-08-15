@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\DiagnosticCollector;
 use Docuccino\Core\Diagnostics\Severity;
+use Docuccino\Core\Provenance\Source;
 
 /**
  * The deterministic diagnostic ordering used on every generateDocument() (and any
@@ -59,6 +60,31 @@ it('breaks ties by code then message with a stable order', function (): void {
     expect(array_map(static fn (Diagnostic $d): string => $d->code.':'.$d->message, $collector->sorted()))
         ->toBe(['aaa:zzz', 'same:apple', 'same:zebra']);
 });
+
+it('breaks a tie the message cannot, by source and then help', function (bool $reverse): void {
+    // Two controllers each pointing #[DescriptionFromFile] outside the app say the same thing about a
+    // different file, under no route signature at all — so everything the key looked at agreed and the
+    // pair came out in discovery order. The key runs on to what actually differs.
+    $collector = new DiagnosticCollector;
+    $diagnostics = [
+        new Diagnostic(Severity::Error, 'same', 'm', new Source('src/Zeta.php', 12), null, 'help'),
+        new Diagnostic(Severity::Error, 'same', 'm', new Source('src/Alpha.php', 9), null, 'help'),
+        new Diagnostic(Severity::Error, 'same', 'm', new Source('src/Alpha.php', 9), null, 'a-help'),
+        new Diagnostic(Severity::Error, 'same', 'm', new Source('src/Alpha.php'), null, 'help'),
+    ];
+    $collector->addAll($reverse ? array_reverse($diagnostics) : $diagnostics);
+
+    expect(array_map(
+        static fn (Diagnostic $d): string => ($d->source?->file ?? '').':'.($d->source?->line ?? '-').':'.$d->help,
+        $collector->sorted(),
+    ))->toBe([
+        // A source with no line sorts before one that has one, rather than tying with all of them.
+        'src/Alpha.php:-:help',
+        'src/Alpha.php:9:a-help',
+        'src/Alpha.php:9:help',
+        'src/Zeta.php:12:help',
+    ]);
+})->with([false, true]);
 
 it('addAll appends an iterable in order', function (): void {
     $collector = new DiagnosticCollector;

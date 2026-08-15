@@ -5,97 +5,133 @@ declare(strict_types=1);
 use Docuccino\Core\Extensions\Schema\ComponentNames;
 
 /**
- * The published names two or more classes contesting one component name end up under. The property
- * that matters is not any single name but that the whole map is a function of the contesting FQCNs
- * alone — never of who registered first — because the alternative hands the plain name to whichever
- * route happened to sort earliest, and an unrelated route added later silently swaps two shapes.
+ * The names schemas contesting one component name end up published under. The property that matters is
+ * not any single name but that the whole map is a function of the claims alone — never of who
+ * registered first — because the alternative hands the plain name to whichever route happened to sort
+ * earliest, and an unrelated route added later silently swaps two shapes.
+ *
+ * @param  array<string, array{base: string, identity: string|null, content: string}>  $claims
+ * @param  array<string, string>  $expected
  */
-it('publishes contested names off the namespace, taking only as much as it needs', function (array $schemaIds, array $names, array $expected): void {
-    expect(ComponentNames::resolve($schemaIds, $names))->toEqual($expected);
+it('publishes a name off what the schema is, not off the slot it landed in', function (array $claims, array $expected): void {
+    expect(ComponentNames::resolve($claims))->toEqual($expected);
 })->with([
     'nothing contested' => [
-        ['UserData' => 'App\\Data\\UserData'],
-        ['UserData'],
+        ['UserData' => claim('UserData', 'App\\Data\\UserData')],
+        [],
+    ],
+    'a class request shape is not its class response shape, so neither has to fight for the name' => [
+        // The whole of defect one: the two used to land on `Foo`/`Foo_2` by route order, so adding one
+        // read route flipped which shape `Foo` meant.
+        ['Article' => claim('Article', 'article.v1#request'), 'Article_2' => claim('Article', 'article.v1')],
+        ['Article' => 'ArticleRequest', 'Article_2' => 'Article'],
+    ],
+    'a request whose name already says request does not say it twice' => [
+        ['StoreWidgetRequest' => claim('StoreWidgetRequest', 'App\\Http\\Requests\\StoreWidgetRequest#request')],
         [],
     ],
     'the real case: an input shape and an output shape of one name' => [
-        ['SSOConnectionData' => 'App\\DTOs\\Schema\\Authentication\\SSOConnectionData', 'SSOConnectionData_2' => 'App\\DTOs\\Data\\SSO\\SSOConnectionData'],
-        ['SSOConnectionData', 'SSOConnectionData_2'],
+        ['SSOConnectionData' => claim('SSOConnectionData', 'App\\DTOs\\Schema\\Authentication\\SSOConnectionData'), 'SSOConnectionData_2' => claim('SSOConnectionData', 'App\\DTOs\\Data\\SSO\\SSOConnectionData')],
         ['SSOConnectionData' => 'AuthenticationSSOConnectionData', 'SSOConnectionData_2' => 'SSOSSOConnectionData'],
     ],
     'one segment is not enough, so both take two' => [
-        ['Node' => 'App\\Read\\Shared\\Node', 'Node_2' => 'App\\Write\\Shared\\Node'],
-        ['Node', 'Node_2'],
+        ['Node' => claim('Node', 'App\\Read\\Shared\\Node'), 'Node_2' => claim('Node', 'App\\Write\\Shared\\Node')],
         ['Node' => 'ReadSharedNode', 'Node_2' => 'WriteSharedNode'],
     ],
     'three claimants, all qualified together' => [
-        ['Node' => 'App\\A\\Node', 'Node_2' => 'App\\B\\Node', 'Node_3' => 'App\\C\\Node'],
-        ['Node', 'Node_2', 'Node_3'],
+        ['Node' => claim('Node', 'App\\A\\Node'), 'Node_2' => claim('Node', 'App\\B\\Node'), 'Node_3' => claim('Node', 'App\\C\\Node')],
         ['Node' => 'ANode', 'Node_2' => 'BNode', 'Node_3' => 'CNode'],
     ],
-    'a qualified name another schema already holds is deepened past it' => [
-        ['Node' => 'App\\A\\Node', 'Node_2' => 'App\\B\\Node'],
-        ['Node', 'Node_2', 'ANode'],
+    'a qualified name another schema asked for plainly is deepened past, leaving the incumbent alone' => [
+        ['Node' => claim('Node', 'App\\A\\Node'), 'Node_2' => claim('Node', 'App\\B\\Node'), 'ANode' => claim('ANode', 'App\\X\\ANode')],
         ['Node' => 'AppANode', 'Node_2' => 'BNode'],
     ],
-    'a contested base an unidentified shape claims keeps its positional names' => [
-        ['Node_2' => 'App\\B\\Node'],
-        ['Node', 'Node_2'],
-        [],
+    'a shape that names no identity is discriminated by the bytes it publishes' => [
+        ['Node' => claim('Node', null, '{"type":"object"}'), 'Node_2' => claim('Node', 'App\\B\\Node')],
+        ['Node' => 'Node_uldzsjrk', 'Node_2' => 'BNode'],
     ],
-    'a global class has no namespace, so the pair keeps its positional names' => [
-        ['Node' => 'Node', 'Node_2' => 'App\\B\\Node'],
-        ['Node', 'Node_2'],
-        [],
+    'a global class has no namespace to walk, so it takes the hash rung' => [
+        ['Node' => claim('Node', 'Node'), 'Node_2' => claim('Node', 'App\\B\\Node')],
+        ['Node' => 'Node_5ezxeuz7', 'Node_2' => 'BNode'],
     ],
-    'one class hoisted twice — a request shape beside its response shape — is not a class contest' => [
-        ['UserData' => 'App\\Data\\UserData', 'UserData_2' => 'App\\Data\\UserData#request'],
-        ['UserData', 'UserData_2'],
-        [],
-    ],
-    'a same-class pair blocks the walk for the whole group, third claimant included' => [
-        ['UserData' => 'App\\Data\\UserData', 'UserData_2' => 'App\\Data\\UserData#request', 'UserData_3' => 'App\\Dto\\UserData'],
-        ['UserData', 'UserData_2', 'UserData_3'],
-        [],
+    'a #[SchemaId] pin with no namespace is still stable, just not descriptive' => [
+        ['UserData' => claim('UserData', 'user-v1'), 'UserData_2' => claim('UserData', 'App\\Admin\\UserData')],
+        ['UserData' => 'UserData_x7ztb6hq', 'UserData_2' => 'AdminUserData'],
     ],
     'a shared tail segment is separated by the root above it' => [
-        ['Node' => 'Vendor\\Pkg\\Node', 'Node_2' => 'App\\Pkg\\Node'],
-        ['Node', 'Node_2'],
+        ['Node' => claim('Node', 'Vendor\\Pkg\\Node'), 'Node_2' => claim('Node', 'App\\Pkg\\Node')],
         ['Node' => 'VendorPkgNode', 'Node_2' => 'AppPkgNode'],
     ],
-    'one namespace, two classes claiming one name: the walk is exhausted, so the FQCN order breaks it' => [
-        ['Node' => 'App\\Pkg\\Alpha', 'Node_2' => 'App\\Pkg\\Beta'],
-        ['Node', 'Node_2'],
-        ['Node' => 'AppPkgNode', 'Node_2' => 'AppPkgNode_2'],
+    'one namespace, two classes claiming one name: the walk is exhausted, so the hash breaks it' => [
+        ['Node' => claim('Node', 'App\\Pkg\\Alpha'), 'Node_2' => claim('Node', 'App\\Pkg\\Beta')],
+        ['Node' => 'Node_dqd5ljz3', 'Node_2' => 'Node_2pvrnso5'],
     ],
     'the author-chosen base is what gets qualified, not the class short name' => [
-        ['Statement' => 'App\\Billing\\StatementData', 'Statement_2' => 'App\\Support\\StatementData'],
-        ['Statement', 'Statement_2'],
+        ['Statement' => claim('Statement', 'App\\Billing\\StatementData'), 'Statement_2' => claim('Statement', 'App\\Support\\StatementData')],
         ['Statement' => 'BillingStatement', 'Statement_2' => 'SupportStatement'],
+    ],
+    'a survivor left holding a suffix nothing else contests gets the name back' => [
+        // What a warm fragment cache hands over once the route that held the plain name is deleted.
+        ['SSOConnectionData_2' => claim('SSOConnectionData', 'App\\Data\\SSO\\SSOConnectionData')],
+        ['SSOConnectionData_2' => 'SSOConnectionData'],
     ],
 ]);
 
-it('depends on the contesting FQCNs alone, not on which of them registered first', function (): void {
+it('depends on the claims alone, not on which of them registered first', function (): void {
     // The whole point. Two builds that met the same two classes in opposite orders publish the same
     // two names, so adding a route that sorts earlier cannot swap what `SSOConnectionData` means.
-    $a = 'App\\Schema\\Auth\\SSOConnectionData';
-    $b = 'App\\Data\\SSO\\SSOConnectionData';
+    $a = claim('SSOConnectionData', 'App\\Schema\\Auth\\SSOConnectionData');
+    $b = claim('SSOConnectionData', 'App\\Data\\SSO\\SSOConnectionData');
 
-    $names = ['SSOConnectionData', 'SSOConnectionData_2'];
-    $forwards = ComponentNames::resolve(['SSOConnectionData' => $a, 'SSOConnectionData_2' => $b], $names);
-    $backwards = ComponentNames::resolve(['SSOConnectionData' => $b, 'SSOConnectionData_2' => $a], $names);
+    $forwards = ComponentNames::resolve(['SSOConnectionData' => $a, 'SSOConnectionData_2' => $b]);
+    $backwards = ComponentNames::resolve(['SSOConnectionData' => $b, 'SSOConnectionData_2' => $a]);
 
     // Same class, same published name, whichever provisional slot it happened to land in.
     expect($forwards)->toEqual(['SSOConnectionData' => 'AuthSSOConnectionData', 'SSOConnectionData_2' => 'SSOSSOConnectionData'])
         ->and($backwards)->toEqual(['SSOConnectionData' => 'SSOSSOConnectionData', 'SSOConnectionData_2' => 'AuthSSOConnectionData']);
 });
 
-it('retires the contested name rather than awarding it to one of the claimants', function (): void {
+it('retires a name two claims asked for rather than awarding it to one of them', function (): void {
     // If one claimant kept `Node`, a build that met the other first would publish a `Node` of the other
     // shape — same name, different meaning, and a green build either way.
-    $renames = ComponentNames::resolve(['Node' => 'App\\A\\Node', 'Node_2' => 'App\\B\\Node'], ['Node', 'Node_2']);
+    $renames = ComponentNames::resolve(['Node' => claim('Node', 'App\\A\\Node'), 'Node_2' => claim('Node', 'App\\B\\Node')]);
 
-    expect(array_values($renames))->not->toContain('Node');
+    expect($renames)->toHaveKeys(['Node', 'Node_2'])
+        ->and(array_values($renames))->not->toContain('Node');
+});
+
+it('leaves every other claim exactly where it was when one is added', function (): void {
+    // Locality, stated directly: a new class contesting `Node` may move `Node`, and must move nothing
+    // else — not the request shape beside it, and not the class that already held `ANode`.
+    $before = [
+        'Article' => claim('Article', 'article.v1#request'),
+        'Article_2' => claim('Article', 'article.v1'),
+        'ANode' => claim('ANode', 'App\\X\\ANode'),
+        'Node' => claim('Node', 'App\\A\\Node'),
+    ];
+
+    $after = ComponentNames::resolve([...$before, 'Node_2' => claim('Node', 'App\\B\\Node')]);
+    $settled = ComponentNames::resolve($before);
+
+    expect($settled)->toEqual(['Article' => 'ArticleRequest', 'Article_2' => 'Article'])
+        ->and($after['Article'])->toBe('ArticleRequest')
+        ->and($after['Article_2'])->toBe('Article')
+        ->and($after)->not->toHaveKey('ANode')
+        ->and($after['Node'])->toBe('AppANode');
+});
+
+it('reports each name two claims asked for, and nothing that was never contested', function (): void {
+    $contests = ComponentNames::contests([
+        'Article' => claim('Article', 'article.v1#request'),
+        'Article_2' => claim('Article', 'article.v1'),
+        'Node' => claim('Node', 'App\\A\\Node'),
+        'Node_2' => claim('Node', null, '{"type":"string"}'),
+    ]);
+
+    // A request shape beside its class's own shape never wanted one name, so it is not a collision.
+    expect($contests)->toHaveKey('Node')
+        ->and($contests)->not->toHaveKey('Article')
+        ->and($contests['Node'])->toBe(['ANode' => 'App\\A\\Node', 'Node_abae42de' => 'an unidentified schema']);
 });
 
 it('sanitizes a name down to the characters a $ref may carry', function (string $raw, string $expected): void {

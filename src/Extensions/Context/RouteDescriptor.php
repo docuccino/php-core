@@ -24,6 +24,16 @@ final readonly class RouteDescriptor
      * @param  list<string>  $cacheInputs  extra scalar cache-key inputs a resolver folds in (design
      *                                     §10): anything not knowable from method/URI/action/middleware
      *                                     that must still bust the fragment cache when it changes
+     * @param  string|null  $domain  the host this route answers on (`admin.example.com`, or a templated
+     *                               `{tenant}.example.com`), scheme-less and lower-cased, or null when it
+     *                               answers on every host. Part of the route's IDENTITY, not just its
+     *                               cache key: one method and URI on two hosts is two operations, and
+     *                               keying either without it serves one sibling's answer for the other.
+     * @param  bool  $fallback  whether this is a catch-all route answering any path no other route
+     *                          matched (Laravel's `Route::fallback()`). Its URI is a placeholder rather
+     *                          than an endpoint, so it is reported and omitted rather than published.
+     *                          Deliberately absent from {@see cacheSignature()}: a route that never
+     *                          reaches a fragment has nothing to key.
      */
     public function __construct(
         public array $methods,
@@ -32,6 +42,8 @@ final readonly class RouteDescriptor
         public ?string $action = null,
         public array $middleware = [],
         public array $cacheInputs = [],
+        public ?string $domain = null,
+        public bool $fallback = false,
     ) {}
 
     /** The primary documentable HTTP method (lower-case) — the first non-HEAD method. */
@@ -70,10 +82,14 @@ final readonly class RouteDescriptor
         return $methods === [] ? [$this->primaryMethod()] : $methods;
     }
 
-    /** A stable, human-readable signature for diagnostics: `GET /api/forms`. */
-    public function signature(): string
+    /**
+     * A stable, human-readable signature for diagnostics: `GET /api/forms`, or
+     * `GET admin.example.com/api/forms` when the route is bound to a host. Pass a method to name one
+     * verb of a multi-method route rather than its primary one.
+     */
+    public function signature(?string $method = null): string
     {
-        return strtoupper($this->primaryMethod()).' '.$this->uri;
+        return strtoupper($method ?? $this->primaryMethod()).' '.($this->domain ?? '').$this->uri;
     }
 
     /**
@@ -82,7 +98,9 @@ final readonly class RouteDescriptor
      * route (the name is the default `operationId`), re-pointing it at another controller or changing
      * middleware (an auth guard shifts the documented security) invalidates the fragment even though
      * the human signature didn't move. The name is folded unconditionally: no route file changes when
-     * `routes/api.php` renames one, and a rename only ever invalidates the route it renamed.
+     * `routes/api.php` renames one, and a rename only ever invalidates the route it renamed. The host
+     * is in here because it is what tells two same-method, same-URI siblings apart at all — without it
+     * they share a key and a warm build hands one of them the other's fragment.
      */
     public function cacheSignature(): string
     {
@@ -98,6 +116,7 @@ final readonly class RouteDescriptor
             $this->action ?? '',
             implode(',', $middleware),
             implode(',', $this->cacheInputs),
+            $this->domain ?? '',
         ]);
     }
 }

@@ -124,6 +124,35 @@ it('mints identical op ids for two routes claiming the same method and path', fu
     expect($a)->toBe($b);
 });
 
+it('leaves a host-less operation the exact identity it had before hosts existed', function (): void {
+    // The byte-lock: every document ever emitted pairs on these, so a route that answers on every host
+    // must hash the three-element tuple and nothing else. A literal, because "same as itself" would
+    // pass however the tuple were built.
+    expect($this->ids->operationId('doc:default', 'GET', '/forms/{form}'))->toBe('op:v1:gokzo2gfa274hn5j')
+        ->and($this->ids->operationId('doc:default', 'GET', '/forms/{form}', null))
+        ->toBe($this->ids->operationId('doc:default', 'GET', '/forms/{form}'))
+        ->and($this->ids->operationId('doc:default', 'GET', '/forms/{form}', ''))
+        ->toBe($this->ids->operationId('doc:default', 'GET', '/forms/{form}'));
+});
+
+it('breaks operation identity when the host changes, so two hosts are two operations', function (): void {
+    $anyHost = $this->ids->operationId('doc:default', 'GET', '/forms');
+    $admin = $this->ids->operationId('doc:default', 'GET', '/forms', 'admin.example.com');
+    $public = $this->ids->operationId('doc:default', 'GET', '/forms', 'www.example.com');
+
+    expect($admin)->not->toBe($public)
+        ->and($admin)->not->toBe($anyHost)
+        ->and($admin)->toBe($this->ids->operationId('doc:default', 'GET', '/forms', 'admin.example.com'));
+});
+
+it('keeps operation identity across a host-parameter rename', function (): void {
+    // Same rule the path template gets: renaming `{tenant}` to `{account}` is a rename, not a new
+    // endpoint, so the diff must still pair them.
+    expect($this->ids->operationId('doc:default', 'GET', '/forms', '{tenant}.example.com'))
+        ->toBe($this->ids->operationId('doc:default', 'GET', '/forms', '{account}.example.com'))
+        ->not->toBe($this->ids->operationId('doc:default', 'GET', '/forms', '{tenant}.example.net'));
+});
+
 it('derives a response id that breaks on status and on media-type change', function (): void {
     $op = 'op:v1:aaaaaaaaaaaaaaaa';
 

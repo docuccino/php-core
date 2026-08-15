@@ -4,20 +4,32 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Extensions\Schema;
 
+use Docuccino\Core\Identity\Base32;
+
 /**
- * Decides the name every class-identified component schema is published under, and rewrites the
- * `$ref`s that point at them.
+ * Decides the name every component schema is published under, and rewrites the `$ref`s that point at
+ * them.
  *
- * Registration hands out names first-come, which is only ever provisional: the plain name would go to
- * whichever route happened to sort first, so adding an unrelated route that sorts earlier could swap
- * two components' names without changing a byte of either shape — a silent breaking change for every
- * generated client. So the names two classes contesting one name are published under are derived from
- * their FQCNs instead: walk up the namespaces until the names differ, and retire the contested plain
- * name rather than awarding it to one of them. `App\Data\SSO\SSOConnectionData` and
- * `App\Schema\Auth\SSOConnectionData` become `SSOSSOConnectionData` and `AuthSSOConnectionData`.
+ * The name a registration lands on is a storage SLOT, handed out first-come — `Foo`, then `Foo_2` —
+ * and first-come is route order. Published as-is, the plain name would go to whichever route happened
+ * to sort first, so adding an unrelated route could swap what two components mean without changing a
+ * byte of either shape: a silent breaking change for every generated client. So the published name is
+ * derived from what a schema IS, never from the slot it got. Each registration states a CLAIM — the
+ * name it asked for, the identity behind it, and the bytes it publishes — and proposes a name off
+ * that:
  *
- * Every name this produces is a function of the contesting FQCNs alone — never of discovery,
- * registration or route order — which is what makes it stable across builds.
+ * 1. the name it asked for, plus the facet of its identity: a class's request shape is not its
+ *    response shape, so `App\Data\Article#request` proposes `ArticleRequest` and the class's own shape
+ *    proposes `Article` — always, contested or not, so adding one never renames the other;
+ * 2. then the innermost namespace segments of its identity, one at a time —
+ *    `AuthenticationSSOConnectionData` beside `SSOSSOConnectionData`;
+ * 3. then a prefix of the hash of its identity (its published bytes, for a schema that names no
+ *    identity) — for two classes in one namespace, or a `#[SchemaId]` pin with no namespace to walk.
+ *
+ * While two claims propose the same name they both take their next rung, so nobody keeps a name two
+ * claims asked for and every name is a function of the contesting set alone.
+ *
+ * @phpstan-type Claim array{base: string, identity: string|null, content: string}
  *
  * @internal
  */
@@ -26,191 +38,22 @@ final class ComponentNames
     /** The head of every component reference; the bucket and name follow it. */
     private const PREFIX = '#/components/';
 
+    /** Characters of the identity hash a claim nothing else separates falls back to — 40 bits. */
+    private const DISCRIMINATOR = 8;
+
     /**
-     * The published name of every schema whose registration name isn't the one it should keep:
+     * The published name of every schema whose registration slot isn't the name it should keep:
      * registration name → published name. Names absent from the result keep the name they have.
      *
-     * @param  array<string, string>  $schemaIds  registration name → the identity it was hoisted for
-     * @param  list<string>  $names  every registered schema name, identified or not
+     * @param  array<string, Claim>  $claims  registration name → what it claims
      * @return array<string, string>
      */
-    public static function resolve(array $schemaIds, array $names): array
+    public static function resolve(array $claims): array
     {
-        [$contested, $reserved] = self::partition($schemaIds, $names);
-
-        if ($contested === []) {
-            return [];
-        }
-
-        return self::assign($contested, self::depths($contested, $reserved), $reserved);
-    }
-
-    /**
-     * Every base name more than one schema claimed, as contested name → published name → identity.
-     * Includes the contests nothing renamed — a pair whose identities have no namespace between them
-     * still ended up on `Foo` and `Foo_2`, and the author still deserves to hear about it.
-     *
-     * @param  array<string, string>  $schemaIds
-     * @param  list<string>  $names
-     * @return array<string, array<string, string>>
-     */
-    public static function contests(array $schemaIds, array $names): array
-    {
-        $renames = self::resolve($schemaIds, $names);
-        $taken = array_fill_keys($names, true);
-
-        $out = [];
-        foreach (self::groups($names, $taken) as $base => $group) {
-            if (count($group) < 2) {
-                continue;
-            }
-
-            foreach ($group as $name) {
-                $out[(string) $base][$renames[$name] ?? $name] = $schemaIds[$name] ?? 'an unidentified schema';
-            }
-        }
-
-        return $out;
-    }
-
-    /**
-     * Split the registered names into the ones a namespace walk can separate and the ones it must
-     * leave alone. A group only qualifies when every claimant carries a namespaced identity AND those
-     * identities are distinct CLASSES: one class hoisted twice — a request shape beside its response
-     * shape — shares every namespace segment it has, so walking them would only trade `Foo_2` for a
-     * longer name that still needs a suffix.
-     *
-     * @param  array<string, string>  $schemaIds
-     * @param  list<string>  $names
-     * @return array{array<string, array{base: string, fqcn: string}>, array<string, true>}
-     */
-    private static function partition(array $schemaIds, array $names): array
-    {
-        $taken = array_fill_keys($names, true);
-
-        /** @var array<string, true> $reserved names nothing is going to rename, so nothing may take */
-        $reserved = [];
-        /** @var array<string, array{base: string, fqcn: string}> $contested */
-        $contested = [];
-
-        foreach (self::groups($names, $taken) as $base => $group) {
-            $classes = [];
-            foreach ($group as $name) {
-                $class = isset($schemaIds[$name]) ? self::classIdentity($schemaIds[$name]) : null;
-                if ($class !== null && str_contains($class, '\\')) {
-                    $classes[$class] = true;
-                }
-            }
-
-            $separable = count($group) > 1 && count($classes) === count($group);
-
-            foreach ($group as $name) {
-                if ($separable) {
-                    $contested[$name] = ['base' => (string) $base, 'fqcn' => $schemaIds[$name]];
-                } else {
-                    $reserved[$name] = true;
-                }
-            }
-        }
-
-        return [$contested, $reserved];
-    }
-
-    /**
-     * The registered names grouped under the base each asked for. `Foo_2` only exists because `Foo`
-     * was taken, so the base is recoverable from the finished name set — no need to track which
-     * registration wanted what, which a warm cache hit could not replay anyway.
-     *
-     * @param  list<string>  $names
-     * @param  array<string, true>  $taken
-     * @return array<string, list<string>>
-     */
-    private static function groups(array $names, array $taken): array
-    {
-        $groups = [];
-        foreach ($names as $name) {
-            $groups[self::base($name, $taken)][] = $name;
-        }
-
-        return $groups;
-    }
-
-    /** The class half of a schema identity — `App\Data\User#request` is still `App\Data\User`. */
-    private static function classIdentity(string $schemaId): string
-    {
-        $hash = strpos($schemaId, '#');
-
-        return $hash === false ? $schemaId : substr($schemaId, 0, $hash);
-    }
-
-    /**
-     * How many namespace segments each contested name needs to stand apart — from every other
-     * contested name and from every name nothing is renaming. Deepening one group can push it onto a
-     * name someone else proposed, so this runs to a fixed point; depth only ever rises and each FQCN
-     * has finitely many segments, so it terminates.
-     *
-     * @param  array<string, array{base: string, fqcn: string}>  $contested
-     * @param  array<string, true>  $reserved
-     * @return array<string, int>
-     */
-    private static function depths(array $contested, array $reserved): array
-    {
-        $depth = array_map(static fn (): int => 1, $contested);
-
-        while (true) {
-            $deepened = false;
-
-            foreach (self::byProposal($contested, $depth) as $proposal => $claimants) {
-                if (count($claimants) === 1 && ! isset($reserved[$proposal])) {
-                    continue;
-                }
-
-                foreach ($claimants as $name) {
-                    if ($depth[$name] < count(self::segments($contested[$name]['fqcn']))) {
-                        $depth[$name]++;
-                        $deepened = true;
-                    }
-                }
-            }
-
-            if (! $deepened) {
-                return $depth;
-            }
-        }
-    }
-
-    /**
-     * The final name for each contested registration. Anything still sharing a proposal has run out
-     * of namespace to walk — identical namespaces under different roots, or two FQCNs that sanitize
-     * to one name — so it falls back to a numeric suffix ordered by FQCN, which is still a function of
-     * the contesting set rather than of who registered first.
-     *
-     * @param  array<string, array{base: string, fqcn: string}>  $contested
-     * @param  array<string, int>  $depth
-     * @param  array<string, true>  $reserved
-     * @return array<string, string>
-     */
-    private static function assign(array $contested, array $depth, array $reserved): array
-    {
-        $used = $reserved;
         $renames = [];
-
-        $byProposal = self::byProposal($contested, $depth);
-        ksort($byProposal);
-
-        foreach ($byProposal as $proposal => $claimants) {
-            usort($claimants, static fn (string $a, string $b): int => $contested[$a]['fqcn'] <=> $contested[$b]['fqcn']);
-
-            foreach ($claimants as $name) {
-                $candidate = (string) $proposal;
-                for ($n = 2; isset($used[$candidate]); $n++) {
-                    $candidate = $proposal.'_'.$n;
-                }
-
-                $used[$candidate] = true;
-                if ($candidate !== $name) {
-                    $renames[$name] = $candidate;
-                }
+        foreach (self::settle($claims)[0] as $name => $published) {
+            if ($published !== (string) $name) {
+                $renames[(string) $name] = $published;
             }
         }
 
@@ -218,63 +61,266 @@ final class ComponentNames
     }
 
     /**
-     * @param  array<string, array{base: string, fqcn: string}>  $contested
-     * @param  array<string, int>  $depth
-     * @return array<string, list<string>>
+     * Every name two or more schemas asked for, as contested name → published name → identity. The
+     * facet rung is part of the ask, so a class's request shape beside its response shape is not a
+     * contest — those two never wanted the same name in the first place.
+     *
+     * @param  array<string, Claim>  $claims
+     * @return array<string, array<string, string>>
      */
-    private static function byProposal(array $contested, array $depth): array
+    public static function contests(array $claims): array
     {
+        [$names, $contested] = self::settle($claims);
+
         $out = [];
-        foreach ($contested as $name => $entry) {
-            $out[self::qualify($entry['base'], $entry['fqcn'], $depth[$name])][] = $name;
+        foreach ($contested as $asked => $claimants) {
+            foreach ($claimants as $name) {
+                $out[$asked][$names[$name] ?? $name] = $claims[$name]['identity'] ?? 'an unidentified schema';
+            }
         }
 
         return $out;
     }
 
-    /** The base name prefixed with the innermost `$depth` namespace segments of its class. */
-    private static function qualify(string $base, string $fqcn, int $depth): string
+    /**
+     * The published name of every claim, plus the names two or more of them asked for.
+     *
+     * For a caller that MINTS names rather than renaming registration slots — the shared-error hoist,
+     * which builds its components out of the finished document and has no registry to rename. It states
+     * the same claims a registry does and gets the same answers, so the two paths cannot drift apart:
+     * an identity-less claim's ladder is exactly the plain-name-then-content-hash pair such a caller
+     * would otherwise hand-roll, and {@see deepen()} is already the rule that moves two equal claimants
+     * off a name neither may keep.
+     *
+     * `$taken` names components this pass cannot move — ones already published by the time it runs. A
+     * claim proposing one climbs past it, and the name counts as contested so the move is reported
+     * rather than silent.
+     *
+     * @param  array<string, Claim>  $claims
+     * @param  list<string>  $taken
+     * @return array{array<string, string>, array<string, list<string>>}
+     */
+    public static function mint(array $claims, array $taken = []): array
     {
-        $segments = self::segments($fqcn);
-
-        return self::sanitize(implode('', array_slice($segments, -$depth)).$base);
+        return self::settle($claims, $taken);
     }
 
     /**
-     * The namespace segments of an FQCN, outermost first — the class's own short name excluded.
+     * The published name of every claim, plus the claims that asked for a name someone else asked for.
+     *
+     * @param  array<string, Claim>  $claims
+     * @param  list<string>  $taken
+     * @return array{array<string, string>, array<string, list<string>>}
+     */
+    private static function settle(array $claims, array $taken = []): array
+    {
+        $ladders = array_map(self::ladder(...), $claims);
+        $names = self::award($ladders, self::deepen($ladders, $taken), $claims, $taken);
+
+        /** @var array<string, list<string>> $asked */
+        $asked = [];
+        foreach ($ladders as $name => $ladder) {
+            $asked[$ladder[0]][] = (string) $name;
+        }
+
+        return [$names, array_filter(
+            $asked,
+            static fn (array $claimants, int|string $name): bool => count($claimants) > 1 || in_array((string) $name, $taken, true),
+            ARRAY_FILTER_USE_BOTH,
+        )];
+    }
+
+    /**
+     * The names one claim will propose, in order: what it asked for, then each further namespace
+     * segment of its identity, then the hash rung — which is unique per claim, so the ladder always
+     * ends somewhere nobody else can be.
+     *
+     * @param  Claim  $claim
+     * @return list<string>
+     */
+    private static function ladder(array $claim): array
+    {
+        $stem = self::sanitize($claim['base'].self::facet($claim['base'], $claim['identity']));
+
+        $rungs = [$stem];
+
+        $segments = self::segments($claim['identity'] ?? '');
+        for ($depth = 1; $depth <= count($segments); $depth++) {
+            $rungs[] = self::sanitize(implode('', array_slice($segments, -$depth)).$stem);
+        }
+
+        $rungs[] = $stem.'_'.self::discriminator($claim['identity'] ?? $claim['content']);
+
+        return array_values(array_unique($rungs));
+    }
+
+    /**
+     * How far up its ladder each claim has to climb to stand alone.
+     *
+     * Claims that asked for the same name equally are all moved off it — nobody keeps a name that
+     * would have meant something else in a build that met the other one first. But a claim that climbs
+     * ONTO a name someone else asked for plainly keeps climbing alone: the incumbent asked for it
+     * without contest, and renaming it would let one part of an application move an unrelated one.
+     *
+     * A `$taken` name is that same incumbent, one that this pass cannot move at all — so everybody on
+     * it climbs and it keeps what it has.
+     *
+     * Climbing lands claims on new names, so this runs to a fixed point; a rung only ever rises and
+     * every ladder is finite, so it terminates.
+     *
+     * @param  array<string, list<string>>  $ladders
+     * @param  list<string>  $taken
+     * @return array<string, int>
+     */
+    private static function deepen(array $ladders, array $taken = []): array
+    {
+        $rungs = array_map(static fn (): int => 0, $ladders);
+
+        while (true) {
+            $climbed = false;
+
+            /** @var array<string, list<string>> $proposals */
+            $proposals = [];
+            foreach ($ladders as $name => $ladder) {
+                $proposals[$ladder[$rungs[$name]]][] = (string) $name;
+            }
+
+            foreach ($proposals as $proposal => $claimants) {
+                if (in_array((string) $proposal, $taken, true)) {
+                    foreach ($claimants as $name) {
+                        if ($rungs[$name] < count($ladders[$name]) - 1) {
+                            $rungs[$name]++;
+                            $climbed = true;
+                        }
+                    }
+
+                    continue;
+                }
+
+                if (count($claimants) < 2) {
+                    continue;
+                }
+
+                $shallowest = min(array_map(static fn (string $name): int => $rungs[$name], $claimants));
+                $tied = array_filter($claimants, static fn (string $name): bool => $rungs[$name] === $shallowest);
+
+                foreach (count($tied) === count($claimants) ? $claimants : array_diff($claimants, $tied) as $name) {
+                    if ($rungs[$name] < count($ladders[$name]) - 1) {
+                        $rungs[$name]++;
+                        $climbed = true;
+                    }
+                }
+            }
+
+            if (! $climbed) {
+                return $rungs;
+            }
+        }
+    }
+
+    /**
+     * The name each claim is published under. Two claims can only still share a proposal by sharing a
+     * ladder's last rung, which takes two identities that hash alike — so the numeric tail here is a
+     * guarantee that the map stays one-to-one rather than a naming strategy. Claims are awarded in
+     * identity order, so even that tail is a function of the contesting set.
+     *
+     * @param  array<string, list<string>>  $ladders
+     * @param  array<string, int>  $rungs
+     * @param  array<string, Claim>  $claims
+     * @param  list<string>  $taken
+     * @return array<string, string>
+     */
+    private static function award(array $ladders, array $rungs, array $claims, array $taken = []): array
+    {
+        $order = array_map(strval(...), array_keys($ladders));
+        usort($order, static fn (string $a, string $b): int => self::discriminant($claims[$a]) <=> self::discriminant($claims[$b]));
+
+        $used = array_fill_keys($taken, true);
+        $names = [];
+        foreach ($order as $name) {
+            $proposal = $ladders[$name][$rungs[$name]];
+
+            $candidate = $proposal;
+            for ($n = 2; isset($used[$candidate]); $n++) {
+                $candidate = $proposal.'_'.$n;
+            }
+
+            $used[$candidate] = true;
+            $names[$name] = $candidate;
+        }
+
+        // Awarded in identity order, handed back in registration order — the caller's map reads like
+        // the registry it came from.
+        $ordered = [];
+        foreach ($ladders as $name => $ladder) {
+            $ordered[(string) $name] = $names[(string) $name];
+        }
+
+        return $ordered;
+    }
+
+    /**
+     * The qualifier an identity's facet contributes. `App\Data\Article#request` is the shape a client
+     * SENDS, and calling it `Article` would leave the class's own shape to fight it for the name — one
+     * of them losing to a suffix that says nothing. Empty when the name already says it, so a
+     * `StoreWidgetRequest` never becomes `StoreWidgetRequestRequest`.
+     */
+    private static function facet(string $base, ?string $identity): string
+    {
+        if ($identity === null) {
+            return '';
+        }
+
+        $hash = strpos($identity, '#');
+        if ($hash === false) {
+            return '';
+        }
+
+        $word = ucfirst(self::clean(substr($identity, $hash + 1)));
+
+        return $word === '' || str_ends_with(strtolower($base), strtolower($word)) ? '' : $word;
+    }
+
+    /** @param  Claim  $claim */
+    private static function discriminant(array $claim): string
+    {
+        return $claim['identity'] ?? $claim['content'];
+    }
+
+    /** A short hash of what makes a claim itself, in the same base32 alphabet as a node id. */
+    private static function discriminator(string $source): string
+    {
+        return substr(Base32::encode(hash('sha256', $source, binary: true)), 0, self::DISCRIMINATOR);
+    }
+
+    /**
+     * The namespace segments of an identity, outermost first — the class's own short name, and any
+     * facet hanging off it, excluded. An identity with no namespace to walk yields none.
      *
      * @return list<string>
      */
-    private static function segments(string $fqcn): array
+    private static function segments(string $identity): array
     {
-        $parts = explode('\\', trim($fqcn, '\\'));
+        $parts = explode('\\', trim($identity, '\\'));
         array_pop($parts);
 
         return $parts;
     }
 
-    /**
-     * The name a registration asked for, recovered from the name it got: strip the disambiguating
-     * suffix while what's left is itself a registered name.
-     *
-     * @param  array<string, true>  $taken
-     */
-    private static function base(string $name, array $taken): string
-    {
-        while (preg_match('/^(.+)_\d+$/', $name, $matches) === 1 && isset($taken[$matches[1]])) {
-            $name = $matches[1];
-        }
-
-        return $name;
-    }
-
     /** Reduce a name to the characters a `$ref` may carry, never to nothing. */
     public static function sanitize(string $name): string
     {
-        $clean = preg_replace('/[^A-Za-z0-9_.-]/', '', $name);
-        $clean = is_string($clean) ? $clean : '';
+        $clean = self::clean($name);
 
         return $clean === '' ? 'Schema' : $clean;
+    }
+
+    /** The `$ref`-safe characters of a name, which may be none of them. */
+    private static function clean(string $name): string
+    {
+        $clean = preg_replace('/[^A-Za-z0-9_.-]/', '', $name);
+
+        return is_string($clean) ? $clean : '';
     }
 
     /**

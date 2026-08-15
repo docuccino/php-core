@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Docuccino\Core\Canonical;
 
 use Docuccino\Core\Document\PathItem;
+use Docuccino\Core\Support\Json;
 use stdClass;
 
 /**
@@ -237,19 +238,19 @@ final class Canonicalizer
             return [];
         }
 
-        $parameters = [];
+        // Decorated with a TOTAL key. `in` and `name` settle every parameter stated inline, but a
+        // `{"$ref": …}` parameter states neither, so a list of them all tied and kept the order they
+        // arrived in — which is whatever built the list. The bytes break the remaining ties, and two
+        // parameters with the same bytes are the same parameter.
+        $keyed = [];
         foreach ($node as $parameter) {
-            $parameters[] = $this->canonicalizeParameter($parameter);
+            $canonical = $this->canonicalizeParameter($parameter);
+            $keyed[] = [[$this->parameterRank($canonical), $this->parameterName($canonical), Json::stable($canonical)], $canonical];
         }
 
-        usort($parameters, function (mixed $a, mixed $b): int {
-            $rankA = $this->parameterRank($a);
-            $rankB = $this->parameterRank($b);
+        usort($keyed, static fn (array $a, array $b): int => $a[0] <=> $b[0]);
 
-            return $rankA <=> $rankB ?: strcmp($this->parameterName($a), $this->parameterName($b));
-        });
-
-        return $parameters;
+        return array_column($keyed, 1);
     }
 
     private function parameterRank(mixed $parameter): int

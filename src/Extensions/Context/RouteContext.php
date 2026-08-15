@@ -9,6 +9,7 @@ use Docuccino\Core\Extensions\Contracts\OperationExtension;
 use Docuccino\Core\Extensions\Contracts\PayloadMediaTypeResolver;
 use Docuccino\Core\Extensions\Contracts\ResponseAnalysisTarget;
 use Docuccino\Core\Extensions\Contracts\ResponseStatusResolver;
+use Docuccino\Core\Extensions\Contracts\RouteBindingFieldSchemaResolver;
 use Docuccino\Core\Extensions\Contracts\RouteBindingSchemaResolver;
 use Docuccino\Core\Extensions\Contracts\RuleTransformer;
 use Docuccino\Core\Extensions\Contracts\TypeToSchema;
@@ -60,6 +61,8 @@ final class RouteContext
      * @param  list<string>  $pathParameters  route template parameter names, in template order
      * @param  list<string>  $optionalPathParameters  the subset declared optional (`{param?}`)
      * @param  array<string, string>  $routeBindings  path parameter name → bound model FQCN
+     * @param  array<string, string>  $routeBindingFields  path parameter name → the column it binds on,
+     *                                                     for the subset that names one (`{post:slug}`)
      * @param  list<ResponseAnalysisTarget>  $responseAnalysisTargets  gated success-body analysis redirects
      * @param  list<ResponseStatusResolver>  $responseStatusResolvers  gated success-status overrides
      * @param  list<PayloadMediaTypeResolver>  $payloadMediaTypeResolvers  gated response media-type matchers
@@ -89,6 +92,7 @@ final class RouteContext
         public readonly array $payloadMediaTypeResolvers = [],
         public readonly array $routeBindingSchemaResolvers = [],
         public readonly ?string $formRequestClass = null,
+        public readonly array $routeBindingFields = [],
     ) {
         $this->dependencies = new RouteDependencies;
     }
@@ -166,6 +170,30 @@ final class RouteContext
     {
         foreach ($this->routeBindingSchemaResolvers as $resolver) {
             $schema = $resolver->keySchemaFor($modelFqcn);
+            if ($schema !== null) {
+                return $schema;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * JSON-schema keywords for the named column a path parameter binds on (`{post:slug}`), or null when
+     * nothing in the chain can type it. Only resolvers that also answer the field question take part —
+     * the route-key schema is NOT a fallback here, because a slug typed off an integer `id` is exactly
+     * the confident wrong answer this exists to avoid.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function routeBindingFieldSchema(string $modelFqcn, string $field): ?array
+    {
+        foreach ($this->routeBindingSchemaResolvers as $resolver) {
+            if (! $resolver instanceof RouteBindingFieldSchemaResolver) {
+                continue;
+            }
+
+            $schema = $resolver->fieldSchemaFor($this, $modelFqcn, $field);
             if ($schema !== null) {
                 return $schema;
             }

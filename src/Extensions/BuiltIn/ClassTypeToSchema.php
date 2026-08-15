@@ -48,8 +48,8 @@ final class ClassTypeToSchema implements TypeToSchema
             $context->dependsOn(...$metadata->dependencyFiles);
 
             if ($metadata->properties === []) {
-                // Degrade to a bare object: null leaves the reserved name unused, so it never reaches
-                // components.schemas. An unexpandable class has no body to self-reference anyway.
+                // Degrade to a bare object: with no properties there is nothing to publish, and nothing
+                // was walked that could have self-referenced it.
                 return null;
             }
 
