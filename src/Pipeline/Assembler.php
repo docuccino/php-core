@@ -216,7 +216,7 @@ final class Assembler
             if ($sharedWith !== null && $sharedWith !== $fragment->path) {
                 $diagnostics[] = new Diagnostic(
                     severity: Severity::Error,
-                    code: 'identity.duplicate-operation',
+                    code: 'route.duplicate-operation',
                     message: sprintf(
                         'Two routes resolve to the same operation identity (%s): %s and %s. A path parameter\'s name is not part of an identity, so a semantic diff pairs the two as one operation.',
                         $operationId,
@@ -235,7 +235,7 @@ final class Assembler
             if ($holder !== null) {
                 $diagnostics[] = new Diagnostic(
                     severity: Severity::Error,
-                    code: 'paths.operation-collision',
+                    code: 'route.operation-collision',
                     message: sprintf(
                         'OpenAPI documents one operation per path and method, and %s %s is already held by %s; this route is not in the document.',
                         strtoupper($fragment->method),
@@ -381,7 +381,7 @@ final class Assembler
             if (isset($seen[$operationId])) {
                 $diagnostics[] = new Diagnostic(
                     severity: Severity::Warning,
-                    code: 'identity.duplicate-operation-id',
+                    code: 'route.duplicate-operation-id',
                     message: sprintf('operationId "%s" is claimed by both %s and %s; a generated client names one function for the pair.', $operationId, $seen[$operationId], $fragment->routeSignature),
                     routeSignature: $fragment->routeSignature,
                     help: 'Give one of them its own id with #[OperationId], or name the routes distinctly.',

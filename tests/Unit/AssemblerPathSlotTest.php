@@ -49,7 +49,7 @@ it('keeps the first claimant of a path and method, and reports the operation it 
         ($this->fragment)('/api/reports', 'get', 'GET b.example.com/api/reports', 'op:v1:bbbbbbbbbbbbbbbb'),
     ]);
 
-    $collisions = array_values(array_filter($diagnostics, fn (Diagnostic $d): bool => $d->code === 'paths.operation-collision'));
+    $collisions = array_values(array_filter($diagnostics, fn (Diagnostic $d): bool => $d->code === 'route.operation-collision'));
 
     expect($document['paths']['/api/reports'])->toHaveKey('get')
         ->and($document['paths']['/api/reports']['get']['summary'])->toBe('GET a.example.com/api/reports')
@@ -70,19 +70,19 @@ it('reports a shared identity and a taken slot as the two different problems the
 
     $codes = array_values(array_map(
         fn (Diagnostic $d): string => $d->code,
-        array_filter($diagnostics, fn (Diagnostic $d): bool => str_starts_with($d->code, 'identity.') || str_starts_with($d->code, 'paths.')),
+        array_filter($diagnostics, fn (Diagnostic $d): bool => str_starts_with($d->code, 'route.')),
     ));
 
     expect($codes)->toBe($expected);
 })->with([
     // Two slots, one identity: both operations are emitted, but a differ pairs them as one node.
-    'renamed path parameter' => ['/api/users/{id}', 'op:v1:aaaaaaaaaaaaaaaa', ['identity.duplicate-operation']],
+    'renamed path parameter' => ['/api/users/{id}', 'op:v1:aaaaaaaaaaaaaaaa', ['route.duplicate-operation']],
     // One slot, two identities: the document loses an operation, and nothing about identity is wrong.
-    'two hosts on one URI' => ['/api/users/{user}', 'op:v1:bbbbbbbbbbbbbbbb', ['paths.operation-collision']],
+    'two hosts on one URI' => ['/api/users/{user}', 'op:v1:bbbbbbbbbbbbbbbb', ['route.operation-collision']],
     // One slot AND one identity is ONE event: the identity repeats because the path and method do, so
     // the collision report already names it. Saying it twice, thirteen lines apart, is one defect
     // reported as two.
-    'one slot and one identity' => ['/api/users/{user}', 'op:v1:aaaaaaaaaaaaaaaa', ['paths.operation-collision']],
+    'one slot and one identity' => ['/api/users/{user}', 'op:v1:aaaaaaaaaaaaaaaa', ['route.operation-collision']],
 ]);
 
 it('does not advise a plain duplicate about hosts it does not have', function (): void {
@@ -100,7 +100,7 @@ it('does not advise a plain duplicate about hosts it does not have', function ()
 
     $help = static fn (array $diagnostics): ?string => array_values(array_filter(
         $diagnostics,
-        static fn (Diagnostic $d): bool => $d->code === 'paths.operation-collision',
+        static fn (Diagnostic $d): bool => $d->code === 'route.operation-collision',
     ))[0]->help;
 
     expect($help($duplicate))->toContain('registered twice')
@@ -117,7 +117,7 @@ it('reports nothing when every fragment holds a slot of its own', function (): v
         ($this->fragment)('/api/ledgers', 'get', 'GET /api/ledgers', 'op:v1:cccccccccccccccc'),
     ]);
 
-    expect(array_filter($diagnostics, fn (Diagnostic $d): bool => $d->code === 'paths.operation-collision'))->toBe([])
+    expect(array_filter($diagnostics, fn (Diagnostic $d): bool => $d->code === 'route.operation-collision'))->toBe([])
         ->and($document['paths']['/api/reports'])->toHaveKeys(['get', 'post'])
         ->and($document['paths']['/api/ledgers'])->toHaveKey('get');
 });
