@@ -87,7 +87,7 @@ it('reports a shared identity and a taken slot as the two different problems the
 
 it('does not advise a plain duplicate about hosts it does not have', function (): void {
     // The same route registered twice is one signature twice. The host advice is right for two hosts on
-    // one URI and nonsense for this, and it used to be unconditional.
+    // one URI and nonsense for this, so it is conditional on the descriptors really differing by host.
     [, $duplicate] = ($this->assemble)([
         ($this->fragment)('/api/reports', 'get', 'GET /api/reports', 'op:v1:aaaaaaaaaaaaaaaa'),
         ($this->fragment)('/api/reports', 'get', 'GET /api/reports', 'op:v1:aaaaaaaaaaaaaaaa'),

@@ -67,6 +67,7 @@ final class RouteContext
      * @param  list<ResponseStatusResolver>  $responseStatusResolvers  gated success-status overrides
      * @param  list<PayloadMediaTypeResolver>  $payloadMediaTypeResolvers  gated response media-type matchers
      * @param  list<RouteBindingSchemaResolver>  $routeBindingSchemaResolvers  gated route-key schema typers
+     * @param  list<RouteBindingFieldSchemaResolver>  $routeBindingFieldSchemaResolvers  gated `{post:slug}` column typers
      * @param  ?string  $formRequestClass  the FormRequest class type-hinted on the action, if any
      */
     public function __construct(
@@ -93,6 +94,7 @@ final class RouteContext
         public readonly array $routeBindingSchemaResolvers = [],
         public readonly ?string $formRequestClass = null,
         public readonly array $routeBindingFields = [],
+        public readonly array $routeBindingFieldSchemaResolvers = [],
     ) {
         $this->dependencies = new RouteDependencies;
     }
@@ -180,19 +182,14 @@ final class RouteContext
 
     /**
      * JSON-schema keywords for the named column a path parameter binds on (`{post:slug}`), or null when
-     * nothing in the chain can type it. Only resolvers that also answer the field question take part —
-     * the route-key schema is NOT a fallback here, because a slug typed off an integer `id` is exactly
-     * the confident wrong answer this exists to avoid.
+     * nothing in the chain can type it — a separate chain from the route-key one, and deliberately so
+     * ({@see RouteBindingFieldSchemaResolver}).
      *
      * @return array<string, mixed>|null
      */
     public function routeBindingFieldSchema(string $modelFqcn, string $field): ?array
     {
-        foreach ($this->routeBindingSchemaResolvers as $resolver) {
-            if (! $resolver instanceof RouteBindingFieldSchemaResolver) {
-                continue;
-            }
-
+        foreach ($this->routeBindingFieldSchemaResolvers as $resolver) {
             $schema = $resolver->fieldSchemaFor($this, $modelFqcn, $field);
             if ($schema !== null) {
                 return $schema;

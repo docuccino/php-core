@@ -41,9 +41,9 @@ it('breaks a self-reference with a $ref to the name the body will land on', func
 });
 
 it('takes no name at all for a class it cannot expand', function (): void {
-    // The defect: reserving up front and never releasing left `Widget` held against a component that
-    // never arrived, so an unrelated class of the same name was pushed onto `Widget_2` — renamed by a
-    // route that contributed nothing, with no collision to warn about.
+    // Reserving up front and never releasing holds `Widget` against a component that never arrives, so
+    // an unrelated class of the same name is pushed onto `Widget_2` — renamed by a route that
+    // contributed nothing, with no collision to warn about.
     $components = new ComponentRegistry;
     $context = new SchemaConverter(DefaultTypeMappers::all(), new NullTypeEngine, $components, new RepresentationPolicy);
     $hoist = new ComponentHoist;

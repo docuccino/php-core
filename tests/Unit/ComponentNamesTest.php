@@ -14,15 +14,15 @@ use Docuccino\Core\Extensions\Schema\ComponentNames;
  * @param  array<string, string>  $expected
  */
 it('publishes a name off what the schema is, not off the slot it landed in', function (array $claims, array $expected): void {
-    expect(ComponentNames::resolve($claims))->toEqual($expected);
+    expect(ComponentNames::settlement($claims)[0])->toEqual($expected);
 })->with([
     'nothing contested' => [
         ['UserData' => claim('UserData', 'App\\Data\\UserData')],
         [],
     ],
     'a class request shape is not its class response shape, so neither has to fight for the name' => [
-        // The whole of defect one: the two used to land on `Foo`/`Foo_2` by route order, so adding one
-        // read route flipped which shape `Foo` meant.
+        // A slot-based answer lands these on `Foo`/`Foo_2` by route order, so adding one read route
+        // flips which shape `Foo` means.
         ['Article' => claim('Article', 'article.v1#request'), 'Article_2' => claim('Article', 'article.v1')],
         ['Article' => 'ArticleRequest', 'Article_2' => 'Article'],
     ],
@@ -83,8 +83,8 @@ it('depends on the claims alone, not on which of them registered first', functio
     $a = claim('SSOConnectionData', 'App\\Schema\\Auth\\SSOConnectionData');
     $b = claim('SSOConnectionData', 'App\\Data\\SSO\\SSOConnectionData');
 
-    $forwards = ComponentNames::resolve(['SSOConnectionData' => $a, 'SSOConnectionData_2' => $b]);
-    $backwards = ComponentNames::resolve(['SSOConnectionData' => $b, 'SSOConnectionData_2' => $a]);
+    $forwards = ComponentNames::settlement(['SSOConnectionData' => $a, 'SSOConnectionData_2' => $b])[0];
+    $backwards = ComponentNames::settlement(['SSOConnectionData' => $b, 'SSOConnectionData_2' => $a])[0];
 
     // Same class, same published name, whichever provisional slot it happened to land in.
     expect($forwards)->toEqual(['SSOConnectionData' => 'AuthSSOConnectionData', 'SSOConnectionData_2' => 'SSOSSOConnectionData'])
@@ -94,7 +94,7 @@ it('depends on the claims alone, not on which of them registered first', functio
 it('retires a name two claims asked for rather than awarding it to one of them', function (): void {
     // If one claimant kept `Node`, a build that met the other first would publish a `Node` of the other
     // shape — same name, different meaning, and a green build either way.
-    $renames = ComponentNames::resolve(['Node' => claim('Node', 'App\\A\\Node'), 'Node_2' => claim('Node', 'App\\B\\Node')]);
+    $renames = ComponentNames::settlement(['Node' => claim('Node', 'App\\A\\Node'), 'Node_2' => claim('Node', 'App\\B\\Node')])[0];
 
     expect($renames)->toHaveKeys(['Node', 'Node_2'])
         ->and(array_values($renames))->not->toContain('Node');
@@ -110,8 +110,8 @@ it('leaves every other claim exactly where it was when one is added', function (
         'Node' => claim('Node', 'App\\A\\Node'),
     ];
 
-    $after = ComponentNames::resolve([...$before, 'Node_2' => claim('Node', 'App\\B\\Node')]);
-    $settled = ComponentNames::resolve($before);
+    $after = ComponentNames::settlement([...$before, 'Node_2' => claim('Node', 'App\\B\\Node')])[0];
+    $settled = ComponentNames::settlement($before)[0];
 
     expect($settled)->toEqual(['Article' => 'ArticleRequest', 'Article_2' => 'Article'])
         ->and($after['Article'])->toBe('ArticleRequest')
@@ -121,12 +121,12 @@ it('leaves every other claim exactly where it was when one is added', function (
 });
 
 it('reports each name two claims asked for, and nothing that was never contested', function (): void {
-    $contests = ComponentNames::contests([
+    $contests = ComponentNames::settlement([
         'Article' => claim('Article', 'article.v1#request'),
         'Article_2' => claim('Article', 'article.v1'),
         'Node' => claim('Node', 'App\\A\\Node'),
         'Node_2' => claim('Node', null, '{"type":"string"}'),
-    ]);
+    ])[1];
 
     // A request shape beside its class's own shape never wanted one name, so it is not a collision.
     expect($contests)->toHaveKey('Node')

@@ -102,8 +102,8 @@ it('is the same signature across two builds of one configuration', function (): 
 });
 
 it('reads a closure by where it was written and what it captured', function (): void {
-    // Json::stable() sees every closure as `Closure` and nothing else, so a setting held as one was
-    // invisible. Two closures written in two places are two settings; one written once is one setting
+    // Json::stable() sees every closure as `Closure` and nothing else, so a setting held as one needs
+    // reading here. Two closures written in two places are two settings; one written once is one setting
     // however many builds construct it, or a cache enabled beside such an extension is never warm.
     $signature = static fn (Closure $decide): array => (new ResolvedExtensions(
         documentTransformers: [new ClosureConfiguredTransformer($decide)],
@@ -119,9 +119,9 @@ it('reads a closure by where it was written and what it captured', function (): 
 
 /**
  * A configuration value is whatever an extension author put in a property, and one that `json_encode`
- * refuses used to take the whole instance's digest down with it: `Json::stable()` answered `''`, so
- * every configuration holding such a value keyed alike — the exact cache collision this signature
- * exists to close, reopened by a binary blob.
+ * refuses must not take the whole instance's digest down with it: a shared `''` answer keys every
+ * configuration holding such a value alike, which is the exact cache collision this signature exists
+ * to close, reopened by a binary blob.
  */
 it('still separates two configurations when one of them holds a value json_encode refuses', function (Closure $make): void {
     $signature = static fn (string $mode): array => (new ResolvedExtensions(

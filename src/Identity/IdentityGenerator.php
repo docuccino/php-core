@@ -37,8 +37,8 @@ final readonly class IdentityGenerator
 
     /**
      * Two routes on one method and path but different hosts are two operations, so the host is part of
-     * the identity — but only when there is one, so a route that answers on every host keeps the id it
-     * has always had. A templated host normalises its `{param}` segments the same way a path does.
+     * the identity — but only when there is one, so a route that answers on every host is identified by
+     * method and path alone. A templated host normalises its `{param}` segments the same way a path does.
      */
     public function operationId(string $documentId, string $method, string $pathTemplate, ?string $host = null): string
     {

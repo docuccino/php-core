@@ -16,33 +16,17 @@ use Docuccino\Core\Support\Arr;
 use Docuccino\Core\Support\Json;
 
 /**
- * Collapses a repeated error body into shared components, in two independent passes.
+ * Collapses a repeated error body into shared components, in two independent passes: the body SHAPE into
+ * `components.schemas`, then — over the rewritten document — the whole RESPONSE into
+ * `components.responses`. That order is load-bearing and the two are never alternatives; design §"Shared
+ * error components" has the argument, and §2 "Component naming" the names.
  *
- * **Shapes** (`components.schemas`) go first: a body SHAPE two or more operations state identically is
- * hoisted and each `content[<media type>].schema` becomes a `$ref`. This is the pass that decides what a
- * generated client gets — one error type instead of one per operation — and it must not care how an
- * operation ILLUSTRATES the error. `description`, `headers` and the media type's own `example` stay on
- * the operation, because an OAS Reference Object may carry none of them beside a `$ref` (OAS 3.2
- * §4.23.1). The Media Type Object's `example` sits outside the schema and is legal in 3.0, 3.1 and 3.2
- * alike, so nothing is lost and nothing downlevels.
+ * Identity survives both rewrites: an operation keeps its own response id and provenance beside the
+ * `$ref`, and a hoisted component carries an id minted from the bytes it publishes — never a per-route
+ * source, which has no business speaking for the other routes sharing it.
  *
- * **Responses** (`components.responses`) go second, over the rewritten document: a whole response —
- * description, headers, examples, and by now a schema `$ref` — that two or more operations state
- * identically is hoisted too. It runs second so that the response it hoists points at the shared shape
- * instead of carrying its own anonymous copy — a code generator names an inline schema after whatever
- * encloses it, so the wrong order would hand back the per-response types the first pass exists to
- * prevent. The two passes are independent, never alternatives: a response that differs by example simply
- * does not join an identical-response group, while the operations that DO match still share one, and all
- * of them still share one shape.
- *
- * Identity survives both rewrites. Each operation keeps its own response id and provenance beside the
- * `$ref`, and a schema keeps its own, so the id-based semantic diff still sees one response per
- * operation. A hoisted component carries no provenance — that is a per-route fact, and one route's
- * source file has no business speaking for the others.
- *
- * Deliberately narrow: 4xx/5xx only, only bodies that actually repeat, and only responses that carry
- * `content` — a description-only response is already small. Anything already a `$ref` is left alone,
- * which is also what makes a second run over this transformer's own output a no-op.
+ * Deliberately narrow: 4xx/5xx only, only bodies that actually repeat, and only responses carrying
+ * `content`. Anything already a `$ref` is left alone, which is what makes a second run a no-op.
  */
 final class SharedErrorResponses implements DocumentTransformer
 {
@@ -53,21 +37,9 @@ final class SharedErrorResponses implements DocumentTransformer
     private const PROVENANCE = 'x-docuccino';
 
     /**
-     * How many occurrences make a body worth hoisting.
-     *
-     * This threshold is not local, and that is a deliberate, ranked trade rather than an oversight:
-     * adding a second identical occurrence promotes the FIRST one from inline to `$ref`, so an operation
-     * nobody edited emits different bytes. What it does NOT do is change what anything MEANS — the body
-     * is the same body, a generated client mints the same type, and every consumer reads the same
-     * contract. That is the whole distinction. The defect this transformer exists to fix is the other
-     * kind: a NAME that quietly comes to mean a different shape, which a client keeps compiling against
-     * and silently gets wrong. Names here are therefore derived from content alone (see {@see mint()}),
-     * while the inline/`$ref` boundary is allowed to move.
-     *
-     * Hoisting singletons instead would make the boundary local, at the cost of a `components` bucket
-     * holding one entry per one-off error body — more indirection, more names to collide, and a worse
-     * document for the reader and the code generator both. Repetition is the whole justification for a
-     * shared component, so a body that does not repeat does not get one.
+     * How many occurrences make a body worth hoisting. Deliberately not a local boundary — a second
+     * occurrence promotes the first from inline to `$ref` — which is a ranked trade, not an oversight:
+     * design §"Shared error components".
      */
     private const MIN_OCCURRENCES = 2;
 
@@ -258,8 +230,7 @@ final class SharedErrorResponses implements DocumentTransformer
      * The naming is {@see ComponentNames}'s, not this transformer's: every path that mints a component
      * name owes it that invariant, and a second implementation of "plain name, then content hash, then
      * a numeric tail" is how the two would come to disagree. Each body states a claim with no identity
-     * to carry — the bytes stand in for one — which is exactly the two-rung ladder this used to
-     * hand-roll.
+     * to carry, so the bytes stand in for one and the ladder degenerates to exactly that pair.
      *
      * So `Error<status>` belongs to a status only while ONE body claims it: two make it contested and
      * each takes a name derived from its own content, and a third arriving later disturbs neither. A

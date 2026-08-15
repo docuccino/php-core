@@ -15,6 +15,7 @@ use Docuccino\Core\Extensions\Contracts\OperationPhase;
 use Docuccino\Core\Extensions\Contracts\PayloadMediaTypeResolver;
 use Docuccino\Core\Extensions\Contracts\ResponseAnalysisTarget;
 use Docuccino\Core\Extensions\Contracts\ResponseStatusResolver;
+use Docuccino\Core\Extensions\Contracts\RouteBindingFieldSchemaResolver;
 use Docuccino\Core\Extensions\Contracts\RouteBindingSchemaResolver;
 use Docuccino\Core\Extensions\Contracts\RouteResolver;
 use Docuccino\Core\Extensions\Contracts\RuleTransformer;
@@ -60,6 +61,7 @@ final readonly class ResolvedExtensions
      * @param  list<ResponseStatusResolver>  $responseStatusResolvers  gated success-status overrides
      * @param  list<PayloadMediaTypeResolver>  $payloadMediaTypeResolvers  gated response media-type matchers
      * @param  list<RouteBindingSchemaResolver>  $routeBindingSchemaResolvers  gated route-key schema typers
+     * @param  list<RouteBindingFieldSchemaResolver>  $routeBindingFieldSchemaResolvers  gated `{post:slug}` column typers
      * @param  list<EnvironmentDigestContributor>  $environmentDigestContributors  gated booted-app cache-digest segments
      */
     public function __construct(
@@ -73,6 +75,7 @@ final readonly class ResolvedExtensions
         public array $responseStatusResolvers = [],
         public array $payloadMediaTypeResolvers = [],
         public array $routeBindingSchemaResolvers = [],
+        public array $routeBindingFieldSchemaResolvers = [],
         public array $environmentDigestContributors = [],
     ) {
         $byPhase = [];
@@ -93,25 +96,6 @@ final readonly class ResolvedExtensions
     }
 
     /**
-     * Every resolved extension class, deduped and sorted — a fragment-cache key input, so changing
-     * the extension set invalidates every fragment.
-     *
-     * @return list<string>
-     */
-    public function classSignature(): array
-    {
-        $classes = [];
-        foreach ($this->instances() as $extension) {
-            $classes[$extension::class] = true;
-        }
-
-        $names = array_keys($classes);
-        sort($names);
-
-        return $names;
-    }
-
-    /**
      * The fragment-cache's view of the extension set: one entry per resolved INSTANCE, each naming its
      * class, its composer package's installed version and a digest of its own configuration. The
      * version pairing means upgrading a package that changes an extension's behaviour invalidates every
@@ -119,9 +103,9 @@ final readonly class ResolvedExtensions
      * package contributes an empty version rather than failing the build.
      *
      * Per INSTANCE rather than per class because an extension is registered as an object as often as a
-     * class-string (`Docuccino::extend(new MyExtension(mode: 'a'))`), and two instances of one
-     * class configured differently are two different builds. Keyed by the class alone they were one
-     * entry, and a warm cache answered the second configuration with the first one's output.
+     * class-string (`Docuccino::extend(new MyExtension(mode: 'a'))`), and two instances of one class
+     * configured differently are two different builds. Keyed by the class alone they are one entry, and
+     * a warm cache answers the second configuration with the first one's output.
      *
      * @return list<string>
      */
@@ -161,7 +145,7 @@ final readonly class ResolvedExtensions
      */
     private function partitions(): array
     {
-        return [$this->routeResolvers, $this->operationExtensions, $this->typeToSchema, $this->exceptionToResponse, $this->documentTransformers, $this->ruleTransformers, $this->responseAnalysisTargets, $this->responseStatusResolvers, $this->payloadMediaTypeResolvers, $this->routeBindingSchemaResolvers, $this->environmentDigestContributors];
+        return [$this->routeResolvers, $this->operationExtensions, $this->typeToSchema, $this->exceptionToResponse, $this->documentTransformers, $this->ruleTransformers, $this->responseAnalysisTargets, $this->responseStatusResolvers, $this->payloadMediaTypeResolvers, $this->routeBindingSchemaResolvers, $this->routeBindingFieldSchemaResolvers, $this->environmentDigestContributors];
     }
 
     /**
@@ -174,11 +158,9 @@ final readonly class ResolvedExtensions
      * unbounded walk and a collaborator is a dependency rather than a setting. Two instances differing
      * only inside such an object therefore still key alike; holding the setting itself is the fix.
      *
-     * The digest leans on {@see Json::stable()} being TOTAL over what a property can hold. It used to
-     * answer `''` for anything `json_encode` refused — a binary blob, a resource, an INF — and `''` is
-     * one digest shared by every configuration holding one, which silently reopened the very cache
-     * collision this method closes. That is fixed at the sink, so an unencodable value now fingerprints
-     * as itself rather than as nothing.
+     * The digest leans on {@see Json::stable()} being TOTAL over what a property can hold: a value
+     * `json_encode` refuses — a binary blob, a resource, an INF — fingerprints as itself, because one
+     * shared digest for all of them would reopen the very cache collision this method closes.
      */
     private static function configurationDigest(object $extension): string
     {

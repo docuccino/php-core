@@ -7,27 +7,10 @@ namespace Docuccino\Core\Extensions\Schema;
 use Docuccino\Core\Identity\Base32;
 
 /**
- * Decides the name every component schema is published under, and rewrites the `$ref`s that point at
- * them.
- *
- * The name a registration lands on is a storage SLOT, handed out first-come — `Foo`, then `Foo_2` —
- * and first-come is route order. Published as-is, the plain name would go to whichever route happened
- * to sort first, so adding an unrelated route could swap what two components mean without changing a
- * byte of either shape: a silent breaking change for every generated client. So the published name is
- * derived from what a schema IS, never from the slot it got. Each registration states a CLAIM — the
- * name it asked for, the identity behind it, and the bytes it publishes — and proposes a name off
- * that:
- *
- * 1. the name it asked for, plus the facet of its identity: a class's request shape is not its
- *    response shape, so `App\Data\Article#request` proposes `ArticleRequest` and the class's own shape
- *    proposes `Article` — always, contested or not, so adding one never renames the other;
- * 2. then the innermost namespace segments of its identity, one at a time —
- *    `AuthenticationSSOConnectionData` beside `SSOSSOConnectionData`;
- * 3. then a prefix of the hash of its identity (its published bytes, for a schema that names no
- *    identity) — for two classes in one namespace, or a `#[SchemaId]` pin with no namespace to walk.
- *
- * While two claims propose the same name they both take their next rung, so nobody keeps a name two
- * claims asked for and every name is a function of the contesting set alone.
+ * Decides the name every component is published under, and rewrites the `$ref`s pointing at them. Owns
+ * the rule that a published name is a function of the claims contesting it and never of the order they
+ * were met — registration slots are first-come, and first-come is route order. The claim ladder and why
+ * it has those rungs: design §2 "Component naming".
  *
  * @phpstan-type Claim array{base: string, identity: string|null, content: string}
  *
@@ -42,44 +25,35 @@ final class ComponentNames
     private const DISCRIMINATOR = 8;
 
     /**
-     * The published name of every schema whose registration slot isn't the name it should keep:
-     * registration name → published name. Names absent from the result keep the name they have.
+     * What one bucket's claims settle to: the RENAMES — registration name → published name, for the
+     * claims whose slot isn't the name they keep — and the CONTESTS, as contested name → published name
+     * → identity. Both fall out of one settle, so a caller never pays for the fixed point twice.
+     *
+     * The facet rung is part of the ask, so a class's request shape beside its response shape is not a
+     * contest — those two never wanted the same name in the first place.
      *
      * @param  array<string, Claim>  $claims  registration name → what it claims
-     * @return array<string, string>
+     * @return array{array<string, string>, array<string, array<string, string>>}
      */
-    public static function resolve(array $claims): array
+    public static function settlement(array $claims): array
     {
+        [$names, $contested] = self::settle($claims);
+
         $renames = [];
-        foreach (self::settle($claims)[0] as $name => $published) {
+        foreach ($names as $name => $published) {
             if ($published !== (string) $name) {
                 $renames[(string) $name] = $published;
             }
         }
 
-        return $renames;
-    }
-
-    /**
-     * Every name two or more schemas asked for, as contested name → published name → identity. The
-     * facet rung is part of the ask, so a class's request shape beside its response shape is not a
-     * contest — those two never wanted the same name in the first place.
-     *
-     * @param  array<string, Claim>  $claims
-     * @return array<string, array<string, string>>
-     */
-    public static function contests(array $claims): array
-    {
-        [$names, $contested] = self::settle($claims);
-
-        $out = [];
+        $contests = [];
         foreach ($contested as $asked => $claimants) {
             foreach ($claimants as $name) {
-                $out[$asked][$names[$name] ?? $name] = $claims[$name]['identity'] ?? 'an unidentified schema';
+                $contests[(string) $asked][$names[$name] ?? $name] = $claims[$name]['identity'] ?? 'an unidentified schema';
             }
         }
 
-        return $out;
+        return [$renames, $contests];
     }
 
     /**

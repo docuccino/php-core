@@ -9,9 +9,8 @@ use Docuccino\Core\Provenance\Source;
 
 /**
  * The deterministic diagnostic ordering used on every generateDocument() (and any
- * --embed-diagnostics payload). The composite key is [routeSignature, severity rank, code, message];
- * this is the byte-stability artifact the DiagnosticBag→DiagnosticCollector merge otherwise left
- * un-asserted (G3).
+ * --embed-diagnostics payload). The composite key is [routeSignature, severity rank, code, message],
+ * and byte stability is what it buys.
  */
 it('sorts by routeSignature, then severity rank, then code, then message — insertion order untouched by all()', function (): void {
     $collector = new DiagnosticCollector;

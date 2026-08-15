@@ -145,7 +145,7 @@ it('discriminates a shape that names no identity by the bytes it publishes, and 
 
 it('publishes a schema under the name it asked for even when its slot kept a suffix', function (): void {
     // What a warm fragment cache hands over once the route that held the plain name is deleted: the
-    // survivor re-registers under `Node`, so a `_2` naming a class no longer in the document is gone.
+    // survivor re-registers under `Node`, so no `_2` names a class the document no longer holds.
     $registry = new ComponentRegistry;
 
     $registry->registerSchema('Node', ['type' => 'object'], 'App\\A\\Node');

@@ -5,7 +5,7 @@ declare(strict_types=1);
 use Docuccino\Core\Extensions\Context\RouteDescriptor;
 
 /**
- * RouteDescriptor identity + cache-signature soundness (design §10 / arch A1): the human signature
+ * RouteDescriptor identity + cache-signature soundness (design §10): the human signature
  * is method + URI (plus the host, when the route is bound to one), while the cache signature
  * additionally folds the route name, the resolved action target, normalised middleware and any scalar
  * cache inputs so a change to any of them busts the fragment cache even when the human signature is

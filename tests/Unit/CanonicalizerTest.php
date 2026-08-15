@@ -79,9 +79,9 @@ it('orders parameters by in-rank then name', function (): void {
 });
 
 it('orders parameters that state neither an `in` nor a name, whichever order they arrive in', function (bool $reverse): void {
-    // A `{"$ref": …}` parameter states neither, so every one of them ranked and named identically and
-    // the canonicaliser left them exactly as the list was built. Two builds that assembled the same
-    // referenced parameters in different orders emitted different documents.
+    // A `{"$ref": …}` parameter states neither, so every one of them ranks and names identically; on
+    // rank and name alone the canonicaliser would leave them exactly as the list was built, and two
+    // builds that assembled the same referenced parameters in different orders would emit differently.
     $refs = [
         ['$ref' => '#/components/parameters/Zeta'],
         ['$ref' => '#/components/parameters/Alpha'],

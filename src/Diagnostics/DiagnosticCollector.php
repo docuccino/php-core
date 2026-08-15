@@ -54,8 +54,8 @@ final class DiagnosticCollector
      *
      * The key is TOTAL — it runs on to `source` and `help` — because two diagnostics agreeing down to
      * the message are ordinary: one `#[DescriptionFromFile]` escape per controller says the same thing
-     * about a different file, and neither carries a route signature. A key that could not tell them
-     * apart left their order to insertion, which is discovery order.
+     * about a different file, and neither carries a route signature. A key that cannot tell them apart
+     * leaves their order to insertion, which is discovery order.
      *
      * @return list<Diagnostic>
      */

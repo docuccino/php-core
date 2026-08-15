@@ -207,7 +207,7 @@ it('keeps a schema\'s own provenance beside its reference when the response stay
 
 it('gives the hoisted shape a content-derived identity', function (): void {
     // Every other `components.schemas` entry carries one, and the diff pairs components by it — so a
-    // component that renames still compares against the shape it used to be.
+    // component that renames still compares against the same shape rather than reading as add + remove.
     $doc = errorDoc(['/a' => ['404' => messageBody()], '/b' => ['404' => messageBody()]]);
 
     expect($doc['components']['schemas']['Error404'])->toHaveKey('x-docuccino')
@@ -325,8 +325,8 @@ it('keeps every route\'s own messaging when it shares the shape', function (): v
 });
 
 it('retires the plain name rather than awarding it when two shapes contest a status', function (): void {
-    // A first-come suffix hands `Error422` to whichever shape the walk met first, so an unrelated route
-    // could swap what it means. Neither shape gets it; each takes a name derived from its own content.
+    // A first-come suffix hands `Error422` to whichever shape the walk meets first, so an unrelated
+    // route swaps what it means. Neither gets it; each takes a name derived from its own content.
     $other = ['description' => 'Unprocessable Entity', 'content' => ['application/json' => ['schema' => ['type' => 'object', 'properties' => ['errors' => ['type' => 'object']]]]]];
 
     $doc = errorDoc([
@@ -358,8 +358,8 @@ it('keeps the plain name for the one shape that holds a status alone', function 
 });
 
 it('names a shape the same wherever the document meets it', function (): void {
-    // The defect this pins: `Error403` used to mean whichever shape sorted first, so adding a route
-    // ahead of the others repointed operations that had not changed.
+    // Left to the walk, `Error403` means whichever shape sorts first, so adding a route ahead of the
+    // others repoints operations that have not changed.
     $one = ['403' => messageBody('Forbidden')];
     $two = ['403' => ['description' => 'Forbidden', 'content' => ['application/json' => ['schema' => ['type' => 'object', 'properties' => ['code' => ['type' => 'string']]]]]]];
 

@@ -239,9 +239,9 @@ final class Canonicalizer
         }
 
         // Decorated with a TOTAL key. `in` and `name` settle every parameter stated inline, but a
-        // `{"$ref": …}` parameter states neither, so a list of them all tied and kept the order they
-        // arrived in — which is whatever built the list. The bytes break the remaining ties, and two
-        // parameters with the same bytes are the same parameter.
+        // `{"$ref": …}` parameter states neither, so a list of them would all tie and keep the order
+        // they arrived in — which is whatever built the list. The bytes break the remaining ties, and
+        // two parameters with the same bytes are the same parameter.
         $keyed = [];
         foreach ($node as $parameter) {
             $canonical = $this->canonicalizeParameter($parameter);

@@ -7,9 +7,9 @@ use Docuccino\Core\Support\Json;
 /**
  * `Json::stable()` is what every equality and cache-key question in the build is settled by, and its
  * callers hand it arbitrary values — an extension's own properties, a schema an integration built. So
- * the contract that matters is that it is TOTAL: it used to answer `''` for anything `json_encode`
- * refused, and `''` is one fingerprint shared by every such value, so two different configurations
- * keyed alike and a warm cache answered one with the other's output.
+ * the contract that matters is that it is TOTAL: `''` for anything `json_encode` refuses is one
+ * fingerprint shared by every such value, so two different configurations key alike and a warm cache
+ * answers one with the other's output.
  *
  * The other half is the descent bound. A self-referential array is a stack overflow, which is SIGSEGV
  * and exit 139 — no exception, no message, no diagnostic.
@@ -55,7 +55,7 @@ it('reads two structurally-equal values as one fingerprint whatever order they w
 });
 
 it('answers a self-referential array instead of overflowing the stack', function (): void {
-    // Before the bound this was SIGSEGV, exit 139: no exception to catch and nothing in the output.
+    // Without the bound this is SIGSEGV, exit 139: no exception to catch and nothing in the output.
     $cycle = ['x' => 1];
     $cycle['self'] = &$cycle;
 

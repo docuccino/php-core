@@ -17,8 +17,8 @@ use Docuccino\Core\Canonical\CanonicalJsonSerializer;
  *
  * Callers hand this arbitrary values — an extension's own properties, a schema an integration built —
  * so the normalizer is TOTAL: anything `json_encode` would refuse is carried as a marker instead of
- * making the encode fail, because a failed encode used to answer `''` for every such value and `''`
- * is one fingerprint shared by all of them. The descent is bounded for the same reason: a
+ * making the encode fail: a failed encode answers `''` for every such value, and `''` is one
+ * fingerprint shared by all of them. The descent is bounded for the same reason: a
  * self-referential array is a stack overflow, which is SIGSEGV with no message rather than an
  * exception.
  *
