@@ -7,11 +7,27 @@ namespace Docuccino\Core\TypeGrammar;
 use PHPStan\PhpDocParser\Ast\PhpDoc\PhpDocTextNode;
 
 /**
- * The one docblock reader: prose, `@example`, `@property`/`@param`/`@var` tags, and the OAS
- * summary/description split, all through the shared {@see PhpDocParserStack} so there's a single grammar.
+ * The one docblock reader: prose, `@example`, `@property`/`@param`/`@var` tags — each with its
+ * `@phpstan-`/`@psalm-` prefixed forms — and the OAS summary/description split, all through the shared
+ * {@see PhpDocParserStack} so there's a single grammar.
  */
 final class DocBlockReader
 {
+    /**
+     * Tag precedence, most authoritative first, and the same order for every family below — an
+     * analyser-prefixed tag exists to state what the generic one couldn't, and `@phpstan-` wins over
+     * `@psalm-` because PHPStan is the engine behind this project.
+     */
+    private const VAR_TAGS = ['@phpstan-var', '@psalm-var', '@var'];
+
+    private const PARAM_TAGS = ['@phpstan-param', '@psalm-param', '@param'];
+
+    private const PROPERTY_TAGS = [
+        '@phpstan-property', '@phpstan-property-read',
+        '@psalm-property', '@psalm-property-read',
+        '@property', '@property-read',
+    ];
+
     public function __construct(
         private readonly PhpDocParserStack $stack = new PhpDocParserStack,
     ) {}
@@ -38,8 +54,8 @@ final class DocBlockReader
 
     /**
      * The `@property`/`@property-read` tags a class declares (the ide-helper model-column convention), as an
-     * ordered `name => {type, description}` map. Read forms count too — a serialized attribute is readable —
-     * with `@property` first, and a duplicate name keeps its first declaration.
+     * ordered `name => {type, description}` map. Write-only forms are left out — not readable, so they don't
+     * document a response — and a duplicate name keeps its first declaration.
      *
      * @return array<string, array{type: string, description: ?string}>
      */
@@ -51,17 +67,19 @@ final class DocBlockReader
         }
 
         $out = [];
-        foreach ([...$node->getPropertyTagValues(), ...$node->getPropertyReadTagValues()] as $tag) {
-            $name = ltrim($tag->propertyName, '$');
-            if ($name === '' || isset($out[$name])) {
-                continue;
-            }
+        foreach (self::PROPERTY_TAGS as $tagName) {
+            foreach ($node->getPropertyTagValues($tagName) as $tag) {
+                $name = ltrim($tag->propertyName, '$');
+                if ($name === '' || isset($out[$name])) {
+                    continue;
+                }
 
-            $description = trim($tag->description);
-            $out[$name] = [
-                'type' => (string) $tag->type,
-                'description' => $description === '' ? null : $description,
-            ];
+                $description = trim($tag->description);
+                $out[$name] = [
+                    'type' => (string) $tag->type,
+                    'description' => $description === '' ? null : $description,
+                ];
+            }
         }
 
         return $out;
@@ -70,7 +88,7 @@ final class DocBlockReader
     /**
      * The `@param` tags a docblock declares, as an ordered `name => {type, description}` map. A promoted
      * constructor property writes its precise type here rather than in a `@var`, so this is where a `list<T>`
-     * behind a native `array` is found. A duplicate name keeps its first declaration.
+     * behind a native `array` is found; a duplicate name keeps its first declaration.
      *
      * @return array<string, array{type: string, description: ?string}>
      */
@@ -82,23 +100,25 @@ final class DocBlockReader
         }
 
         $out = [];
-        foreach ($node->getParamTagValues() as $tag) {
-            $name = ltrim($tag->parameterName, '$');
-            if ($name === '' || isset($out[$name])) {
-                continue;
-            }
+        foreach (self::PARAM_TAGS as $tagName) {
+            foreach ($node->getParamTagValues($tagName) as $tag) {
+                $name = ltrim($tag->parameterName, '$');
+                if ($name === '' || isset($out[$name])) {
+                    continue;
+                }
 
-            $description = trim($tag->description);
-            $out[$name] = [
-                'type' => (string) $tag->type,
-                'description' => $description === '' ? null : $description,
-            ];
+                $description = trim($tag->description);
+                $out[$name] = [
+                    'type' => (string) $tag->type,
+                    'description' => $description === '' ? null : $description,
+                ];
+            }
         }
 
         return $out;
     }
 
-    /** The first `@var` type a docblock states, or null. */
+    /** The first type a `@var` tag states, in {@see self::VAR_TAGS} precedence, or null. */
     public function varType(?string $docComment): ?string
     {
         $node = $this->stack->parseDocBlock($docComment);
@@ -106,10 +126,12 @@ final class DocBlockReader
             return null;
         }
 
-        foreach ($node->getVarTagValues() as $tag) {
-            $type = trim((string) $tag->type);
-            if ($type !== '') {
-                return $type;
+        foreach (self::VAR_TAGS as $tagName) {
+            foreach ($node->getVarTagValues($tagName) as $tag) {
+                $type = trim((string) $tag->type);
+                if ($type !== '') {
+                    return $type;
+                }
             }
         }
 

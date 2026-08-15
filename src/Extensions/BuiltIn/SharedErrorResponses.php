@@ -269,6 +269,12 @@ final class SharedErrorResponses implements DocumentTransformer
      * bodies in one document are two components, never one merged wrong. An identical existing component
      * (a rebuild over a restored snapshot) is reused rather than duplicated.
      *
+     * The suffix is NOT a name collision and raises no diagnostic, unlike the one component naming
+     * settles for two classes contesting a name. Nothing is contesting a name here: these names are
+     * minted per shape, in document order, by this transformer alone. There is no author who chose them,
+     * no second claimant to name in a message, and nothing an author could do about it — a document with
+     * two 422 shapes has two 422 components by construction.
+     *
      * @param  array<string, mixed>  $components
      * @param  array<array-key, mixed>  $body
      */

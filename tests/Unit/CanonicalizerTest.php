@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Docuccino\Core\Canonical\Canonicalizer;
+use Docuccino\Core\Canonical\CanonicalJsonSerializer;
 use Docuccino\Core\Emit\UirEmitter;
 
 /**
@@ -174,4 +175,31 @@ it('passes unknown x-* members through verbatim but canonicalises known members'
     expect(array_keys($canonical))->toBe(['uir', 'openapi', 'info', 'paths', 'x-vendor']);
     expect(array_keys($canonical['info']))->toBe(['title', 'version']);
     expect($canonical['x-vendor'])->toBe(['z' => 1, 'a' => 2]);
+});
+
+it('keeps an object-valued member a JSON object even when its keys are a 0..n sequence', function (): void {
+    // PHP re-coerces a numeric-string key straight back to an int, so a `properties` map keyed by a
+    // tuple's indices is a PHP LIST and would serialise as `"properties": [ … ]` — not a shape any JSON
+    // Schema has. Every object-valued member goes through the same sorted-map step, so this is the one
+    // place that can close it whatever synthesised the keys.
+    $doc = [
+        'openapi' => '3.2.0',
+        'uir' => '1.0.0',
+        'info' => ['version' => '1.0.0', 'title' => 'T'],
+        'paths' => [],
+        'components' => [
+            'schemas' => [
+                'Tuple' => [
+                    'type' => 'object',
+                    'properties' => ['0' => ['type' => 'string'], '1' => ['type' => 'integer']],
+                ],
+            ],
+        ],
+    ];
+
+    $json = (new CanonicalJsonSerializer)->serialize($this->canonicalizer->canonicalize($doc));
+
+    expect($json)->toContain('"properties": {')
+        ->and(json_decode($json, true)['components']['schemas']['Tuple']['properties'])
+        ->toBe(['0' => ['type' => 'string'], '1' => ['type' => 'integer']]);
 });

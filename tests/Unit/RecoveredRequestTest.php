@@ -127,8 +127,9 @@ it('suffixes a THIRD distinct claimant past _2 (collision ordering beyond N=2)',
         ->and(array_keys($components->schemas()))->toBe(['Thing', 'Thing_2', 'Thing_3'])
         // Re-registering an existing identity dedupes onto its own suffixed name, not a fourth.
         ->and($components->registerSchema('Thing', ['type' => 'object', 'properties' => ['slug' => ['type' => 'string']]], 'App\\Third\\Thing'))->toBe('Thing_3')
-        // One warning per genuine collision (two), none for the dedupe.
-        ->and($components->diagnostics())->toHaveCount(2);
+        // All three publish under a namespace-derived name, under ONE warning for the contested name.
+        ->and($components->schemaRenames())->toEqual(['Thing' => 'AppThing', 'Thing_2' => 'OtherThing', 'Thing_3' => 'ThirdThing'])
+        ->and($components->nameCollisions())->toHaveCount(1);
 });
 
 it('shares one component when a class is used on both sides with an identical shape', function (): void {

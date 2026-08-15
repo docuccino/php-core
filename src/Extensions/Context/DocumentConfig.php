@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Docuccino\Core\Extensions\Context;
 
 use Docuccino\Core\Extensions\Contracts\TagMapper;
+use Docuccino\Core\Support\Fqcn;
 use Docuccino\Core\Support\Hydrate;
 use Docuccino\Core\Support\Json;
 
@@ -74,6 +75,23 @@ final readonly class DocumentConfig
         $strategy = $this->tags['default_strategy'] ?? 'controller';
 
         return $strategy === 'none' ? 'none' : 'controller';
+    }
+
+    /**
+     * The tag a route on `$actionClass` groups under when it carries no `#[Group]`: the controller's
+     * short name with a trailing `Controller` stripped, then through `tags.map` like any raw tag.
+     * Null for the `none` strategy or a closure route. Two controllers of the same short name in
+     * different namespaces therefore answer the same tag, which the assembler reports.
+     */
+    public function defaultTag(?string $actionClass): ?string
+    {
+        if ($this->tagDefaultStrategy() !== 'controller' || $actionClass === null) {
+            return null;
+        }
+
+        $short = preg_replace('/Controller$/', '', Fqcn::short($actionClass));
+
+        return $short === null || $short === '' ? null : $this->mapTag($short);
     }
 
     /**

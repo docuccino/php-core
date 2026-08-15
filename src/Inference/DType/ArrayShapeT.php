@@ -6,17 +6,42 @@ namespace Docuccino\Core\Inference\DType;
 
 /**
  * A constant array shape (`array{id: int, name?: string}`, or a positional list-shape). Field order
- * matters and is preserved verbatim — unlike union members, it's never sorted. `isList` records
- * whether the keys are a `0..n` sequence, from PHPStan's list accessory.
+ * matters and is preserved verbatim — unlike union members, it's never sorted. `isList` records whether
+ * the keys are a `0..n` sequence, which is exactly when PHP renders the array as a JSON array; it is
+ * derived from the keys here as well as taken from the caller (PHPStan's list accessory), so a path that
+ * only knows the keys can't leave a tuple looking like an object with `"0"`/`"1"` property names.
  */
 final readonly class ArrayShapeT extends DType
 {
     public const KIND = 'arrayShape';
 
+    public bool $isList;
+
     /**
      * @param  list<ArrayShapeField>  $fields
      */
-    public function __construct(public array $fields, public bool $isList = false) {}
+    public function __construct(public array $fields, bool $isList = false)
+    {
+        $this->isList = $isList || self::keysArePositional($fields);
+    }
+
+    /**
+     * @param  list<ArrayShapeField>  $fields
+     */
+    private static function keysArePositional(array $fields): bool
+    {
+        if ($fields === []) {
+            return false;
+        }
+
+        foreach ($fields as $index => $field) {
+            if ($field->key !== $index) {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     public function kind(): string
     {

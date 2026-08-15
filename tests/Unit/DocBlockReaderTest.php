@@ -105,3 +105,67 @@ it('reads the first @var type, and null when there is none', function (): void {
         ->and($reader->varType("/**\n * Just prose.\n */"))->toBeNull()
         ->and($reader->varType(null))->toBeNull();
 });
+
+it('reads the type out of an analyser-prefixed @var tag', function (string $tag): void {
+    // Standardising on the prefixed form is a real and common convention — it is how you state a type
+    // the runtime doesn't have — so each accepted spelling reads the same as the plain one.
+    expect((new DocBlockReader)->varType("/**\n * ".$tag." list<ErrorDetailData>\n */"))
+        ->toBe('list<ErrorDetailData>');
+})->with([
+    '@var' => ['@var'],
+    '@phpstan-var' => ['@phpstan-var'],
+    '@psalm-var' => ['@psalm-var'],
+]);
+
+it('ignores a @var spelling it does not accept', function (string $tag): void {
+    // The unknown-entry contract: only the two conventional analyser prefixes are read. `@phan-var` and
+    // an invented prefix parse fine but are not this reader's vocabulary, so they answer null rather
+    // than silently widening it.
+    expect((new DocBlockReader)->varType("/**\n * ".$tag." list<ErrorDetailData>\n */"))->toBeNull();
+})->with([
+    '@phan-var' => ['@phan-var'],
+    '@rector-var' => ['@rector-var'],
+]);
+
+it('prefers @phpstan-var, then @psalm-var, then @var, whatever order they are written in', function (): void {
+    // Determinism: the prefixed tag exists precisely to say what the generic one couldn't, so it wins,
+    // and @phpstan- wins over @psalm- because PHPStan is the engine behind this project. Source order
+    // never decides it.
+    $reader = new DocBlockReader;
+
+    expect($reader->varType("/**\n * @var array\n * @psalm-var list<int>\n * @phpstan-var list<string>\n */"))
+        ->toBe('list<string>')
+        ->and($reader->varType("/**\n * @phpstan-var list<string>\n * @psalm-var list<int>\n * @var array\n */"))
+        ->toBe('list<string>')
+        ->and($reader->varType("/**\n * @var array\n * @psalm-var list<int>\n */"))->toBe('list<int>');
+});
+
+it('applies the same tag precedence to @param', function (): void {
+    $doc = "/**\n * @param  array  \$rows  Generic prose.\n * @psalm-param  list<int>  \$rows\n * @phpstan-param  list<string>  \$rows  Precise prose.\n */";
+
+    expect((new DocBlockReader)->params($doc))
+        ->toBe(['rows' => ['type' => 'list<string>', 'description' => 'Precise prose.']]);
+});
+
+it('reads analyser-prefixed @param and @property tags at all', function (): void {
+    $reader = new DocBlockReader;
+
+    expect($reader->params("/**\n * @phpstan-param  list<int>  \$ids\n */"))
+        ->toBe(['ids' => ['type' => 'list<int>', 'description' => null]])
+        ->and($reader->params("/**\n * @psalm-param  list<int>  \$ids\n */"))
+        ->toBe(['ids' => ['type' => 'list<int>', 'description' => null]])
+        ->and($reader->properties("/**\n * @phpstan-property  list<int>  \$ids\n */"))
+        ->toBe(['ids' => ['type' => 'list<int>', 'description' => null]])
+        ->and($reader->properties("/**\n * @psalm-property-read  list<int>  \$ids\n */"))
+        ->toBe(['ids' => ['type' => 'list<int>', 'description' => null]]);
+});
+
+it('applies the same tag precedence to @property, read forms last within each analyser', function (): void {
+    $doc = "/**\n * @property int \$id\n * @property-read string \$id\n * @psalm-property float \$id\n * @phpstan-property-read bool \$id\n */";
+
+    expect((new DocBlockReader)->properties($doc))->toBe(['id' => ['type' => 'bool', 'description' => null]]);
+});
+
+it('still leaves a write-only @property out', function (): void {
+    expect((new DocBlockReader)->properties("/**\n * @property-write int \$secret\n */"))->toBe([]);
+});

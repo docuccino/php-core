@@ -678,11 +678,18 @@ final class Canonicalizer
         uksort($node, $this->compareKeys(...));
 
         $out = [];
+        $index = 0;
+        $sequential = true;
         foreach ($node as $key => $value) {
+            $sequential = $sequential && $key === $index;
+            $index++;
             $out[(string) $key] = $child($value);
         }
 
-        return $out;
+        // PHP re-coerces a numeric-string key straight back to an int, so a map whose keys happen to be
+        // `0..n` — `properties` synthesised from a tuple's indices — would serialise as a JSON ARRAY.
+        // An object-valued member is an object whatever its keys look like.
+        return $sequential ? (object) $out : $out;
     }
 
     private function canonicalizeGeneric(mixed $node): mixed

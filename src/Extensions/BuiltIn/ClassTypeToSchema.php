@@ -7,20 +7,19 @@ namespace Docuccino\Core\Extensions\BuiltIn;
 use Docuccino\Core\Extensions\Contracts\SchemaContext;
 use Docuccino\Core\Extensions\Contracts\TypeToSchema;
 use Docuccino\Core\Extensions\Schema\ComponentHoist;
+use Docuccino\Core\Extensions\Schema\SchemaIdentity;
 use Docuccino\Core\Extensions\Schema\SchemaResult;
 use Docuccino\Core\Inference\ClassRef;
 use Docuccino\Core\Inference\DType\ClassT;
 use Docuccino\Core\Inference\DType\DType;
 use Docuccino\Core\Inference\DType\UnionT;
-use Docuccino\Core\Support\Fqcn;
 
 /**
- * A named class → an object schema hoisted to `components.schemas` and referenced by `$ref`.
- * Properties come from {@see TypeEngine::classMetadata()}; the component is named by the short class
- * name and pinned by the FQCN. This is the framework-agnostic fallback mapper, and it ignores
- * `#[SchemaName]`/`#[SchemaId]` on purpose — the mappers that supersede it (spatie Data,
- * Eloquent, resources) resolve those, so this one passes name and id explicitly to suppress
- * {@see ComponentHoist}'s attribute fallback.
+ * A named class → an object schema hoisted to `components.schemas` and referenced by `$ref`. Properties
+ * come from {@see TypeEngine::classMetadata()} less whatever `#[Hidden]` denies, read through
+ * {@see SchemaIdentity} so a plain DTO hides a property exactly as a Data class or a model does. Being
+ * the framework-agnostic fallback, it is the ONLY mapper a plain DTO reaches, so it leaves the component
+ * name and diff identity to {@see ComponentHoist}'s attribute fallback rather than forcing the short name.
  */
 final class ClassTypeToSchema implements TypeToSchema
 {
@@ -54,9 +53,15 @@ final class ClassTypeToSchema implements TypeToSchema
                 return null;
             }
 
+            $hidden = SchemaIdentity::hidden($fqcn);
+
             $properties = [];
             $required = [];
             foreach ($metadata->properties as $property) {
+                if (in_array($property->name, $hidden, true) || SchemaIdentity::hidesProperty($fqcn, $property->name)) {
+                    continue;
+                }
+
                 $schema = $context->convert($property->type);
                 if ($property->summary !== null) {
                     $schema['description'] = $property->summary;
@@ -67,12 +72,17 @@ final class ClassTypeToSchema implements TypeToSchema
                 }
             }
 
+            if ($properties === []) {
+                // Everything the class exposes is hidden — same degradation as an unexpandable class.
+                return null;
+            }
+
             $object = ['type' => 'object', 'properties' => $properties];
             if ($required !== []) {
                 $object['required'] = $required;
             }
 
             return $object;
-        }, Fqcn::short($fqcn), $fqcn);
+        });
     }
 }

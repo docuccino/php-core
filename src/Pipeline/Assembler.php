@@ -12,6 +12,7 @@ use Docuccino\Core\Extensions\Context\DocumentConfig;
 use Docuccino\Core\Extensions\Context\DocumentContext;
 use Docuccino\Core\Extensions\Contracts\DocumentTransformer;
 use Docuccino\Core\Extensions\Document\UirDocumentDraft;
+use Docuccino\Core\Extensions\Schema\ComponentNames;
 use Docuccino\Core\Extensions\Schema\ComponentRegistry;
 use Docuccino\Core\Identity\ContentHasher;
 use Docuccino\Core\Identity\IdentityGenerator;
@@ -110,6 +111,10 @@ final class Assembler
             $doc['components'] = $componentsOut;
         }
 
+        // Registration named components first-come; this is where the ones two classes contested take
+        // the namespace-derived names they are published under, references included.
+        $doc = $this->publishSchemaNames($doc, $components->schemaRenames());
+
         $doc['x-docuccino'] = [
             'document' => ['id' => $documentId, 'configHash' => $document->hash()],
             'generator' => ['name' => $this->generatorName, 'version' => $generatorVersion, 'specVersion' => self::UIR_VERSION],
@@ -118,6 +123,14 @@ final class Assembler
         foreach ($components->diagnostics() as $diagnostic) {
             $diagnostics[] = $diagnostic;
         }
+
+        // The three document-wide name spaces, all read off the finished build rather than reported as
+        // each route passes: that is what keeps them intact on a warm cache hit, where no route runs.
+        foreach ($components->nameCollisions() as $diagnostic) {
+            $diagnostics[] = $diagnostic;
+        }
+        $this->reportDuplicateOperationIds($fragments, $diagnostics);
+        $this->reportTagCollisions($fragments, $document, $diagnostics);
 
         $doc = $this->applyOverlays($doc, $overlayDocuments, $diagnostics);
         $doc = $this->applyTransformers($doc, $document, $documentId, $transformers, $diagnostics);
@@ -201,6 +214,115 @@ final class Assembler
         }
 
         return $paths;
+    }
+
+    /**
+     * Rewrite the document onto the component names the registry publishes: rekey
+     * `components.schemas` and repoint every `$ref` that named one of them.
+     *
+     * @param  array<string, mixed>  $doc
+     * @param  array<string, string>  $renames
+     * @return array<string, mixed>
+     */
+    private function publishSchemaNames(array $doc, array $renames): array
+    {
+        if ($renames === []) {
+            return $doc;
+        }
+
+        /** @var array<string, mixed> $doc */
+        $doc = ComponentNames::rename($doc, $renames);
+
+        $components = $doc['components'] ?? null;
+        $schemas = is_array($components) ? ($components['schemas'] ?? null) : null;
+        if (! is_array($components) || ! is_array($schemas)) {
+            return $doc;
+        }
+
+        /** @var array<string, mixed> $schemas */
+        $components['schemas'] = ComponentNames::rekey($schemas, $renames);
+        $doc['components'] = $components;
+
+        return $doc;
+    }
+
+    /**
+     * One warning per pair of routes that ended up sharing an `operationId`. Unlike the operation
+     * IDENTITY above, nothing in the document is lost — but an operationId is what a client generator
+     * names its function after, so two of them is a broken SDK rather than a cosmetic clash.
+     *
+     * @param  list<OperationFragment>  $fragments
+     * @param  list<Diagnostic>  $diagnostics
+     */
+    private function reportDuplicateOperationIds(array $fragments, array &$diagnostics): void
+    {
+        $seen = [];
+
+        foreach ($fragments as $fragment) {
+            $operationId = $fragment->operation->operationId;
+            if ($operationId === null || $operationId === '') {
+                continue;
+            }
+
+            if (isset($seen[$operationId])) {
+                $diagnostics[] = new Diagnostic(
+                    severity: Severity::Warning,
+                    code: 'identity.duplicate-operation-id',
+                    message: sprintf('operationId "%s" is claimed by both %s and %s; a generated client names one function for the pair.', $operationId, $seen[$operationId], $fragment->routeSignature),
+                    routeSignature: $fragment->routeSignature,
+                    help: 'Give one of them its own id with #[OperationId], or name the routes distinctly.',
+                );
+
+                continue;
+            }
+
+            $seen[$operationId] = $fragment->routeSignature;
+        }
+    }
+
+    /**
+     * One info per tag that two different controllers landed under by default. Merging tags is not
+     * itself wrong — a tag is a display grouping, nothing is renamed and no shape is lost, and an
+     * author may well have meant `Api\UserController` and `Admin\UserController` to read as one
+     * `User` group — so this reports the merge and names the two ways out rather than splitting a
+     * grouping nobody asked to split.
+     *
+     * @param  list<OperationFragment>  $fragments
+     * @param  list<Diagnostic>  $diagnostics
+     */
+    private function reportTagCollisions(array $fragments, DocumentConfig $document, array &$diagnostics): void
+    {
+        /** @var array<string, array<string, true>> $claimants */
+        $claimants = [];
+
+        foreach ($fragments as $fragment) {
+            $class = $fragment->actionClass;
+            $tag = $class === null ? null : $document->defaultTag($class);
+
+            // Only the tag the default strategy derived: an explicit #[Group] on both controllers is
+            // the author saying they belong together, and reporting that would be noise.
+            if ($tag !== null && in_array($tag, $fragment->operation->tags, true)) {
+                $claimants[$tag][$class] = true;
+            }
+        }
+
+        ksort($claimants);
+
+        foreach ($claimants as $tag => $classes) {
+            if (count($classes) < 2) {
+                continue;
+            }
+
+            $names = array_keys($classes);
+            sort($names);
+
+            $diagnostics[] = new Diagnostic(
+                severity: Severity::Info,
+                code: 'tags.name-collision',
+                message: sprintf('Tag "%s" is the default tag of distinct controllers (%s), so their operations are grouped together.', $tag, implode(', ', $names)),
+                help: 'Intended? Nothing to do. Otherwise separate them with #[Group], or rename one through the tags.map config option.',
+            );
+        }
     }
 
     /**

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Docuccino\Core\Inference\DType\ArrayShapeT;
 use Docuccino\Core\Inference\DType\ClassT;
+use Docuccino\Core\Inference\DType\EnumT;
 use Docuccino\Core\Inference\DType\IntersectionT;
 use Docuccino\Core\Inference\DType\ListT;
 use Docuccino\Core\Inference\DType\LiteralT;
@@ -12,6 +13,8 @@ use Docuccino\Core\Inference\DType\NullT;
 use Docuccino\Core\Inference\DType\ScalarT;
 use Docuccino\Core\Inference\DType\UnionT;
 use Docuccino\Core\Inference\DType\UnknownT;
+use Docuccino\Core\Tests\Fixtures\PinnedRequestClass;
+use Docuccino\Core\Tests\Fixtures\SampleStatus;
 use Docuccino\Core\TypeGrammar\ImportContext;
 use Docuccino\Core\TypeGrammar\TypeStringParser;
 
@@ -93,6 +96,89 @@ it('maps generic list and array forms to List/Map DTypes', function (): void {
 it('maps the square-bracket array shorthand to a List DType', function (): void {
     expect(parseType('int[]'))->toEqual(new ListT(ScalarT::int()));
 });
+
+it('decides list vs map on the key type of every keyed array form', function (string $type, mixed $expected): void {
+    // Only a string key makes a PHP array serialize to a JSON object, so an int-capable key is a JSON
+    // array. Every key identifier the grammar can produce is here, plus the unreasonable ones, which
+    // degrade to a map rather than guess a list. The rule itself is core's ArrayKey, which the engine's
+    // translator calls too (ArrayKeyTest); this dataset pins what the GRAMMAR hands it.
+    expect(parseType($type))->toEqual($expected);
+})->with([
+    // int-capable keys → a list, and the value type is what survives.
+    'int' => ['array<int, string>', new ListT(ScalarT::string())],
+    'integer' => ['array<integer, string>', new ListT(ScalarT::string())],
+    'positive-int' => ['array<positive-int, string>', new ListT(ScalarT::string())],
+    'negative-int' => ['array<negative-int, string>', new ListT(ScalarT::string())],
+    'non-negative-int' => ['array<non-negative-int, string>', new ListT(ScalarT::string())],
+    'int range' => ['array<int<0, max>, string>', new ListT(ScalarT::string())],
+    'int-mask' => ['array<int-mask<1, 2>, string>', new ListT(ScalarT::string())],
+    'array-key' => ['array<array-key, string>', new ListT(ScalarT::string())],
+    'int|string' => ['array<int|string, string>', new ListT(ScalarT::string())],
+    'int literal' => ['array<0, string>', new ListT(ScalarT::string())],
+    'int literal union' => ["array<0|'a', string>", new ListT(ScalarT::string())],
+    // string-only keys → a map, which keeps the key type.
+    'string' => ['array<string, int>', new MapT(ScalarT::string(), ScalarT::int())],
+    'non-empty-string' => ['array<non-empty-string, int>', new MapT(ScalarT::string(), ScalarT::int())],
+    'class-string' => ['array<class-string, int>', new MapT(ScalarT::string(), ScalarT::int())],
+    // A numeric-string key is written by an author thinking in strings; PHP's runtime cast of `'1'` to an
+    // int key is not something a declared type says, so the declaration is taken at its word.
+    'numeric-string' => ['array<numeric-string, int>', new MapT(ScalarT::string(), ScalarT::int())],
+    'string literal' => ["array<'a', int>", new MapT(new LiteralT('a'), ScalarT::int())],
+    'string literal union' => ["array<'a'|'b', int>", new MapT(UnionT::of([new LiteralT('a'), new LiteralT('b')]), ScalarT::int())],
+    // Keys we cannot reason about degrade to a map, the shape that survives being wrong about ordering.
+    'mixed' => ['array<mixed, int>', new MapT(new UnknownT('mixed'), ScalarT::int())],
+    'template parameter' => ['array<TKey, int>', new MapT(new ClassT('TKey'), ScalarT::int())],
+]);
+
+it('applies the same key rule to every generic array spelling', function (string $type, mixed $expected): void {
+    expect(parseType($type))->toEqual($expected);
+})->with([
+    'iterable list' => ['iterable<int, string>', new ListT(ScalarT::string())],
+    'iterable map' => ['iterable<string, string>', new MapT(ScalarT::string(), ScalarT::string())],
+    'non-empty-array list' => ['non-empty-array<int, string>', new ListT(ScalarT::string())],
+    'non-empty-array map' => ['non-empty-array<string, string>', new MapT(ScalarT::string(), ScalarT::string())],
+]);
+
+it('reads array-key as the int|string union it is', function (): void {
+    // It has to be in the identifier table, or it falls through and builds a bogus `ClassT('array-key')`.
+    expect(parseType('array-key'))->toEqual(UnionT::of([ScalarT::int(), ScalarT::string()]));
+});
+
+it('maps a bounded or masked int to a plain int', function (string $type): void {
+    expect(parseType($type))->toEqual(ScalarT::int());
+})->with([
+    'int range' => ['int<0, max>'],
+    'int range with bounds' => ['int<1, 5>'],
+    'int-mask' => ['int-mask<1, 2, 4>'],
+    'int-mask-of' => ['int-mask-of<int>'],
+]);
+
+it('maps a backed-enum name to an EnumT carrying its case names', function (): void {
+    // The same answer the reflection and PHPStan-type mappers give, so a column whose only declaration is
+    // a docblock (`@property ListingStatus $status`) documents as a string enum, not as an object of the
+    // enum's own `name`/`value` members.
+    expect(parseType(SampleStatus::class))->toEqual(new EnumT(SampleStatus::class, ['Draft', 'Published']));
+});
+
+it('resolves a docblock enum through the import context, and degrades without one', function (): void {
+    $parser = new TypeStringParser;
+    $imports = ImportContext::forFile(dirname(__DIR__).'/Fixtures/ImportSample.php');
+
+    // An import context qualifies the short name, so the enum is found…
+    expect($parser->parse('SampleStatus', $imports))->toEqual(new EnumT(SampleStatus::class, ['Draft', 'Published']));
+
+    // …and without one the short name resolves to nothing loadable, so it stays a ClassT rather than
+    // throwing or inventing an empty enum.
+    expect($parser->parse('SampleStatus'))->toEqual(new ClassT('SampleStatus'));
+});
+
+it('keeps a non-enum class name a ClassT', function (string $type): void {
+    // The enum_exists() miss, for a class that loads and for a name that never will.
+    expect(parseType($type))->toEqual(new ClassT($type));
+})->with([
+    'a loadable class' => [PinnedRequestClass::class],
+    'a name nothing autoloads' => ['App\\Nope\\NotAThing'],
+]);
 
 it('degrades an over-parameterised array generic', function (): void {
     $result = parseType('array<int, string, bool>');

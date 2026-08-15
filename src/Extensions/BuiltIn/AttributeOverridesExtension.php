@@ -136,25 +136,10 @@ final class AttributeOverridesExtension implements OperationExtension
             return $tags;
         }
 
-        // No #[Group]: derive a raw default tag per `tags.default_strategy`, then run it through
-        // `tags.map` like any raw tag, so an untagged API still groups and the map can still remap.
-        $default = $this->defaultTag($context);
+        // No #[Group]: the document's default strategy decides, and the assembler re-derives the same
+        // answer to spot two controllers landing on one tag — so the rule lives there, once.
+        $default = $context->document->defaultTag($context->actionRef->class);
 
-        return $default === null ? [] : [$context->document->mapTag($default)];
-    }
-
-    /**
-     * The controller's short name with a trailing `Controller` stripped (`FormController` → `Form`),
-     * or null for a closure route / the `none` strategy.
-     */
-    private function defaultTag(RouteContext $context): ?string
-    {
-        if ($context->document->tagDefaultStrategy() !== 'controller' || $context->actionRef->class === null) {
-            return null;
-        }
-
-        $short = preg_replace('/Controller$/', '', Fqcn::short($context->actionRef->class));
-
-        return $short === null || $short === '' ? null : $short;
+        return $default === null ? [] : [$default];
     }
 }

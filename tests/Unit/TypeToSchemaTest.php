@@ -21,6 +21,9 @@ use Docuccino\Core\Inference\DType\StatusMarkerT;
 use Docuccino\Core\Inference\DType\UnionT;
 use Docuccino\Core\Inference\DType\UnknownT;
 use Docuccino\Core\Inference\PropertyMetadata;
+use Docuccino\Core\Tests\Fixtures\AttributedNode;
+use Docuccino\Core\Tests\Fixtures\FullyHiddenNode;
+use Docuccino\Core\Tests\Fixtures\HiddenPropertyNode;
 use Docuccino\Core\Tests\Support\StubTypeEngine;
 
 /**
@@ -151,8 +154,76 @@ it('points a self-reference at the suffixed name when the short name collides', 
         ->and($registry->schemas())->toHaveKeys(['Node', 'Node_2'])
         ->and($registry->schemas()['Node_2']['properties']['parent'])->toBe(['$ref' => '#/components/schemas/Node_2'])
         ->and($registry->schemaIds()['Node_2'])->toBe('App\\B\\Node')
-        ->and($registry->diagnostics())->toHaveCount(1)
-        ->and($registry->diagnostics()[0]->code)->toBe('components.name-collision');
+        // The suffix is provisional; the name each class is PUBLISHED under comes off the FQCNs.
+        ->and($registry->schemaRenames())->toEqual(['Node' => 'ANode', 'Node_2' => 'BNode'])
+        ->and($registry->nameCollisions()[0]->code)->toBe('components.name-collision');
+});
+
+it('honours #[SchemaName] and #[SchemaId] on a plain class the fallback mapper handles', function (): void {
+    // A plain DTO reaches no integration mapper, so this is the only place its attributes can be read
+    // — and the only escape hatch its author has when a short name collides with another namespace's.
+    $fqcn = AttributedNode::class;
+    $engine = new StubTypeEngine(classes: [
+        $fqcn => new ClassMetadata($fqcn, [new PropertyMetadata('id', ScalarT::int())]),
+    ]);
+
+    $registry = new ComponentRegistry;
+    $result = (new SchemaConverter(DefaultTypeMappers::all(), $engine, $registry))->toSchema(new ClassT($fqcn));
+
+    expect($result->schema)->toBe(['$ref' => '#/components/schemas/RenamedNode'])
+        ->and($registry->schemaIds())->toBe(['RenamedNode' => 'node.v1'])
+        ->and($registry->diagnostics())->toBe([]);
+});
+
+it('honours #[Hidden] on a plain class the fallback mapper handles', function (): void {
+    // A plain DTO reaches no integration mapper, so the fallback is the only place `#[Hidden]` can be
+    // read — and the lint that tells authors to "Hide it (e.g. #[Hidden])" points them straight at it.
+    // Both forms: the property's own attribute, and the class-level deny-list naming a property.
+    $fqcn = HiddenPropertyNode::class;
+    $engine = new StubTypeEngine(classes: [
+        $fqcn => new ClassMetadata($fqcn, [
+            new PropertyMetadata('id', ScalarT::int()),
+            new PropertyMetadata('internal_score', ScalarT::string()),
+            new PropertyMetadata('password_hash', ScalarT::string()),
+        ]),
+    ]);
+
+    $registry = new ComponentRegistry;
+    (new SchemaConverter(DefaultTypeMappers::all(), $engine, $registry))->toSchema(new ClassT($fqcn));
+
+    expect($registry->schemas()['HiddenPropertyNode'])->toBe([
+        'type' => 'object',
+        'properties' => ['id' => ['type' => 'integer']],
+        'required' => ['id'],
+    ]);
+});
+
+it('degrades a class whose every property is hidden to a bare object', function (): void {
+    // Nothing left to describe, so it takes the same route as an unexpandable class: a bare object and
+    // no reserved component name, rather than an `object` with an empty properties map.
+    $fqcn = FullyHiddenNode::class;
+    $engine = new StubTypeEngine(classes: [
+        $fqcn => new ClassMetadata($fqcn, [new PropertyMetadata('secret', ScalarT::string())]),
+    ]);
+
+    $registry = new ComponentRegistry;
+    $result = (new SchemaConverter(DefaultTypeMappers::all(), $engine, $registry))->toSchema(new ClassT($fqcn));
+
+    expect($result->schema)->toBe(['type' => 'object'])
+        ->and($registry->schemas())->toBe([]);
+});
+
+it('falls back to the short name and the FQCN for a class carrying neither attribute', function (): void {
+    // The unattributed contract the rename must not disturb.
+    $engine = new StubTypeEngine(classes: [
+        'App\\A\\Node' => new ClassMetadata('App\\A\\Node', [new PropertyMetadata('id', ScalarT::int())]),
+    ]);
+
+    $registry = new ComponentRegistry;
+    $result = (new SchemaConverter(DefaultTypeMappers::all(), $engine, $registry))->toSchema(new ClassT('App\\A\\Node'));
+
+    expect($result->schema)->toBe(['$ref' => '#/components/schemas/Node'])
+        ->and($registry->schemaIds())->toBe(['Node' => 'App\\A\\Node']);
 });
 
 it('degrades an unexpandable class to a bare object at low confidence', function (): void {

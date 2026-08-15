@@ -6,6 +6,7 @@ namespace Docuccino\Core\Pipeline;
 
 use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Document\Operation;
+use Docuccino\Core\Extensions\Schema\ComponentNames;
 use Docuccino\Core\Support\Hydrate;
 
 /**
@@ -26,6 +27,7 @@ final readonly class OperationFragment
      * @param  array<string, array<string, mixed>>  $componentSchemas  name → schema this operation references (transitive closure)
      * @param  array<string, string>  $componentSchemaIds  name → schemaId (FQCN) for diff identity
      * @param  array<string, array<string, mixed>>  $componentResponses  name → response component this operation references (transitive closure)
+     * @param  ?string  $actionClass  the controller/action class this route dispatches to, if any
      */
     public function __construct(
         public string $path,
@@ -36,7 +38,45 @@ final readonly class OperationFragment
         public array $componentSchemas = [],
         public array $componentSchemaIds = [],
         public array $componentResponses = [],
+        public ?string $actionClass = null,
     ) {}
+
+    /**
+     * The same fragment with every component reference put through a rename map — what a warm cache
+     * hit needs when the component it restores lands under a name other than the one it was cached
+     * with, because a route added since took that name first. Without it the restored operation would
+     * keep `$ref`-ing a name now held by a DIFFERENT class's shape.
+     *
+     * @param  array<string, string>  $schemas  cached schema name → the name it registered under now
+     * @param  array<string, string>  $responses  the same for `components.responses`
+     */
+    public function withRenamedComponents(array $schemas, array $responses): self
+    {
+        if ($schemas === [] && $responses === []) {
+            return $this;
+        }
+
+        $operation = ComponentNames::rename($this->operation->toArray(), $schemas);
+        $operation = ComponentNames::rename($operation, $responses, 'responses');
+
+        $schemaIds = [];
+        foreach ($this->componentSchemaIds as $name => $id) {
+            $schemaIds[$schemas[$name] ?? $name] = $id;
+        }
+
+        /** @var array<string, mixed> $operation */
+        return new self(
+            path: $this->path,
+            method: $this->method,
+            operation: Operation::fromArray($operation),
+            routeSignature: $this->routeSignature,
+            diagnostics: $this->diagnostics,
+            componentSchemas: ComponentNames::rekey($this->componentSchemas, $schemas),
+            componentSchemaIds: $schemaIds,
+            componentResponses: ComponentNames::rekey($this->componentResponses, $responses),
+            actionClass: $this->actionClass,
+        );
+    }
 
     /**
      * @return array<string, mixed>
@@ -52,6 +92,7 @@ final readonly class OperationFragment
             'componentSchemas' => $this->componentSchemas,
             'componentSchemaIds' => $this->componentSchemaIds,
             'componentResponses' => $this->componentResponses,
+            'actionClass' => $this->actionClass,
         ];
     }
 
@@ -72,6 +113,7 @@ final readonly class OperationFragment
             componentSchemas: Hydrate::mapOfArrays($data['componentSchemas'] ?? null),
             componentSchemaIds: Hydrate::stringMap($data['componentSchemaIds'] ?? null),
             componentResponses: Hydrate::mapOfArrays($data['componentResponses'] ?? null),
+            actionClass: Hydrate::stringOrNull($data['actionClass'] ?? null),
         );
     }
 }

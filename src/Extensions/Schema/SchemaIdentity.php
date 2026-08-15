@@ -10,10 +10,10 @@ use Docuccino\Attributes\SchemaName;
 use ReflectionClass;
 
 /**
- * Reads `#[SchemaName]` (component display name), `#[SchemaId]` (diff identity) and the class-level
- * `#[Hidden]` deny-list off a class. Every class-hoisting schema mapper reads them through here, so
- * the behaviour is identical whether the source is core's class mapper, a spatie Data class, an API
- * Resource or an Eloquent model.
+ * Reads `#[SchemaName]` (component display name), `#[SchemaId]` (diff identity) and the `#[Hidden]`
+ * deny-list — class-level names and the per-property form — off a class. Every class-hoisting schema
+ * mapper reads them through here, so the behaviour is identical whether the source is core's class
+ * mapper, a spatie Data class, an API Resource or an Eloquent model.
  */
 final class SchemaIdentity
 {
@@ -35,6 +35,19 @@ final class SchemaIdentity
         }
 
         return $hidden;
+    }
+
+    /** Whether the property carries its own `#[Hidden]`, the per-property half of the same deny-list. */
+    public static function hidesProperty(string $fqcn, string $property): bool
+    {
+        if (! class_exists($fqcn)) {
+            return false;
+        }
+
+        $reflection = new ReflectionClass($fqcn);
+
+        return $reflection->hasProperty($property)
+            && $reflection->getProperty($property)->getAttributes(Hidden::class) !== [];
     }
 
     /** The `#[SchemaName]` display name, else null (caller defaults to the short class name). */
