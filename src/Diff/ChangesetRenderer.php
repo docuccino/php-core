@@ -4,11 +4,16 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Diff;
 
+use Docuccino\Core\Support\PlainText;
+
 /**
  * Renders a {@see Changeset} as deterministic, plain-text terminal output: a one-line summary,
  * then breaking changes grouped ahead of non-breaking ones (the {@see Changeset} is already
  * sorted breaking-first). No colour, no timestamps — safe to snapshot in tests and to pipe into
  * a CI log or a PR comment.
+ *
+ * A removed node is described from the old side, which is whatever document the operator pointed at, so
+ * every value that came out of one goes through {@see PlainText} on the way to the terminal.
  */
 final class ChangesetRenderer
 {
@@ -96,7 +101,7 @@ final class ChangesetRenderer
             ChangeKind::Changed => self::MARK_CHANGED,
         };
 
-        $line = sprintf('  %s [%s] %s  (%s)', $mark, $change->target->value, $change->path, $change->code);
+        $line = sprintf('  %s [%s] %s  (%s)', $mark, $change->target->value, PlainText::of($change->path), $change->code);
 
         foreach ($change->fields as $field) {
             $line .= sprintf("\n      %s: %s -> %s", $field->field, self::scalar($field->old), self::scalar($field->new));
@@ -116,11 +121,11 @@ final class ChangesetRenderer
         }
 
         if (is_string($value)) {
-            return $value;
+            return PlainText::of($value);
         }
 
         $encoded = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 
-        return $encoded === false ? gettype($value) : $encoded;
+        return $encoded === false ? gettype($value) : PlainText::of($encoded);
     }
 }

@@ -65,6 +65,22 @@ describe('SemverPolicy', function (): void {
         expect($verdict->satisfied)->toBeFalse()
             ->and($verdict->code)->toBe('invalid-version');
     });
+
+    it('escapes control characters in a version it quotes back', function (): void {
+        // The version comes out of the artifact being diffed, and the violation is printed to a terminal.
+        $verdicts = [
+            (new SemverPolicy)->evaluate(breakingSet(), "1.4\x1B[31m", '2.0.0'),
+            (new SemverPolicy)->evaluate(breakingSet(), "1.4.2-\x1B[31m", '1.4.3'),
+            (new SemverPolicy)->evaluate(breakingSet(), "0.4.2-\x1B[31m", '0.4.2'),
+            (new DateVersionPolicy)->evaluate(breakingSet(), "not-a-date\x1B[31m", '2026-08-01'),
+            (new DateVersionPolicy)->evaluate(breakingSet(), "2026-08-01\x1B[31m", '2026-08-01'),
+        ];
+
+        foreach ($verdicts as $verdict) {
+            expect($verdict->message)->not->toContain("\x1B")
+                ->and($verdict->message)->toContain('\x1B[31m');
+        }
+    });
 });
 
 describe('DateVersionPolicy', function (): void {

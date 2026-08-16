@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Docuccino\Core\Diff\Policy;
 
 use Docuccino\Core\Diff\Changeset;
+use Docuccino\Core\Support\PlainText;
 
 /**
  * Semantic-versioning policy: a breaking changeset needs a major bump — or, at `0.y.z` where the API
@@ -28,7 +29,7 @@ final class SemverPolicy implements VersioningPolicy
             return PolicyVerdict::violation(
                 $this->name(),
                 'invalid-version',
-                sprintf('Both versions must be semver (got "%s" → "%s").', $oldVersion, $newVersion),
+                sprintf('Both versions must be semver (got "%s" → "%s").', PlainText::of($oldVersion), PlainText::of($newVersion)),
             );
         }
 
@@ -48,7 +49,7 @@ final class SemverPolicy implements VersioningPolicy
             return PolicyVerdict::violation(
                 $this->name(),
                 'minor-bump-required',
-                sprintf('Breaking changes on a 0.x version require at least a minor bump (%s → %s).', $oldVersion, $newVersion),
+                sprintf('Breaking changes on a 0.x version require at least a minor bump (%s → %s).', PlainText::of($oldVersion), PlainText::of($newVersion)),
                 sprintf('0.%d.0', $oldMinor + 1),
             );
         }
@@ -60,7 +61,7 @@ final class SemverPolicy implements VersioningPolicy
         return PolicyVerdict::violation(
             $this->name(),
             'major-bump-required',
-            sprintf('Breaking changes require a major bump (%s → %s).', $oldVersion, $newVersion),
+            sprintf('Breaking changes require a major bump (%s → %s).', PlainText::of($oldVersion), PlainText::of($newVersion)),
             sprintf('%d.0.0', $oldMajor + 1),
         );
     }

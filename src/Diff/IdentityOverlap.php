@@ -58,14 +58,22 @@ final class IdentityOverlap
         $parameters = [];
         $schemas = [];
 
+        // Through the same resolver the pairing uses, or a document whose parameters are all `$ref`s looks
+        // to carry no parameter identity at all and the warning goes quiet on the pairing failures it exists
+        // to flag.
+        $refs = ComponentRefs::of($document);
+
         foreach ($document->paths ?? [] as $item) {
+            // A path item's parameters belong to the operations under it, and the pairing compares them
+            // there, so they count as parameter identities here too.
             foreach ($item->operations as $operation) {
                 $id = NodeIdentity::of($operation->docuccino, $operation->rest);
                 if ($id !== null) {
                     $operations[$id] = true;
                 }
 
-                foreach ($operation->parameters as $parameter) {
+                foreach ([...$item->parameters, ...$operation->parameters] as $parameter) {
+                    $parameter = $refs->resolveParameter($parameter);
                     $id = NodeIdentity::of($parameter->docuccino, $parameter->rest);
                     if ($id !== null) {
                         $parameters[$id] = true;
