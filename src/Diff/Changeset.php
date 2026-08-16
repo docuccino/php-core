@@ -14,10 +14,13 @@ final readonly class Changeset
      * @param  list<Change>  $changes  already sorted by the caller ({@see DocumentDiffer})
      * @param  Pairing  $pairing  how the two sides' nodes were matched — `Structural` means at least one
      *                            artifact carried no identities, so a rename reads as remove + add
+     * @param  list<string>  $disjointIdentities  node kinds both sides identified and shared no id for
+     *                                            ({@see IdentityOverlap})
      */
     public function __construct(
         public array $changes = [],
         public Pairing $pairing = Pairing::Identity,
+        public array $disjointIdentities = [],
     ) {}
 
     public function isEmpty(): bool
@@ -54,6 +57,7 @@ final readonly class Changeset
         return [
             'breaking' => $this->isBreaking(),
             'pairing' => $this->pairing->value,
+            'disjointIdentities' => $this->disjointIdentities,
             'counts' => [
                 'total' => count($this->changes),
                 'breaking' => count($this->breakingChanges()),

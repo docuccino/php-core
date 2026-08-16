@@ -115,6 +115,34 @@ it('pairs by identity when the artifact kept its ids', function (): void {
         ->and(array_keys(changesByCode($changeset)))->not->toContain('operation.removed');
 });
 
+it('reports no API churn for an id-carrying artifact against the document it came from', function (): void {
+    // The DEFAULT workflow: `docuccino:export` keeps ids, so the committed artifact is diffed against the
+    // document it was emitted from. Everything the artifact carries an id for has to pair — parameters and
+    // component schemas as much as operations. The content pages are the one real absence: OAS has nowhere
+    // to put them.
+    $changeset = diffOf(diffBaseArtifact(keepIds: true), diffBase());
+
+    expect(array_keys(changesByCode($changeset)))->toBe(['page.added'])
+        ->and($changeset->pairing)->toBe(Pairing::Identity);
+});
+
+it('pairs an artifact\'s parameters and component schemas by their flat ids', function (): void {
+    // The flat id is the only identity an OAS artifact carries, and every node that mints one owes the same
+    // pairing — so a renamed parameter and a renamed component stay cosmetic here too.
+    $renamed = diffBase();
+    $renamed['paths']['/api/v1/forms/{id}']['get']['parameters'][1]['name'] = 'state';
+    $renamed['components']['schemas']['FormPayload'] = $renamed['components']['schemas']['FormData'];
+    unset($renamed['components']['schemas']['FormData']);
+
+    $codes = array_keys(changesByCode(diffOf(diffBaseArtifact(keepIds: true), $renamed)));
+
+    expect($codes)->not->toContain('parameter.removed')
+        ->and($codes)->not->toContain('parameter.added')
+        ->and($codes)->not->toContain('parameter.added-required')
+        ->and($codes)->not->toContain('schema.removed')
+        ->and($codes)->not->toContain('schema.added');
+});
+
 it('reads the flat id even where the nested member is gone', function (): void {
     // The emitter writes `x-docuccino-id`, never the nested object — so this is the only identity an
     // OpenAPI artifact can carry, and the differ has to know it.
@@ -138,6 +166,73 @@ it('renders a note when it had to pair structurally', function (): void {
         ->and($rendered)->toContain('Re-export the artifact');
 
     // …and never when it paired by identity, so the note stays a signal.
+    expect((new ChangesetRenderer)->render(diffOf(diffBase(), diffBase())))->toBe("No API changes.\n");
+});
+
+// --- Disjoint identities ----------------------------------------------------
+
+it('names each kind of node the two sides share no identity for', function (): void {
+    // Same algo version, ids that name nothing in common — an artifact diffed against another document's,
+    // or one whose identity inputs moved. Everything under those kinds reads as removed AND re-added, so
+    // the changeset is a phantom and has to say so.
+    $old = diffBase();
+    $old['components']['schemas']['FormMeta'] = [
+        'x-docuccino' => ['id' => 'sch:v1:1111111111111111'],
+        'type' => 'object',
+    ];
+
+    $new = $old;
+    $new['components']['schemas']['FormData']['x-docuccino']['id'] = 'sch:v1:9999999999999999';
+    $new['components']['schemas']['FormMeta']['x-docuccino']['id'] = 'sch:v1:2222222222222222';
+    $new['paths']['/api/v1/forms/{id}']['get']['parameters'][0]['x-docuccino']['id'] = 'par:v1:8888888888888888';
+    $new['paths']['/api/v1/forms/{id}']['get']['parameters'][1]['x-docuccino']['id'] = 'par:v1:7777777777777777';
+
+    $changeset = diffOf($old, $new);
+
+    // The operations still pair, which is exactly why this can't be judged document-wide.
+    expect($changeset->disjointIdentities)->toBe(['parameter', 'schema'])
+        ->and($changeset->toArray()['disjointIdentities'])->toBe(['parameter', 'schema']);
+});
+
+it('holds its tongue when the identities do pair, or when there were none to pair', function (): void {
+    expect(diffOf(diffBase(), diffBase())->disjointIdentities)->toBe([])
+        // Structural pairing isn't keyed on ids at all, so a kind with none is no failure.
+        ->and(diffOf(diffBaseArtifact(), diffBase())->disjointIdentities)->toBe([]);
+});
+
+it('does not call a kind disjoint when one side simply has none of it', function (): void {
+    // Every component schema genuinely removed is a real diff, not a pairing failure.
+    $new = diffBase();
+    unset($new['components']);
+
+    expect(diffOf(diffBase(), $new)->disjointIdentities)->toBe([]);
+});
+
+it('says nothing about a kind either side carries a single identity for', function (): void {
+    // The document's only component schema, renamed and re-minted. "No id in common" here says only that
+    // the one node changed — which is the commonest real diff there is — so calling it a pairing failure
+    // would tell an operator to dismiss a genuine break.
+    $new = diffBase();
+    $new['components']['schemas']['FormPayload'] = $new['components']['schemas']['FormData'];
+    $new['components']['schemas']['FormPayload']['x-docuccino']['id'] = 'sch:v1:9999999999999999';
+    unset($new['components']['schemas']['FormData']);
+
+    expect(diffOf(diffBase(), $new)->disjointIdentities)->toBe([]);
+});
+
+it('warns in the rendered output when a kind paired nothing', function (): void {
+    $new = diffBase();
+    $new['paths']['/api/v1/forms/{id}']['get']['parameters'][0]['x-docuccino']['id'] = 'par:v1:8888888888888888';
+    $new['paths']['/api/v1/forms/{id}']['get']['parameters'][1]['x-docuccino']['id'] = 'par:v1:7777777777777777';
+
+    $rendered = (new ChangesetRenderer)->render(diffOf(diffBase(), $new));
+
+    expect($rendered)->toContain('no parameter id appears on both')
+        // Hedged, because a wholesale rewrite of every parameter looks identical from here.
+        ->and($rendered)->toContain('usually a pairing failure rather')
+        ->and($rendered)->toContain('re-export it');
+
+    // …and stays quiet on a clean diff, so the warning keeps meaning something.
     expect((new ChangesetRenderer)->render(diffOf(diffBase(), diffBase())))->toBe("No API changes.\n");
 });
 

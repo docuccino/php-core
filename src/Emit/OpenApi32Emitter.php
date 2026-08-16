@@ -6,6 +6,7 @@ namespace Docuccino\Core\Emit;
 
 use Docuccino\Core\Canonical\Canonicalizer;
 use Docuccino\Core\Canonical\CanonicalJsonSerializer;
+use Docuccino\Core\Document\NodeIdentity;
 use Docuccino\Core\Document\UirDocument;
 
 /**
@@ -93,7 +94,7 @@ final readonly class OpenApi32Emitter implements Emitter
     private function projectDocuccino(array &$out, array $docuccino, EmitOptions $options): void
     {
         if ($options->keepIds && isset($docuccino['id']) && is_string($docuccino['id'])) {
-            $out['x-docuccino-id'] = $docuccino['id'];
+            $out[NodeIdentity::FLAT_KEY] = $docuccino['id'];
         }
 
         if ($options->mockFakerKey !== null

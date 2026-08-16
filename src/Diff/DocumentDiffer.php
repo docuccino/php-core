@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Diff;
 
+use Docuccino\Core\Document\NodeIdentity;
 use Docuccino\Core\Document\Operation;
 use Docuccino\Core\Document\Parameter;
 use Docuccino\Core\Document\ResponseObject;
@@ -33,6 +34,7 @@ use Docuccino\Core\Support\Arr;
  * Identity pairing needs identities on BOTH sides. An artifact exported with ids dropped, or a spec from
  * another tool, has none, so the differ falls back to method + path on both sides and reports which it
  * used ({@see Pairing}) — see {@see pairing()} for why the one-sided case can't be paired by id at all.
+ * Every node's id is read through {@see NodeIdentity}, which knows both forms an artifact can carry.
  */
 final class DocumentDiffer
 {
@@ -53,7 +55,9 @@ final class DocumentDiffer
 
         usort($changes, static fn (Change $a, Change $b): int => $a->sortKey() <=> $b->sortKey());
 
-        return new Changeset($changes, $pairing);
+        $disjoint = $pairing === Pairing::Identity ? IdentityOverlap::disjointKinds($old, $new) : [];
+
+        return new Changeset($changes, $pairing, $disjoint);
     }
 
     /**
@@ -209,12 +213,12 @@ final class DocumentDiffer
 
             if (! $inNew) {
                 $param = $oldParams[$key];
-                $changes[] = new Change(ChangeKind::Removed, ChangeTarget::Parameter, self::nodeId($param->docuccino?->id, $opId, $key), $path.' parameters '.self::paramLabel($param), true, 'parameter.removed');
+                $changes[] = new Change(ChangeKind::Removed, ChangeTarget::Parameter, self::nodeId(self::parameterId($param), $opId, $key), $path.' parameters '.self::paramLabel($param), true, 'parameter.removed');
             } elseif (! $inOld) {
                 $param = $newParams[$key];
                 $breaking = $param->required === true;
                 $code = $breaking ? 'parameter.added-required' : 'parameter.added';
-                $changes[] = new Change(ChangeKind::Added, ChangeTarget::Parameter, self::nodeId($param->docuccino?->id, $opId, $key), $path.' parameters '.self::paramLabel($param), $breaking, $code);
+                $changes[] = new Change(ChangeKind::Added, ChangeTarget::Parameter, self::nodeId(self::parameterId($param), $opId, $key), $path.' parameters '.self::paramLabel($param), $breaking, $code);
             } else {
                 $this->diffParameterPair($opId, $path, $key, $oldParams[$key], $newParams[$key], $changes);
             }
@@ -226,7 +230,7 @@ final class DocumentDiffer
      */
     private function diffParameterPair(string $opId, string $path, string $key, Parameter $old, Parameter $new, array &$changes): void
     {
-        $id = self::nodeId($new->docuccino?->id, $opId, $key);
+        $id = self::nodeId(self::parameterId($new), $opId, $key);
         $paramPath = $path.' parameters '.self::paramLabel($new);
 
         if ($old->required !== true && $new->required === true) {
@@ -259,10 +263,10 @@ final class DocumentDiffer
 
             if (! $inNew) {
                 $response = $oldResponses[$status];
-                $changes[] = new Change(ChangeKind::Removed, ChangeTarget::Response, self::nodeId($response->docuccino?->id, $opId, $status), $path.' responses '.$status, true, 'response.removed');
+                $changes[] = new Change(ChangeKind::Removed, ChangeTarget::Response, self::nodeId(self::responseId($response), $opId, $status), $path.' responses '.$status, true, 'response.removed');
             } elseif (! $inOld) {
                 $response = $newResponses[$status];
-                $changes[] = new Change(ChangeKind::Added, ChangeTarget::Response, self::nodeId($response->docuccino?->id, $opId, $status), $path.' responses '.$status, false, 'response.added');
+                $changes[] = new Change(ChangeKind::Added, ChangeTarget::Response, self::nodeId(self::responseId($response), $opId, $status), $path.' responses '.$status, false, 'response.added');
             } else {
                 $this->diffResponsePair($opId, $path, $status, $oldResponses[$status], $newResponses[$status], $changes);
             }
@@ -274,7 +278,7 @@ final class DocumentDiffer
      */
     private function diffResponsePair(string $opId, string $path, string $status, ResponseObject $old, ResponseObject $new, array &$changes): void
     {
-        $id = self::nodeId($new->docuccino?->id, $opId, $status);
+        $id = self::nodeId(self::responseId($new), $opId, $status);
         $responsePath = $path.' responses '.$status;
 
         $this->scalarChange($changes, ChangeTarget::Response, $id, $responsePath, 'response.description-changed', 'description', $old->description, $new->description);
@@ -398,21 +402,9 @@ final class DocumentDiffer
         return $out;
     }
 
-    /**
-     * An operation's identity: the UIR `x-docuccino.id`, or the flat `x-docuccino-id` an OpenAPI export
-     * writes in its place when asked to keep ids (the nested member never survives OAS emission, since it
-     * also carries provenance). `rest` holds every member the model doesn't name, extensions included.
-     */
     private static function operationId(Operation $operation): ?string
     {
-        $id = $operation->docuccino?->id;
-        if ($id !== null) {
-            return $id;
-        }
-
-        $flat = $operation->rest['x-docuccino-id'] ?? null;
-
-        return is_string($flat) && $flat !== '' ? $flat : null;
+        return NodeIdentity::of($operation->docuccino, $operation->rest);
     }
 
     /**
@@ -439,7 +431,7 @@ final class DocumentDiffer
         $out = [];
 
         foreach ($op->parameters as $param) {
-            $id = $pairing === Pairing::Identity ? $param->docuccino?->id : null;
+            $id = $pairing === Pairing::Identity ? self::parameterId($param) : null;
             $key = $id ?? self::paramLabel($param);
             $out[$key] = $param;
         }
@@ -557,13 +549,17 @@ final class DocumentDiffer
      */
     private static function schemaId(array $schema): ?string
     {
-        $docuccino = $schema['x-docuccino'] ?? null;
+        return NodeIdentity::inArray($schema);
+    }
 
-        if (is_array($docuccino) && isset($docuccino['id']) && is_string($docuccino['id'])) {
-            return $docuccino['id'];
-        }
+    private static function parameterId(Parameter $param): ?string
+    {
+        return NodeIdentity::of($param->docuccino, $param->rest);
+    }
 
-        return null;
+    private static function responseId(ResponseObject $response): ?string
+    {
+        return NodeIdentity::of($response->docuccino, $response->rest);
     }
 
     private static function algoVersionOf(?string $id): ?string
