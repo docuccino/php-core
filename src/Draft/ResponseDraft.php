@@ -6,6 +6,7 @@ namespace Docuccino\Core\Draft;
 
 use Docuccino\Core\Document\NodeExtension;
 use Docuccino\Core\Document\ResponseObject;
+use Docuccino\Core\Extensions\Schema\ComponentNames;
 use Docuccino\Core\Patch\Contribution;
 use Docuccino\Core\Patch\PatchGuard;
 use Docuccino\Core\Patch\PatchResult;
@@ -26,6 +27,13 @@ final class ResponseDraft
      * trailing newline can't sneak past the anchor.
      */
     private const BODYLESS_STATUS = '/^(1\d\d|1XX|204|205|304)$/D';
+
+    /**
+     * The guarded field {@see claimComponentName()} writes to, and the `x-docuccino.facts` member it
+     * freezes into so the hoist can read it back off the finished document. Public because it is that
+     * wire contract: whoever reads the fact back names it from here rather than spelling it again.
+     */
+    public const COMPONENT = 'component';
 
     private readonly PatchGuard $guard;
 
@@ -72,6 +80,33 @@ final class ResponseDraft
     public function set(string $field, mixed $value, Contribution $by): PatchResult
     {
         return $this->guard->apply($field, $value, $by);
+    }
+
+    /**
+     * Declare the component name this error response is published under when it hoists — for a producer
+     * that speaks for ONE kind of error and can name it better than `Error<status>`, which is what a
+     * generated client's type ends up called. Guarded like any other field, so two producers naming one
+     * response settle by precedence; two different BODIES claiming one name is a contest the hoist
+     * settles, not this.
+     *
+     * A name no component key could carry ({@see ComponentNames::isLegal()}) is read as no declaration
+     * at all and answers `NoOp`, the same as `null`. Enforced at the write like {@see BODYLESS_STATUS}
+     * above it, so a name a `$ref` cannot point at never reaches the document — whether or not the
+     * shared-error hoist, which is the only thing that would have refused it, is switched on.
+     */
+    public function claimComponentName(?string $name, Contribution $by): PatchResult
+    {
+        return $this->guard->apply(
+            self::COMPONENT,
+            $name !== null && ComponentNames::isLegal($name) ? $name : null,
+            $by,
+        );
+    }
+
+    /** The component name a producer declared for this response, or null when none did. */
+    public function componentClaim(): ?string
+    {
+        return Hydrate::stringOrNull($this->guard->resolved()[self::COMPONENT] ?? null);
     }
 
     public function content(string $mediaType): SchemaDraft
@@ -157,7 +192,9 @@ final class ResponseDraft
             $headers = $resolved['headers'];
         }
 
-        unset($resolved['$ref'], $resolved['description'], $resolved['headers']);
+        $component = Hydrate::stringOrNull($resolved[self::COMPONENT] ?? null);
+
+        unset($resolved['$ref'], $resolved['description'], $resolved['headers'], $resolved[self::COMPONENT]);
 
         $content = null;
         if ($this->content !== []) {
@@ -170,7 +207,11 @@ final class ResponseDraft
             }
         }
 
-        $docuccino = new NodeExtension(id: $this->id, provenance: $this->guard->provenance());
+        $docuccino = new NodeExtension(
+            id: $this->id,
+            provenance: $this->guard->provenance(),
+            rest: $component === null ? [] : ['facts' => [self::COMPONENT => $component]],
+        );
 
         return new ResponseObject(
             ref: $ref,

@@ -35,9 +35,13 @@ final readonly class Contribution
         return new self(Layer::Inference, 'inference', $source, $confidence);
     }
 
-    public static function integration(string $name, ?Source $source = null, ?float $confidence = null): self
+    /**
+     * `$specificity` is how one integration beats another at the same layer — an application's own
+     * extension taking a field a built-in already owns, which an equal contribution would only shadow.
+     */
+    public static function integration(string $name, ?Source $source = null, ?float $confidence = null, int $specificity = 0): self
     {
-        return new self(Layer::Integration, 'integration:'.$name, $source, $confidence);
+        return new self(Layer::Integration, 'integration:'.$name, $source, $confidence, $specificity);
     }
 
     public static function docblock(?Source $source = null): self

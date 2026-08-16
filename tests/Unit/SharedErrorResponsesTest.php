@@ -11,6 +11,8 @@ use Docuccino\Core\Extensions\BuiltIn\SharedErrorResponses;
 use Docuccino\Core\Extensions\Context\DocumentConfig;
 use Docuccino\Core\Extensions\Context\DocumentContext;
 use Docuccino\Core\Extensions\Document\UirDocumentDraft;
+use Docuccino\Core\Overlay\OverlayApplier;
+use Docuccino\Core\Overlay\OverlayDocument;
 
 /**
  * The shared-error hoist collapses an error body SHAPE repeated across operations into one
@@ -43,6 +45,33 @@ function transformedErrorDoc(array $doc, array $representation = []): array
     );
 
     return $draft->toArray();
+}
+
+/** The diagnostics one run raises, in the order it raised them. */
+function errorDocReport(array $doc, array $representation = []): array
+{
+    $context = new DocumentContext(new DocumentConfig('default', [], representation: $representation), 'doc:default');
+    (new SharedErrorResponses)->transform(new UirDocumentDraft($doc), $context);
+
+    return $context->diagnostics->all();
+}
+
+/**
+ * A response body whose producer declared the component name it publishes under, spelled the way
+ * `ResponseDraft::claimComponentName()` freezes it.
+ */
+function claimedBody(string $name, array $body, ?string $producer = null): array
+{
+    $extension = is_array($body['x-docuccino'] ?? null) ? $body['x-docuccino'] : [];
+
+    if ($producer !== null) {
+        $extension['provenance'] = [['producer' => $producer, 'fields' => ['component', 'description']]];
+    }
+
+    $extension['facts'] = ['component' => $name];
+    unset($body['x-docuccino']);
+
+    return ['x-docuccino' => $extension] + $body;
 }
 
 /** A `{message}` body, optionally carrying provenance for the identity assertions. */
@@ -704,4 +733,301 @@ it('promotes a body from inline to a reference once a second operation states it
         ->and(responseAt($joined, '/a', '404')['description'])->toBe('Not Found')
         ->and($joined['components']['schemas']['Error404']['properties'])
         ->toBe(messageShape()['properties']);
+});
+
+it('publishes a declared name in both buckets, in place of the status', function (): void {
+    // What a producer that speaks for one kind of error buys: the generated client catches `NotFound`
+    // rather than `Error404`, in the response component and the shape underneath it alike.
+    $body = claimedBody('NotFound', messageBody());
+
+    $doc = errorDoc(['/a' => ['404' => $body], '/b' => ['404' => $body]]);
+
+    expect(array_keys($doc['components']['schemas']))->toBe(['NotFound'])
+        ->and(array_keys($doc['components']['responses']))->toBe(['NotFound'])
+        ->and(responseRefAt($doc, '/a', '404'))->toBe('#/components/responses/NotFound')
+        ->and($doc['components']['responses']['NotFound']['content']['application/json']['schema'])
+        ->toBe(['$ref' => '#/components/schemas/NotFound']);
+});
+
+it('leaves the declaration on the operation and out of the component it names', function (): void {
+    // The claim is a per-route provenance fact like the id beside it, so it travels with the `$ref` and
+    // never into the shared body — which speaks for every route pointing at it.
+    $body = claimedBody('NotFound', messageBody('Not Found', 'integration:framework-errors'));
+
+    $doc = errorDoc(['/a' => ['404' => $body], '/b' => ['404' => $body]]);
+
+    expect($doc['paths']['/a']['get']['responses']['404']['x-docuccino']['facts'])->toBe(['component' => 'NotFound'])
+        ->and($doc['components']['responses']['NotFound'])->not->toHaveKey('x-docuccino')
+        ->and($doc['components']['schemas']['NotFound'])->not->toHaveKey('facts');
+});
+
+it('gives two declared names that share a body a component each', function (): void {
+    // The point of keying the hoist on the declaration. Two producers naming two different errors that
+    // happen to spell the same body get two named components — and neither name is a function of the
+    // other's existence, which is what a single shared `Error404` could never promise.
+    $one = claimedBody('NotFound', messageBody());
+    $two = claimedBody('GoneAway', messageBody());
+
+    $doc = errorDoc([
+        '/a' => ['404' => $one], '/b' => ['404' => $one],
+        '/c' => ['404' => $two], '/d' => ['404' => $two],
+    ]);
+
+    expect(array_keys($doc['components']['schemas']))->toBe(['GoneAway', 'NotFound'])
+        ->and(schemaRefAt($doc, '/a', '404'))->toBe('#/components/schemas/NotFound')
+        ->and(schemaRefAt($doc, '/c', '404'))->toBe('#/components/schemas/GoneAway')
+        // Two published components are two published nodes, so they cannot share one id.
+        ->and($doc['components']['schemas']['NotFound']['x-docuccino']['id'])
+        ->not->toBe($doc['components']['schemas']['GoneAway']['x-docuccino']['id']);
+});
+
+it('leaves an undeclared body exactly where it was when a declared one arrives', function (string $case, array $arriving): void {
+    // Locality across the feature boundary, on the hardest version of it: the arriving route states the
+    // SAME status and the SAME bytes, so the two would be one component if a declaration were only a
+    // label. Every byte the undeclared pair already published — both `$ref`s and both components — has
+    // to survive a producer elsewhere in the application learning to name its error.
+    $undeclared = ['404' => messageBody()];
+
+    $before = errorDoc(['/a' => $undeclared, '/b' => $undeclared]);
+    $after = errorDoc(['/a' => $undeclared, '/b' => $undeclared, '/c' => $arriving, '/d' => $arriving]);
+
+    expect(schemaRefAt($after, '/a', '404'))->toBe(schemaRefAt($before, '/a', '404'))
+        ->and(responseRefAt($after, '/a', '404'))->toBe(responseRefAt($before, '/a', '404'))
+        ->and($after['components']['schemas']['Error404'])->toBe($before['components']['schemas']['Error404'])
+        ->and($after['components']['responses']['Error404'])->toBe($before['components']['responses']['Error404'])
+        // …and the arrival really did arrive, so the rows above are not equality between two nothings.
+        ->and($after['components']['schemas'])->toHaveCount(count($before['components']['schemas']) + 1)
+        ->and($after['components']['responses'])->toHaveCount(count($before['components']['responses']) + 1);
+})->with([
+    ['the same status and the same body', ['404' => claimedBody('NotFound', messageBody())]],
+    ['the same status and a body of its own', ['404' => claimedBody('NotFound', ['description' => 'Not Found', 'content' => ['application/json' => ['schema' => ['type' => 'object', 'properties' => ['detail' => ['type' => 'string']]]]]])]],
+    ['a status of its own', ['403' => claimedBody('Forbidden', messageBody('Forbidden'))]],
+]);
+
+it('shares a body a declaring and a non-declaring producer both state', function (): void {
+    // What repeats decides WHETHER a body is hoisted; the declaration decides only what the component is
+    // called. Counting per declared name instead would leave each of these alone in a bucket of one, and
+    // a body two operations state would go out inline twice — a declaration taking a shared component
+    // away from a route that never declared anything.
+    $doc = errorDoc([
+        '/a' => ['404' => claimedBody('NotFound', messageBody())],
+        '/b' => ['404' => messageBody()],
+    ]);
+
+    expect(array_keys($doc['components']['schemas']))->toBe(['NotFound', 'Error404'])
+        ->and(schemaRefAt($doc, '/a', '404'))->toBe('#/components/schemas/NotFound')
+        ->and(schemaRefAt($doc, '/b', '404'))->toBe('#/components/schemas/Error404')
+        ->and(responseRefAt($doc, '/a', '404'))->toBe('#/components/responses/NotFound')
+        ->and(responseRefAt($doc, '/b', '404'))->toBe('#/components/responses/Error404');
+});
+
+it('publishes an undeclared body exactly as it would with no declaration in the document', function (): void {
+    // The invariant stated as an equality. An undeclared body's whole representation — its `$ref`s and
+    // the components behind them — is a function of the statuses and bodies the document states, and
+    // nothing a producer declares anywhere can move it.
+    $bare = errorDoc(['/a' => ['404' => messageBody()], '/b' => ['404' => messageBody()]]);
+
+    $mixed = errorDoc([
+        '/a' => ['404' => messageBody()],
+        '/b' => ['404' => messageBody()],
+        '/c' => ['404' => claimedBody('NotFound', messageBody())],
+    ]);
+
+    expect($mixed['paths']['/a'])->toBe($bare['paths']['/a'])
+        ->and($mixed['paths']['/b'])->toBe($bare['paths']['/b'])
+        ->and($mixed['components']['schemas']['Error404'])->toBe($bare['components']['schemas']['Error404'])
+        ->and($mixed['components']['responses']['Error404'])->toBe($bare['components']['responses']['Error404'])
+        // …and the arriving route, alone in naming this body, is hoisted all the same: the body it
+        // states is one the document already states twice, and that is the whole question.
+        ->and(responseRefAt($mixed, '/c', '404'))->toBe('#/components/responses/NotFound');
+});
+
+it('names a declared body the same wherever the document meets it', function (): void {
+    // Filed by name and content, never by the walk: reversing which shape the document states first
+    // moves nothing.
+    $one = ['404' => claimedBody('NotFound', messageBody())];
+    $two = ['404' => claimedBody('GoneAway', messageBody('Not Found here'))];
+
+    $first = errorDoc(['/a' => $one, '/b' => $one, '/c' => $two, '/d' => $two]);
+    $second = errorDoc(['/a' => $two, '/b' => $two, '/c' => $one, '/d' => $one]);
+
+    expect(schemaRefAt($first, '/a', '404'))->toBe(schemaRefAt($second, '/c', '404'))
+        ->and(array_keys($first['components']['schemas']))->toBe(array_keys($second['components']['schemas']))
+        ->and(json_encode($first['components']))->toBe(json_encode($second['components']));
+});
+
+it('retires a declared name two different bodies contest, and says who asked', function (): void {
+    // A genuine contest, settled by the one ladder every minted name climbs — not by a second mechanism
+    // of this transformer's own.
+    $one = claimedBody('NotFound', messageBody());
+    $two = claimedBody('NotFound', ['description' => 'Not Found', 'content' => ['application/json' => ['schema' => ['type' => 'object', 'properties' => ['detail' => ['type' => 'string']]]]]]);
+
+    $doc = errorDoc([
+        '/a' => ['404' => $one], '/b' => ['404' => $one],
+        '/c' => ['404' => $two], '/d' => ['404' => $two],
+    ]);
+    $names = array_keys($doc['components']['schemas']);
+
+    expect($names)->toHaveCount(2)
+        ->and($names)->not->toContain('NotFound')
+        ->and($names)->each->toMatch('/^NotFound_[a-z2-7]{8}$/');
+
+    $collision = array_values(array_filter(
+        errorDocReport(['paths' => array_map(static fn (array $r): array => ['get' => ['responses' => $r]], [
+            '/a' => ['404' => $one], '/b' => ['404' => $one],
+            '/c' => ['404' => $two], '/d' => ['404' => $two],
+        ])]),
+        static fn ($d): bool => $d->code === 'components.name-collision',
+    ));
+
+    expect($collision)->not->toBeEmpty()
+        ->and($collision[0]->message)->toContain('"NotFound"')
+        ->and($collision[0]->message)->toContain($names[0]);
+});
+
+it('climbs past a declared name a component already holds with another body', function (): void {
+    // `$taken` is the registry's, and a declaration does not outrank it: the incumbent keeps its name
+    // and the shared body takes a discriminated one rather than overwriting something already `$ref`ed.
+    $body = claimedBody('NotFound', messageBody());
+
+    $doc = transformedErrorDoc([
+        'paths' => [
+            '/a' => ['get' => ['responses' => ['404' => $body]]],
+            '/b' => ['get' => ['responses' => ['404' => $body]]],
+        ],
+        'components' => ['schemas' => ['NotFound' => ['type' => 'string']]],
+    ]);
+
+    expect($doc['components']['schemas']['NotFound'])->toBe(['type' => 'string'])
+        ->and(schemaRefAt($doc, '/a', '404'))->toMatch('#^\#/components/schemas/NotFound_[a-z2-7]{8}$#');
+});
+
+it('refuses a declared name no component key could carry, and says whose it was', function (): void {
+    // An author error must cost the document a better name, never its validity — so the body falls back
+    // to the status and the producer is named where the author will see it.
+    $body = claimedBody('Not Found!', messageBody(), 'integration:framework-errors');
+    $paths = ['paths' => [
+        '/a' => ['get' => ['responses' => ['404' => $body]]],
+        '/b' => ['get' => ['responses' => ['404' => $body]]],
+    ]];
+
+    $doc = transformedErrorDoc($paths);
+    $rejected = array_values(array_filter(errorDocReport($paths), static fn ($d): bool => $d->code === 'components.name-invalid'));
+
+    expect(array_keys($doc['components']['schemas']))->toBe(['Error404'])
+        ->and($rejected)->toHaveCount(1)
+        ->and($rejected[0]->message)->toContain('"integration:framework-errors"')
+        ->and($rejected[0]->message)->toContain('"Not Found!"');
+});
+
+it('says nothing about a rejected name on a body that was never going to hoist', function (string $case, array $paths): void {
+    // A diagnostic earns its place by where it fires. The message says the body "was named after its
+    // status instead", which is only true of a body that got published — a 2xx is none of this
+    // transformer's business and a body stated once stays inline whatever anyone called it.
+    expect(errorDocReport(['paths' => $paths]))->toBe([]);
+})->with(function (): array {
+    $body = claimedBody('Not Found!', messageBody(), 'integration:acme');
+
+    return [
+        ['a body stated once', ['/a' => ['get' => ['responses' => ['404' => $body]]]]],
+        ['a success body', [
+            '/a' => ['get' => ['responses' => ['200' => claimedBody('Not Found!', messageBody('OK'), 'integration:acme')]]],
+            '/b' => ['get' => ['responses' => ['200' => claimedBody('Not Found!', messageBody('OK'), 'integration:acme')]]],
+        ]],
+        ['two bodies neither of which repeats', [
+            '/a' => ['get' => ['responses' => ['404' => $body]]],
+            '/b' => ['get' => ['responses' => ['409' => claimedBody('Not Found!', messageBody('Conflict'), 'integration:acme')]]],
+        ]],
+    ];
+});
+
+it('names no producer for an illegal name an overlay wrote, because no record owns the field', function (): void {
+    // The one source of an illegal name left, and the one arm of the message a hand-built document does
+    // not have to fake: `claimComponentName()` refuses one at the write, so a name this transformer can
+    // reject reached the document some other way — an overlay, which runs before the transformers. Its
+    // provenance record owns the `x-docuccino` member it merged and not the `component` inside it, so
+    // there is no producer to name and the diagnostic says only what it knows.
+    $body = messageBody();
+    $overlaid = (new OverlayApplier)->apply(
+        ['paths' => [
+            '/a' => ['get' => ['responses' => ['404' => $body]]],
+            '/b' => ['get' => ['responses' => ['404' => $body]]],
+        ]],
+        OverlayDocument::fromArray([
+            'overlay' => '1.0.0',
+            'actions' => array_map(static fn (string $path): array => [
+                'target' => sprintf('$.paths[\'%s\'].get.responses[\'404\']', $path),
+                'update' => ['x-docuccino' => ['facts' => ['component' => 'Not Found!']]],
+            ], ['/a', '/b']),
+        ]),
+    )->document;
+
+    $rejected = array_values(array_filter(errorDocReport($overlaid), static fn ($d): bool => $d->code === 'components.name-invalid'));
+
+    expect($rejected)->toHaveCount(1)
+        ->and($rejected[0]->message)->toStartWith('A producer declared the component name "Not Found!"')
+        // …and the body still publishes, under the name its status gives it.
+        ->and(array_keys(transformedErrorDoc($overlaid)['components']['schemas']))->toBe(['Error404']);
+});
+
+it('quotes a rejected name without letting it write to the terminal', function (): void {
+    // A diagnostic is read on a terminal, and the only names that reach this one are by definition ones
+    // nothing validated — an overlay states `x-docuccino.facts.component` on whatever it likes, and the
+    // hoist reads the document. An escape sequence would repaint the line and a newline would forge a
+    // second diagnostic, so the control characters are shown rather than performed.
+    $body = claimedBody("Evil\x1b[31m\nName", messageBody(), "acme\x07");
+    $paths = ['paths' => [
+        '/a' => ['get' => ['responses' => ['404' => $body]]],
+        '/b' => ['get' => ['responses' => ['404' => $body]]],
+    ]];
+
+    $rejected = array_values(array_filter(errorDocReport($paths), static fn ($d): bool => $d->code === 'components.name-invalid'));
+
+    expect($rejected)->toHaveCount(1)
+        ->and($rejected[0]->message)->toContain('Evil\x1B[31m\x0AName')
+        ->and($rejected[0]->message)->toContain('acme\x07')
+        ->and(preg_match('/[\x00-\x1F\x7F]/', $rejected[0]->message))->toBe(0)
+        // The name is still legible enough to recognise, which is the whole point of quoting it.
+        ->and($rejected[0]->message)->toContain('Name')
+        // …and the component the body actually got is the status fallback, unaffected.
+        ->and(array_keys(transformedErrorDoc($paths)['components']['schemas']))->toBe(['Error404']);
+});
+
+it('reports one rejected name per producer, however many routes state it', function (): void {
+    // A mapper wrong on one route is wrong on every route it maps; one warning is the whole story.
+    $body = claimedBody('Not Found!', messageBody(), 'integration:framework-errors');
+    $paths = ['paths' => array_map(
+        static fn (): array => ['get' => ['responses' => ['404' => $body]]],
+        array_flip(['/a', '/b', '/c', '/d']),
+    )];
+
+    expect(array_filter(errorDocReport($paths), static fn ($d): bool => $d->code === 'components.name-invalid'))
+        ->toHaveCount(1);
+});
+
+it('walks past a declaration it cannot read rather than reporting on it', function (string $case, mixed $fact): void {
+    // An overlay or a hand-written document can put anything anywhere. A member that is not a name is
+    // not a mistaken name; the body simply keeps the one its status gives it.
+    $body = ['x-docuccino' => ['facts' => ['component' => $fact]]] + messageBody();
+    $paths = ['paths' => [
+        '/a' => ['get' => ['responses' => ['404' => $body]]],
+        '/b' => ['get' => ['responses' => ['404' => $body]]],
+    ]];
+
+    expect(array_keys(transformedErrorDoc($paths)['components']['schemas']))->toBe(['Error404'])
+        ->and(errorDocReport($paths))->toBe([]);
+})->with([
+    ['a number', 404],
+    ['an empty string', ''],
+    ['a map', ['name' => 'NotFound']],
+    ['a boolean', true],
+]);
+
+it('is a no-op the second time it runs over a declared body', function (): void {
+    $once = errorDoc([
+        '/a' => ['404' => claimedBody('NotFound', messageBody())],
+        '/b' => ['404' => claimedBody('NotFound', messageBody())],
+    ]);
+
+    expect(transformedErrorDoc($once))->toBe($once);
 });

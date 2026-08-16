@@ -36,6 +36,10 @@ final class ResponseDraftApplier
             return;
         }
 
+        // The name the producer declared for this body, carried across the merge under the producer's own
+        // contribution — the target response is where the hoist will read it.
+        $response->claimComponentName($draft->componentClaim(), $contribution);
+
         if ($frozen->description !== null) {
             $response->setDescription($frozen->description, $contribution);
         }

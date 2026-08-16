@@ -281,6 +281,16 @@ final class ComponentNames
         return $parts;
     }
 
+    /**
+     * Whether a name is already one a `$ref` can carry — the question {@see sanitize()} answers by
+     * force. The character class lives here and nowhere else: a second copy of it is how a name this
+     * class would rewrite comes to be accepted somewhere upstream.
+     */
+    public static function isLegal(string $name): bool
+    {
+        return self::sanitize($name) === $name;
+    }
+
     /** Reduce a name to the characters a `$ref` may carry, never to nothing. */
     public static function sanitize(string $name): string
     {
