@@ -13,7 +13,9 @@ namespace Docuccino\Core\Provenance;
  *
  * A file under neither — an include path, a class loaded from outside any package — keeps its name
  * and loses the rest. That is a degraded answer and deliberately so: the emitted document may carry
- * no absolute machine path, since the same code on two machines would then emit different bytes.
+ * no absolute machine path, since the same code on two machines would then emit different bytes. That
+ * is the whole rule, and this is the only place it is written down: {@see Source::fromLocation()}
+ * relativises by coming here.
  *
  * The composer-ancestor walk is framework-neutral, so it lives in core; each adapter constructs it
  * with its own base path (the Laravel one binds `base_path()`).
@@ -28,6 +30,12 @@ final readonly class RootRelativeSourcePathResolver implements SourcePathResolve
     {
         $normalized = str_replace('\\', '/', $file);
 
+        // Already relative, so already the answer — stripping it to a basename would throw away
+        // directories that are portable exactly as they stand.
+        if (! self::isAbsolute($normalized)) {
+            return $normalized;
+        }
+
         $base = rtrim(str_replace('\\', '/', $this->basePath), '/');
         if ($base !== '' && str_starts_with($normalized, $base.'/')) {
             return substr($normalized, strlen($base) + 1);
@@ -39,6 +47,12 @@ final readonly class RootRelativeSourcePathResolver implements SourcePathResolve
         }
 
         return basename($normalized);
+    }
+
+    /** A leading slash, or a Windows drive letter — the paths a machine could be recognised from. */
+    private static function isAbsolute(string $file): bool
+    {
+        return str_starts_with($file, '/') || preg_match('#^[A-Za-z]:/#', $file) === 1;
     }
 
     /**

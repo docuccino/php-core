@@ -12,8 +12,7 @@ use Docuccino\Core\Support\Hydrate;
  *
  * Not the same thing as {@see SourceLocation}, which is the engine's raw absolute-path finding
  * (file + line + byte `pos`, for engine-internal ordering). This is the emitted `provenance.source`
- * (file + line + human `symbol`), and {@see fromLocation()} is the one crossing point that owns the
- * absolute→relative normalisation.
+ * (file + line + human `symbol`), and {@see fromLocation()} is the crossing point between them.
  */
 final readonly class Source
 {
@@ -24,29 +23,17 @@ final readonly class Source
     ) {}
 
     /**
-     * Converts an inference {@see SourceLocation} into a provenance source, relativising the engine's
-     * absolute path. Files already relative, or outside `$projectRoot`, are kept verbatim.
+     * Converts an inference {@see SourceLocation} into a provenance source. The path is relativised by
+     * {@see RootRelativeSourcePathResolver}, which owns the one rule for it — so a file outside
+     * `$projectRoot` degrades the same way here as everywhere else, and never arrives absolute.
      */
     public static function fromLocation(SourceLocation $location, string $projectRoot, ?string $symbol = null): self
     {
         return new self(
-            file: self::relativize($location->file, $projectRoot),
+            file: (new RootRelativeSourcePathResolver($projectRoot))->relative($location->file),
             line: $location->line,
             symbol: $symbol,
         );
-    }
-
-    private static function relativize(string $file, string $projectRoot): string
-    {
-        $prefix = rtrim($projectRoot, '/');
-
-        if ($prefix === '') {
-            return $file;
-        }
-
-        return str_starts_with($file, $prefix.'/')
-            ? substr($file, strlen($prefix) + 1)
-            : $file;
     }
 
     /**

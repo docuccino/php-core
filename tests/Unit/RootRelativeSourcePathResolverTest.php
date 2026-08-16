@@ -40,6 +40,32 @@ it('keeps the name and drops the machine path when neither the base path nor a c
         ->and($resolver->relative($directory.'/File.php'))->not->toContain($directory);
 });
 
+it('does not read a sibling directory sharing a prefix as inside the base path', function (): void {
+    $base = '/'.uniqid('docuccino-base-', true);
+
+    $resolver = new RootRelativeSourcePathResolver($base);
+
+    // Stripping the base off a path that merely starts with its characters would publish
+    // `-extra/src/Thing.php`, which points at nothing. The file is outside the base path like any other.
+    expect($resolver->relative($base.'-extra/src/Thing.php'))->toBe('Thing.php');
+});
+
+it('leaves an already-relative path as it found it', function (): void {
+    // Nothing to strip and nothing to walk up from: the path is already the portable form the resolver
+    // exists to produce, and taking its basename would throw away directories that were fine.
+    $resolver = new RootRelativeSourcePathResolver('/some/base');
+
+    expect($resolver->relative('modules/Form/FormController.php'))->toBe('modules/Form/FormController.php');
+});
+
+it('recognises a Windows drive letter as absolute rather than as a relative path', function (): void {
+    // Backslashes are normalised first, so what is left is `C:/…` — still a machine path, and still
+    // something the document may not carry.
+    $resolver = new RootRelativeSourcePathResolver('/some/base');
+
+    expect($resolver->relative('C:\\'.uniqid('docuccino-windows-', true).'\\app\\Thing.php'))->toBe('Thing.php');
+});
+
 it('emits no leading slash for any path it is given', function (string $case, string $base, string $file): void {
     // The invariant behind the rows above, as one statement: whatever comes in, what goes out is a
     // relative path, so nothing downstream has to know which of the three routes answered.

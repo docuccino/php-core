@@ -615,29 +615,14 @@ final class SharedErrorResponses implements DocumentTransformer
                 code: 'components.name-invalid',
                 message: sprintf(
                     '%s declared the component name "%s" for a shared error response, which is not a name an OpenAPI component key can carry, so the body was named after its status instead.',
-                    $producer === null ? 'A producer' : sprintf('"%s"', self::printable($producer)),
-                    self::printable($name),
+                    $producer === null ? 'A producer' : sprintf('"%s"', $producer),
+                    $name,
                 ),
                 help: 'A component key is letters, digits, ".", "_" and "-" only. A reason phrase as one word — "NotFound", "TooManyRequests" — is what reads best as a generated client\'s type.',
             );
         }
 
         return $out;
-    }
-
-    /**
-     * A name as a diagnostic may quote it. The document escapes what it publishes; a diagnostic is read
-     * on a terminal, and the only names reaching this one are ones nothing validated, so an escape
-     * sequence or a newline would move the cursor rather than be read. Everything printable passes
-     * through — the author has to recognise what they wrote.
-     */
-    private static function printable(string $value): string
-    {
-        return (string) preg_replace_callback(
-            '/[\x00-\x1F\x7F]/',
-            static fn (array $match): string => sprintf('\x%02X', ord($match[0])),
-            $value,
-        );
     }
 
     /**
