@@ -7,6 +7,17 @@ User-facing changes to `docuccino/core` — features, fixes, performance work an
 taken from the commit messages scoped `core`. Entries begin after v0.1.2; older history is in
 the [repository](https://github.com/docuccino/docuccino) git log.
 
+## v0.5.1
+
+### Features
+
+- let a finding the whole document reports travel on the route that found it ([#70](https://github.com/docuccino/docuccino/pull/70))
+
+### Bug fixes
+
+- read every form that writes a local, not only the plain assignment ([#72](https://github.com/docuccino/docuccino/pull/72))
+- stop a collision blaming an author for a name nothing claimed, and name the remedy ([#66](https://github.com/docuccino/docuccino/pull/66))
+
 ## v0.5.0
 
 ### Breaking changes
