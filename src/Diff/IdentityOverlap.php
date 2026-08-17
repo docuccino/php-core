@@ -63,7 +63,8 @@ final class IdentityOverlap
         // to flag.
         $refs = ComponentRefs::of($document);
 
-        foreach ($document->paths ?? [] as $item) {
+        // Webhooks are paired as operations, so their ids are operation ids here as well.
+        foreach ([...array_values($document->paths ?? []), ...array_values($document->webhooks ?? [])] as $item) {
             // A path item's parameters belong to the operations under it, and the pairing compares them
             // there, so they count as parameter identities here too.
             foreach ($item->operations as $operation) {

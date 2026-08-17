@@ -16,8 +16,9 @@ use Docuccino\Core\Support\Json;
 /**
  * The semantic diff engine: compares two {@see UirDocument}s by their stable `x-docuccino.id`s,
  * so a path-parameter rename (same op id) reads as no change while a URI change reads as
- * remove + add. Walks operations, their parameters/responses/request bodies, named component
- * schemas and content pages, delegating field-level schema comparison to
+ * remove + add. Walks operations — under `paths` and under `webhooks`, which are one contract and are
+ * diffed by one machinery — their parameters/responses/request bodies, named component schemas,
+ * security schemes and content pages, delegating field-level schema comparison to
  * {@see SchemaComparator}, and flags each {@see Change} breaking or not.
  *
  * Responses and parameters are read through {@see ComponentRefs} on both sides, so where one lives —
@@ -26,9 +27,11 @@ use Docuccino\Core\Support\Json;
  * declares for every operation under it, minus any the operation restates for the same `in` + `name`.
  *
  * Breaking: a removed operation/parameter/response/status, a parameter becoming required, an
- * added required parameter, plus the schema-level rules SchemaComparator owns. Additions, prose
- * edits and deprecations aren't — and since only modelled fields and schema structure are
- * compared, a provenance-only delta yields an empty changeset.
+ * added required parameter, a security scheme a requirement still names changing or going away,
+ * plus the schema-level rules SchemaComparator owns. Additions, prose edits and deprecations
+ * aren't — and since only modelled fields and schema structure are compared, a provenance-only
+ * delta yields an empty changeset. A component nothing reaches is the one place a rule is stood
+ * down; {@see diffComponentSchemas()} owns why.
  *
  * Identities carry an algorithm version (`op:v1:…`); documents minted by different algo versions
  * can't be paired safely, so the differ throws {@see IncomparableDocumentsException} rather than
@@ -44,6 +47,9 @@ use Docuccino\Core\Support\Json;
  */
 final class DocumentDiffer
 {
+    /** Security-scheme members that say something ABOUT the scheme rather than how to satisfy it. */
+    private const array SCHEME_PROSE = ['summary', 'description', 'deprecated'];
+
     public function __construct(
         private readonly SchemaComparator $schemas = new SchemaComparator,
     ) {}
@@ -55,15 +61,20 @@ final class DocumentDiffer
         /** @var list<Change> $changes */
         $changes = [];
 
+        /** @var array<string, true> $unreferenced */
+        $unreferenced = [];
+
         $this->diffOperations($old, $new, $changes, $pairing);
-        $this->diffComponentSchemas($old, $new, $changes, $pairing);
+        $this->diffComponentSchemas($old, $new, $changes, $unreferenced, $pairing);
+        $this->diffSecuritySchemes($old, $new, $changes, $unreferenced);
         $this->diffPages($old, $new, $changes);
 
         usort($changes, static fn (Change $a, Change $b): int => $a->sortKey() <=> $b->sortKey());
+        ksort($unreferenced);
 
         $disjoint = $pairing === Pairing::Identity ? IdentityOverlap::disjointKinds($old, $new) : [];
 
-        return new Changeset($changes, $pairing, $disjoint);
+        return new Changeset($changes, $pairing, $disjoint, array_keys($unreferenced));
     }
 
     /**
@@ -336,14 +347,29 @@ final class DocumentDiffer
     }
 
     /**
+     * A schema nothing in EITHER document reaches ({@see SchemaReachability}) is in no operation's request
+     * or response, so no edit to it can break a consumer of the API. It is still reported — a name under
+     * `components` becomes a type in a generated client — but never as breaking, and the name is collected
+     * so the changeset can say the downgrade happened rather than quietly under-report. Docuccino publishes
+     * no unreachable schema; a hand-written or third-party artifact routinely carries several.
+     *
+     * Deleting one the new document still points at is the mirror image: the pointer is left naming
+     * nothing, so the document is invalid AND every client generated from it loses the type that pointer
+     * stood for. That is breaking however small the schema was, and it gets its own code — "removed" alone
+     * would read as tidying up.
+     *
      * @param  list<Change>  $changes
+     * @param  array<string, true>  $unreferenced
      */
-    private function diffComponentSchemas(UirDocument $old, UirDocument $new, array &$changes, Pairing $pairing): void
+    private function diffComponentSchemas(UirDocument $old, UirDocument $new, array &$changes, array &$unreferenced, Pairing $pairing): void
     {
         [$oldSchemas, $newSchemas] = IdentityKeys::pair(
             $this->componentSchemaEntries($old, $pairing),
             $this->componentSchemaEntries($new, $pairing),
         );
+        $oldReach = SchemaReachability::of($old);
+        $newReach = SchemaReachability::of($new);
+        $declared = self::schemaNames($new);
 
         foreach (Arr::sortedUnion(array_keys($oldSchemas), array_keys($newSchemas)) as $key) {
             $inOld = array_key_exists($key, $oldSchemas);
@@ -351,17 +377,176 @@ final class DocumentDiffer
 
             if (! $inNew) {
                 $entry = $oldSchemas[$key];
-                $changes[] = new Change(ChangeKind::Removed, ChangeTarget::Schema, $key, 'components.schemas.'.$entry['name'], false, 'schema.removed');
+                // Pairing is by identity, so a schema re-minted under the same name is a removal here and
+                // an addition below. The name still resolves, and nothing dangles.
+                $dangling = $newReach->reaches($entry['name']) && ! isset($declared[$entry['name']]);
+                $code = $dangling ? 'schema.removed-still-referenced' : 'schema.removed';
+                $changes[] = new Change(ChangeKind::Removed, ChangeTarget::Schema, $key, 'components.schemas.'.$entry['name'], $dangling, $code);
             } elseif (! $inOld) {
                 $entry = $newSchemas[$key];
                 $changes[] = new Change(ChangeKind::Added, ChangeTarget::Schema, $key, 'components.schemas.'.$entry['name'], false, 'schema.added');
             } else {
                 $entry = $newSchemas[$key];
+                $unreachable = ! $oldReach->reaches($oldSchemas[$key]['name']) && ! $newReach->reaches($entry['name']);
+
                 foreach ($this->schemas->compare($oldSchemas[$key]['schema'], $entry['schema'], 'components.schemas.'.$entry['name'], $key, request: false) as $change) {
+                    if ($unreachable && $change->breaking) {
+                        $unreferenced['components.schemas.'.$entry['name']] = true;
+                        $change = new Change($change->kind, $change->target, $change->id, $change->path, false, $change->code, $change->fields);
+                    }
+
                     $changes[] = $change;
                 }
             }
         }
+    }
+
+    /**
+     * `components.securitySchemes` is how a document says what a client must send to be let in, and a
+     * `security` requirement names one by key rather than through a `$ref` — so schemes pair by name, and
+     * which names are spoken for is {@see SecurityRequirements}'s answer, not reachability's.
+     *
+     * A scheme a requirement still names is one a client must satisfy: changing how (`type`, `in`, `name`,
+     * `flows`, `scheme`, and every other member that is not prose) breaks every client that authenticates
+     * the old way, and deleting it leaves them told to authenticate a way the document no longer
+     * describes. Neither is anything a consumer can be left to discover at runtime. A scheme nothing names
+     * is the security half of {@see diffComponentSchemas()}'s stand-down.
+     *
+     * @param  list<Change>  $changes
+     * @param  array<string, true>  $unreferenced
+     */
+    private function diffSecuritySchemes(UirDocument $old, UirDocument $new, array &$changes, array &$unreferenced): void
+    {
+        $oldSchemes = self::securitySchemes($old);
+        $newSchemes = self::securitySchemes($new);
+
+        if ($oldSchemes === [] && $newSchemes === []) {
+            return;
+        }
+
+        $oldRequired = SecurityRequirements::of($old);
+        $newRequired = SecurityRequirements::of($new);
+
+        foreach (Arr::sortedUnion(array_keys($oldSchemes), array_keys($newSchemes)) as $name) {
+            $path = 'components.securitySchemes.'.$name;
+            $inOld = array_key_exists($name, $oldSchemes);
+            $inNew = array_key_exists($name, $newSchemes);
+
+            if (! $inNew) {
+                // Only what the NEW document still asks for can be left unsatisfiable. A scheme dropped
+                // along with the requirements naming it is an API that stopped asking, which breaks nobody.
+                $changes[] = new Change(ChangeKind::Removed, ChangeTarget::SecurityScheme, self::schemeId($oldSchemes[$name], $name), $path, $newRequired->requires($name), 'securityScheme.removed');
+            } elseif (! $inOld) {
+                $changes[] = new Change(ChangeKind::Added, ChangeTarget::SecurityScheme, self::schemeId($newSchemes[$name], $name), $path, false, 'securityScheme.added');
+            } else {
+                $required = $oldRequired->requires($name) || $newRequired->requires($name);
+                $this->diffSecuritySchemePair($name, $path, $oldSchemes[$name], $newSchemes[$name], $required, $changes, $unreferenced);
+            }
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $old
+     * @param  array<string, mixed>  $new
+     * @param  list<Change>  $changes
+     * @param  array<string, true>  $unreferenced
+     */
+    private function diffSecuritySchemePair(string $name, string $path, array $old, array $new, bool $required, array &$changes, array &$unreferenced): void
+    {
+        $id = self::schemeId($new, $name);
+
+        $this->scalarChange($changes, ChangeTarget::SecurityScheme, $id, $path, 'securityScheme.summary-changed', 'summary', $old['summary'] ?? null, $new['summary'] ?? null);
+        $this->scalarChange($changes, ChangeTarget::SecurityScheme, $id, $path, 'securityScheme.description-changed', 'description', $old['description'] ?? null, $new['description'] ?? null);
+        $this->scalarChange($changes, ChangeTarget::SecurityScheme, $id, $path, 'securityScheme.deprecated-changed', 'deprecated', $old['deprecated'] ?? null, $new['deprecated'] ?? null);
+
+        $oldContract = self::schemeContract($old);
+        $newContract = self::schemeContract($new);
+
+        /** @var list<FieldChange> $fields */
+        $fields = [];
+        foreach (Arr::sortedUnion(array_keys($oldContract), array_keys($newContract)) as $member) {
+            if (($oldContract[$member] ?? null) !== ($newContract[$member] ?? null)) {
+                $fields[] = new FieldChange($member, $oldContract[$member] ?? null, $newContract[$member] ?? null);
+            }
+        }
+
+        if ($fields === []) {
+            return;
+        }
+
+        if (! $required) {
+            $unreferenced[$path] = true;
+        }
+
+        $changes[] = new Change(ChangeKind::Changed, ChangeTarget::SecurityScheme, $id, $path, $required, 'securityScheme.changed', $fields);
+    }
+
+    /**
+     * What a client has to do differently if it changes. Prose and a deprecation announce rather than
+     * move a contract, and each is reported on its own above; an extension is a tool's business rather
+     * than the contract's. Everything else is contract, a member OAS adds later included — silence about
+     * a new way of authenticating is the costlier mistake.
+     *
+     * @param  array<string, mixed>  $scheme
+     * @return array<string, mixed>
+     */
+    private static function schemeContract(array $scheme): array
+    {
+        $out = [];
+
+        foreach ($scheme as $member => $value) {
+            if (in_array($member, self::SCHEME_PROSE, true) || str_starts_with($member, 'x-')) {
+                continue;
+            }
+
+            $out[$member] = $value;
+        }
+
+        return $out;
+    }
+
+    /**
+     * @return array<string, array<string, mixed>>
+     */
+    private static function securitySchemes(UirDocument $document): array
+    {
+        $section = $document->components?->rest['securitySchemes'] ?? null;
+
+        if (! is_array($section)) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($section as $name => $scheme) {
+            // A scheme that isn't an object describes nothing, so it is no more a scheme than an absent one.
+            if (is_array($scheme)) {
+                $out[(string) $name] = Arr::stringKeyed($scheme);
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param  array<string, mixed>  $scheme
+     */
+    private static function schemeId(array $scheme, string $name): string
+    {
+        return NodeIdentity::inArray($scheme) ?? 'name:'.$name;
+    }
+
+    /**
+     * @return array<string, true>
+     */
+    private static function schemaNames(UirDocument $document): array
+    {
+        $out = [];
+
+        foreach (array_keys($document->components->schemas ?? []) as $name) {
+            $out[(string) $name] = true;
+        }
+
+        return $out;
     }
 
     /**
@@ -424,6 +609,10 @@ final class DocumentDiffer
     }
 
     /**
+     * A webhook is an operation the API promises to CALL, which is as much a published contract as one it
+     * answers, so it is walked here rather than beside here. It is named by a key instead of a URI, and
+     * `webhooks.` keeps that key out of the space a path template occupies — a path always begins with `/`.
+     *
      * @return list<array{0: Operation, 1: string, 2: string, 3: list<Parameter>}>
      */
     private function operations(UirDocument $document): array
@@ -433,6 +622,12 @@ final class DocumentDiffer
         foreach ($document->paths ?? [] as $template => $item) {
             foreach ($item->operations as $method => $op) {
                 $out[] = [$op, $method, (string) $template, $item->parameters];
+            }
+        }
+
+        foreach ($document->webhooks ?? [] as $name => $item) {
+            foreach ($item->operations as $method => $op) {
+                $out[] = [$op, $method, 'webhooks.'.$name, $item->parameters];
             }
         }
 

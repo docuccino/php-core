@@ -622,6 +622,17 @@ final class ComponentRegistry
         $this->diagnostics[] = $diagnostic;
     }
 
+    /**
+     * Whether a name is one a `$ref` could carry. The character class lives in
+     * {@see ComponentNames::isLegal()} and nowhere else; this is the extension author's view of it, on
+     * the same object as the diagnostic channel — so a producer handed a name by the application can tell
+     * its author the name was refused, which a draft that drops it at the write has no way to say.
+     */
+    public function isLegalName(string $name): bool
+    {
+        return ComponentNames::isLegal($name);
+    }
+
     private static function sanitize(string $name): string
     {
         return ComponentNames::sanitize($name);

@@ -6,6 +6,7 @@ use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
 use Docuccino\Core\Inference\ActionAnalysis;
 use Docuccino\Core\Inference\ClassMetadata;
+use Docuccino\Core\Inference\ComponentDeclaration;
 use Docuccino\Core\Inference\DType\ScalarT;
 use Docuccino\Core\Inference\DType\UnknownT;
 use Docuccino\Core\Inference\Frame;
@@ -131,7 +132,45 @@ it('degrades a malformed return site to an unknown type at an unknown location',
 
     expect($decoded->type)->toBeInstanceOf(UnknownT::class)
         ->and($decoded->location->file)->toBe('')
-        ->and($decoded->location->line)->toBeNull();
+        ->and($decoded->location->line)->toBeNull()
+        ->and($decoded->component)->toBeNull();
+});
+
+it('round-trips the component a return path declared, and omits the key when none did', function (): void {
+    // The name a render method declares reaches the adapter on the return site and has to survive the
+    // fragment cache with the rest of the analysis — a warm build publishing a different name from a cold
+    // one is the trap `x-docuccino.facts.component` exists to close.
+    $declared = new ReturnSite(
+        ScalarT::string(),
+        new SourceLocation('/app/Exceptions/Renderer.php', 30),
+        new ComponentDeclaration('PortalRejection', 'App\\Exceptions\\Renderer::renderRejection', new SourceLocation('/app/Exceptions/Renderer.php', 44)),
+    );
+    $payload = $declared->toArray();
+
+    expect(ReturnSite::fromArray($payload)->toArray())->toBe($payload)
+        ->and(ReturnSite::fromArray($payload)->component?->symbol)->toBe('App\\Exceptions\\Renderer::renderRejection')
+        ->and(ReturnSite::fromArray($payload)->component?->location->line)->toBe(44)
+        // A return path nothing named states nothing, rather than stating a null.
+        ->and((new ReturnSite(ScalarT::string(), new SourceLocation('')))->toArray())->not->toHaveKey('component');
+});
+
+it('degrades a malformed component declaration to an empty one rather than throwing', function (): void {
+    $decoded = ComponentDeclaration::fromArray(['name' => 12, 'symbol' => ['nope'], 'location' => 'nope']);
+
+    // A scalar coerces, as everywhere else in the model; anything that is not one leaves the member empty.
+    expect($decoded->name)->toBe('12')
+        ->and($decoded->symbol)->toBe('')
+        ->and($decoded->location->file)->toBe('')
+        ->and(ComponentDeclaration::fromArray([])->name)->toBe('');
+});
+
+it('re-homes a return site onto a declaration made further out on the call path', function (): void {
+    $site = new ReturnSite(ScalarT::string(), new SourceLocation('/app/x.php', 3));
+    $outer = new ComponentDeclaration('PortalProblem', 'App\\Exceptions\\Renderer::__invoke');
+
+    expect($site->withComponent($outer)->component)->toBe($outer)
+        ->and($site->withComponent($outer)->type)->toBe($site->type)
+        ->and($site->withComponent(null)->component)->toBeNull();
 });
 
 it('degrades a malformed thrown exception to a signal of unknown status', function (): void {

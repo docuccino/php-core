@@ -16,11 +16,17 @@ final readonly class Changeset
      *                            artifact carried no identities, so a rename reads as remove + add
      * @param  list<string>  $disjointIdentities  node kinds both sides identified and shared no id for
      *                                            ({@see IdentityOverlap})
+     * @param  list<string>  $unreferencedComponents  components nothing in either document reaches — a
+     *                                                schema no operation can read, a security scheme no
+     *                                                requirement names — whose changes were reported but
+     *                                                stood down from breaking
+     *                                                ({@see DocumentDiffer::diffComponentSchemas()})
      */
     public function __construct(
         public array $changes = [],
         public Pairing $pairing = Pairing::Identity,
         public array $disjointIdentities = [],
+        public array $unreferencedComponents = [],
     ) {}
 
     public function isEmpty(): bool
@@ -58,6 +64,7 @@ final readonly class Changeset
             'breaking' => $this->isBreaking(),
             'pairing' => $this->pairing->value,
             'disjointIdentities' => $this->disjointIdentities,
+            'unreferencedComponents' => $this->unreferencedComponents,
             'counts' => [
                 'total' => count($this->changes),
                 'breaking' => count($this->breakingChanges()),

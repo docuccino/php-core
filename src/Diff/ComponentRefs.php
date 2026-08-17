@@ -14,8 +14,15 @@ use Docuccino\Core\Document\UirDocument;
  *
  * Resolving both sides is what keeps hoisting invisible to the diff: an inline body or parameter that
  * becomes a `$ref` (or moves between component names) compares thing-to-thing and reports nothing, while
- * an edit to a shared one reports against every operation using it. Members stated beside the `$ref` win —
- * the referring node keeps its own identity and provenance.
+ * an edit to a shared one reports against every operation using it.
+ *
+ * The CONTRACT comes from the component, never from what the referring node states beside the pointer: a
+ * `required: false` written next to a `$ref` at a component that says `required: true` describes nothing,
+ * and honouring it reported a parameter becoming optional, or required, for a contract that had not moved.
+ * That is the MODELLED members only — `name`, `in`, `required`, `deprecated` and `schema` on a parameter,
+ * `headers` and `content` on a response. A `description`, and anything left in `rest` (`style`, `explode`,
+ * `example`, an extension), stay as the referring node wrote them, and so does the identity, which names
+ * the USE rather than the thing the diff pairs on.
  *
  * For a parameter it is also what makes the comparison possible at all: a Reference Object states neither
  * `name` nor `in`, which is how a parameter is told from its neighbours, so unresolved they are
@@ -55,8 +62,8 @@ final readonly class ComponentRefs
         return new ResponseObject(
             ref: $target->ref,
             description: $response->description ?? $target->description,
-            headers: $response->headers ?? $target->headers,
-            content: $response->content ?? $target->content,
+            headers: $target->headers,
+            content: $target->content,
             docuccino: $response->docuccino,
             rest: $response->rest + $target->rest,
         );
@@ -78,12 +85,12 @@ final readonly class ComponentRefs
         }
 
         return new Parameter(
-            name: $parameter->name ?? $target->name,
-            in: $parameter->in ?? $target->in,
+            name: $target->name,
+            in: $target->in,
             description: $parameter->description ?? $target->description,
-            required: $parameter->required ?? $target->required,
-            deprecated: $parameter->deprecated ?? $target->deprecated,
-            schema: $parameter->schema ?? $target->schema,
+            required: $target->required,
+            deprecated: $target->deprecated,
+            schema: $target->schema,
             docuccino: $parameter->docuccino ?? $target->docuccino,
             rest: $parameter->rest + $target->rest,
         );

@@ -18,6 +18,8 @@ it('escapes what steers a terminal rather than showing in it', function (string 
     'arabic letter mark (U+061C)' => ["\u{061C}", '\u{061C}'],
     'left-to-right mark (U+200E)' => ["\u{200E}", '\u{200E}'],
     'right-to-left mark (U+200F)' => ["\u{200F}", '\u{200F}'],
+    'line separator (U+2028)' => ["\u{2028}", '\u{2028}'],
+    'paragraph separator (U+2029)' => ["\u{2029}", '\u{2029}'],
     'left-to-right embedding (U+202A)' => ["\u{202A}", '\u{202A}'],
     'right-to-left override (U+202E)' => ["\u{202E}", '\u{202E}'],
     'left-to-right isolate (U+2066)' => ["\u{2066}", '\u{2066}'],
@@ -33,8 +35,10 @@ it('leaves the characters either side of the escaped ranges alone', function (st
     'tilde (U+007E)' => '~',
     'no-break space (U+00A0), just past the C1 block' => "\u{00A0}",
     'arabic semicolon (U+061B), just before the letter mark' => "\u{061B}",
+    'arabic end of text mark (U+061D), just past the letter mark' => "\u{061D}",
     'zero-width joiner (U+200D), just before the marks' => "\u{200D}",
     'hyphen (U+2010), just past the marks' => "\u{2010}",
+    'hyphenation point (U+2027), just before the separators' => "\u{2027}",
     'narrow no-break space (U+202F), just past the overrides' => "\u{202F}",
     'U+2065, just before the isolates' => "\u{2065}",
     'U+206A, just past the isolates' => "\u{206A}",
@@ -58,4 +62,10 @@ it('still escapes a C1 control smuggled in beside malformed bytes', function ():
 
 it('escapes a direction override that would otherwise reverse the line it appears in', function (): void {
     expect(PlainText::of("GET /forms\u{202E}exe.tnetnoc"))->toBe('GET /forms\u{202E}exe.tnetnoc');
+});
+
+it('escapes a line separator that would otherwise forge a line of a web-rendered log', function (): void {
+    // A terminal shows nothing for U+2028, so this reads as inert until the same log is rendered as HTML
+    // and the reader is handed a second line stating a verdict nothing produced.
+    expect(PlainText::of("Pet\u{2028}0 changes (0 breaking)"))->toBe('Pet\u{2028}0 changes (0 breaking)');
 });

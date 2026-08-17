@@ -20,10 +20,11 @@ use Docuccino\Core\Overlay\OverlayDocument;
  * difference between a generated client with one error type and one with an error type per operation.
  *
  * Two things it must not lose. Identity: each operation keeps its own response id and provenance, so the
- * id-based semantic diff still sees one response per operation. Messaging: `description`, `headers` and
- * the media type's own `example` stay on the operation, because an OAS Reference Object may carry none
- * of them beside a `$ref` — so a difference in how two operations illustrate one error never splits it
- * into two definitions. Deliberately narrow: 4xx/5xx, shapes that repeat, bodies that exist.
+ * id-based semantic diff still sees one response per operation. Messaging: `description` and `headers`
+ * are part of what a response IS, so they never merge away, while the media type's `example` is how an
+ * operation illustrates it — it comes off the key and travels into the shared response as one of its
+ * `examples`, so a difference in illustration never splits one error into two definitions.
+ * Deliberately narrow: 4xx/5xx, shapes that repeat, bodies that exist.
  */
 function errorDoc(array $responsesByPath, array $representation = []): array
 {
@@ -94,10 +95,10 @@ function messageShape(): array
 }
 
 /** The same `{code, hint}` error body, differing only in the example a given route documents it with. */
-function examplableBody(mixed $example): array
+function examplableBody(mixed $example, string $description = 'Forbidden'): array
 {
     return [
-        'description' => 'Forbidden',
+        'description' => $description,
         'content' => ['application/problem+json' => [
             'schema' => ['type' => 'object', 'properties' => ['code' => ['type' => 'string'], 'hint' => ['type' => 'string']]],
             'example' => $example,
@@ -135,10 +136,24 @@ function responseRefAt(array $doc, string $path, string $status): ?string
     return $doc['paths'][$path]['get']['responses'][$status]['$ref'] ?? null;
 }
 
-/** The example a given path's error response keeps for itself. */
+/** The single example a given path's error response documents, or null where it documents several. */
 function exampleAt(array $doc, string $path, string $status, string $mediaType = 'application/problem+json'): mixed
 {
     return responseAt($doc, $path, $status)['content'][$mediaType]['example'] ?? null;
+}
+
+/** The example bodies a given path's error response offers, under the keys they were minted with. */
+function examplesAt(array $doc, string $path, string $status, string $mediaType = 'application/problem+json'): array
+{
+    $examples = responseAt($doc, $path, $status)['content'][$mediaType]['examples'] ?? [];
+
+    return is_array($examples) ? $examples : [];
+}
+
+/** Just the example bodies, in key order — what a reader of the document is shown. */
+function exampleValuesAt(array $doc, string $path, string $status, string $mediaType = 'application/problem+json'): array
+{
+    return array_values(array_map(static fn (array $example): mixed => $example['value'], examplesAt($doc, $path, $status, $mediaType)));
 }
 
 it('hoists a shape repeated across operations and points each operation at it', function (): void {
@@ -177,20 +192,114 @@ it('keeps the response object whole, wherever it ends up living', function (): v
         ->and(schemaRefAt($doc, '/a', '404'))->toBe('#/components/schemas/Error404');
 });
 
-it('leaves the response on the operation when only its shape is shared', function (): void {
-    // Two operations that illustrate one error differently cannot share a response — so they keep their
-    // own, complete with their own example, and share only the shape underneath.
+it('shares one response between operations that illustrate it differently', function (): void {
+    // Two operations stating one contract — one schema, one description — are one response however each
+    // chooses to illustrate it. Splitting them would hand an SDK consumer two structurally identical
+    // types for one concept, neither named after anything but a hash; instead they share ONE component
+    // carrying both illustrations.
     $doc = errorDoc([
         '/a' => ['403' => examplableBody(['code' => 'forbidden'])],
         '/b' => ['403' => examplableBody(['code' => 'denied'])],
     ]);
 
-    expect(responseRefAt($doc, '/a', '403'))->toBeNull()
-        ->and($doc['components']['responses'] ?? null)->toBeNull()
-        ->and($doc['paths']['/a']['get']['responses']['403'])->toHaveKeys(['description', 'content'])
+    expect(array_keys($doc['components']['responses']))->toBe(['Error403'])
+        ->and(responseRefAt($doc, '/a', '403'))->toBe('#/components/responses/Error403')
+        ->and(responseRefAt($doc, '/b', '403'))->toBe('#/components/responses/Error403')
         ->and(schemaRefAt($doc, '/a', '403', 'application/problem+json'))->toBe('#/components/schemas/Error403')
-        ->and(exampleAt($doc, '/a', '403'))->toBe(['code' => 'forbidden'])
-        ->and(exampleAt($doc, '/b', '403'))->toBe(['code' => 'denied']);
+        // Neither illustration was lost, and neither is the media type's singular `example` any more.
+        ->and(exampleValuesAt($doc, '/a', '403'))->toBe([['code' => 'denied'], ['code' => 'forbidden']])
+        ->and(exampleAt($doc, '/a', '403'))->toBeNull();
+});
+
+it('mints an example key from that example alone, so an arriving arm renames nothing', function (): void {
+    // The same invariant every published name owes, on the one kind of name whose opacity is cheap: no
+    // code generator turns an example key into a type, so it can be paid for in readability. What it
+    // cannot be is a function of the set — an arm arriving must add a key and move none.
+    $before = errorDoc([
+        '/a' => ['403' => examplableBody(['code' => 'forbidden'])],
+        '/b' => ['403' => examplableBody(['code' => 'denied'])],
+    ]);
+    $after = errorDoc([
+        // …and arriving FIRST, where a walk-ordered key would have been most obviously wrong.
+        '/z' => ['403' => examplableBody(['code' => 'expired'])],
+        '/a' => ['403' => examplableBody(['code' => 'forbidden'])],
+        '/b' => ['403' => examplableBody(['code' => 'denied'])],
+    ]);
+
+    $keys = array_keys(examplesAt($before, '/a', '403'));
+
+    expect($keys)->toHaveCount(2)
+        ->and($keys)->each->toMatch('/^example_[a-z2-7]{8}$/')
+        ->and(array_keys(examplesAt($after, '/a', '403')))->toHaveCount(3)
+        ->and(array_intersect($keys, array_keys(examplesAt($after, '/a', '403'))))->toBe($keys)
+        // Every surviving key still names the body it always named.
+        ->and(array_intersect_key(examplesAt($after, '/a', '403'), examplesAt($before, '/a', '403')))
+        ->toBe(examplesAt($before, '/a', '403'));
+});
+
+it('keeps a difference in description out of the merge', function (): void {
+    // A description is what a response SAYS, not how it illustrates it, so two arms describing their
+    // error differently are two contracts and must never collapse into one component.
+    $described = examplableBody(['code' => 'forbidden']);
+    $described['description'] = 'You may not do that';
+
+    $doc = errorDoc(['/a' => ['403' => examplableBody(['code' => 'denied'])], '/b' => ['403' => $described]]);
+
+    expect($doc['components']['responses'] ?? null)->toBeNull()
+        ->and(responseRefAt($doc, '/a', '403'))->toBeNull()
+        ->and(exampleAt($doc, '/a', '403'))->toBe(['code' => 'denied'])
+        ->and(exampleAt($doc, '/b', '403'))->toBe(['code' => 'forbidden']);
+});
+
+it('keeps an example that illustrates no shape out of the merge', function (): void {
+    // An example only illustrates something when a schema is there to be illustrated. A media type that
+    // states an example and no shape is stating that example and nothing else, so it stays part of what
+    // the response IS — merging on it would publish a component asserting nothing at all.
+    $bare = static fn (array $example): array => ['description' => 'Not Found', 'content' => ['application/json' => ['example' => $example]]];
+
+    $doc = errorDoc(['/a' => ['404' => $bare(['message' => 'a'])], '/b' => ['404' => $bare(['message' => 'b'])]]);
+
+    expect($doc['components'] ?? [])->toBe([])
+        ->and($doc['paths']['/a']['get']['responses']['404'])->toBe($bare(['message' => 'a']));
+});
+
+it('leaves an authored examples map exactly as it found it', function (string $case, array $a, array $b): void {
+    // A plural map's keys were chosen by whoever wrote them, and a document that already published those
+    // names has consumers reading them. Rewriting one is the failure this whole area exists to prevent,
+    // so a media type carrying one keeps it and stays part of the body's identity — including the one
+    // that also states a singular `example`, which is a document OAS already calls wrong and which this
+    // pass has no business tidying by merging half of it away.
+    $doc = errorDoc(['/a' => ['403' => $a], '/b' => ['403' => $b]]);
+
+    $illustrations = static fn (array $body): array => array_intersect_key(
+        $body['content']['application/problem+json'],
+        ['example' => true, 'examples' => true],
+    );
+
+    // The shape underneath still shares — it is only the response that could not.
+    expect($doc['components']['responses'] ?? null)->toBeNull()
+        ->and($illustrations($doc['paths']['/a']['get']['responses']['403']))->toBe($illustrations($a))
+        ->and($illustrations($doc['paths']['/b']['get']['responses']['403']))->toBe($illustrations($b));
+})->with(function (): array {
+    $authored = static function (?string $key, mixed $example = null): array {
+        $body = examplableBody($example);
+        if ($example === null) {
+            unset($body['content']['application/problem+json']['example']);
+        }
+
+        if ($key !== null) {
+            $body['content']['application/problem+json']['examples'] = [$key => ['value' => ['code' => 'forbidden']]];
+        }
+
+        return $body;
+    };
+
+    return [
+        ['a map of its own', $authored('expired'), $authored('revoked')],
+        // Both members, differing only in the singular one: strip that and the two collapse, and the
+        // component published would carry minted keys where an author had written their own.
+        ['a map beside a singular example', $authored('expired', ['code' => 'a']), $authored('expired', ['code' => 'b'])],
+    ];
 });
 
 it('keeps each operation\'s own id and provenance beside the reference', function (): void {
@@ -218,7 +327,8 @@ it('keeps a schema\'s own provenance beside its reference when the response stay
     // Where only the shape is shared, the operation keeps its whole response — so the per-route
     // provenance the schema carries has somewhere to live and is not thrown away.
     $a = examplableBody(['code' => 'forbidden']);
-    $b = examplableBody(['code' => 'denied']);
+    $b = examplableBody(['code' => 'forbidden']);
+    $b['description'] = 'You may not do that';
     $a['content']['application/problem+json']['schema']['x-docuccino'] = ['provenance' => [['producer' => 'integration:framework-errors']]];
     $b['content']['application/problem+json']['schema']['x-docuccino'] = ['provenance' => [['producer' => 'integration:inferred-handler']]];
 
@@ -335,9 +445,11 @@ it('shares one shape however the operations choose to illustrate it', function (
     ];
 });
 
-it('keeps every route\'s own messaging when it shares the shape', function (): void {
-    // Sharing must not cost a route the thing it was saying. Each keeps the example it can honestly
-    // claim, and the route that documents none still documents none.
+it('loses no illustration when several arms collapse into one response', function (): void {
+    // Sharing must not cost a route the thing it was saying, and the route that illustrated nothing must
+    // not cost the others theirs. Every example survives the collapse, under the one component all three
+    // now point at — and each still sits beside exactly the schema it was written against, so none of
+    // them can have become false on the way.
     $noExample = examplableBody([]);
     unset($noExample['content']['application/problem+json']['example']);
 
@@ -347,10 +459,14 @@ it('keeps every route\'s own messaging when it shares the shape', function (): v
         '/c' => ['403' => $noExample],
     ]);
 
-    expect(exampleAt($doc, '/a', '403'))->toBe(['code' => 'forbidden', 'hint' => 'ask an admin'])
-        ->and(exampleAt($doc, '/b', '403'))->toBe(['code' => 'forbidden', 'hint' => 'renew your token'])
-        ->and($doc['paths']['/c']['get']['responses']['403']['content']['application/problem+json'])
-        ->not->toHaveKey('example');
+    expect(array_keys($doc['components']['responses']))->toBe(['Error403'])
+        ->and(exampleValuesAt($doc, '/a', '403'))->toBe([
+            ['code' => 'forbidden', 'hint' => 'ask an admin'],
+            ['code' => 'forbidden', 'hint' => 'renew your token'],
+        ])
+        ->and(responseRefAt($doc, '/c', '403'))->toBe('#/components/responses/Error403')
+        ->and($doc['components']['responses']['Error403']['content']['application/problem+json']['schema'])
+        ->toBe(['$ref' => '#/components/schemas/Error403']);
 });
 
 it('retires the plain name rather than awarding it when two shapes contest a status', function (): void {
@@ -535,34 +651,49 @@ it('is deterministic, discriminated names included', function (): void {
     expect(json_encode(errorDoc($responses)))->toBe(json_encode(errorDoc($responses)));
 });
 
-it('emits the shared shape and the per-operation example unchanged in 3.2, 3.1 and 3.0 alike', function (string $version, Emitter $emitter): void {
-    // Why the example lives on the MEDIA TYPE and not inside the schema. A Media Type Object's `example`
-    // sits outside the schema, so it survives every version untouched and the `$ref` stays bare. The
-    // 2020-12 alternative — `{"$ref": …, "examples": […]}` inside the schema — is legal in 3.1 and 3.2 but
-    // costs 3.0 an `allOf` wrapper and two downlevel notes PER OPERATION, which is the opposite of a
-    // shared definition.
-    $body = examplableBody(['code' => 'forbidden']);
-    $doc = errorDoc(['/a' => ['403' => $body], '/b' => ['403' => examplableBody(['code' => 'denied'])]]);
+it('emits the shared shape and every illustration unchanged in 3.2, 3.1 and 3.0 alike', function (string $version, Emitter $emitter): void {
+    // Why the illustrations live on the MEDIA TYPE and not inside the schema. A Media Type Object's
+    // `example` and `examples` both sit outside the schema and both are defined in 3.0, 3.1 and 3.2, so
+    // they survive every version untouched and the `$ref` stays bare. The 2020-12 alternative —
+    // `{"$ref": …, "examples": […]}` inside the schema — is legal in 3.1 and 3.2 but costs 3.0 an `allOf`
+    // wrapper and a downlevel note, and the 3.0 walk rewrites a SCHEMA's `examples` into a single
+    // `example`, which would silently throw away all but one of them.
+    $doc = errorDoc(['/a' => ['403' => examplableBody(['code' => 'forbidden'])], '/b' => ['403' => examplableBody(['code' => 'denied'])]]);
 
-    $emitted = json_decode($emitter->emit(UirDocument::fromArray([
-        'openapi' => '3.2.0',
-        'info' => ['title' => 'API', 'version' => '1.0.0'],
-    ] + $doc)), true, flags: JSON_THROW_ON_ERROR);
+    $document = UirDocument::fromArray(['openapi' => '3.2.0', 'info' => ['title' => 'API', 'version' => '1.0.0']] + $doc);
+    $emitted = json_decode($emitter->emit($document), true, flags: JSON_THROW_ON_ERROR);
 
-    $media = $emitted['paths']['/a']['get']['responses']['403']['content']['application/problem+json'];
+    $media = $emitted['components']['responses']['Error403']['content']['application/problem+json'];
 
-    expect($media['schema'])->toBe(['$ref' => '#/components/schemas/Error403'])
-        ->and($media['example'])->toBe(['code' => 'forbidden'])
+    expect($emitted['paths']['/a']['get']['responses']['403'])->toBe(['$ref' => '#/components/responses/Error403'])
+        ->and($media['schema'])->toBe(['$ref' => '#/components/schemas/Error403'])
+        ->and($media)->not->toHaveKey('example')
+        ->and(array_values(array_map(static fn (array $e): mixed => $e['value'], $media['examples'])))
+        ->toBe([['code' => 'denied'], ['code' => 'forbidden']])
         ->and($emitted['components']['schemas'])->toHaveKey('Error403');
 
     if ($emitter instanceof OpenApi30DownlevelEmitter || $emitter instanceof OpenApi31DownlevelEmitter) {
-        // The schema's per-route provenance is stripped before the downlevel walk, so the `$ref` it sits
-        // beside never trips the ref-siblings hoist.
-        expect(array_map(static fn ($d): string => $d->code, $emitter->emitWithReport(UirDocument::fromArray([
-            'openapi' => '3.2.0',
-            'info' => ['title' => 'API', 'version' => '1.0.0'],
-        ] + $doc))->report->diagnostics))->toBe([]);
+        // Nothing was downlevelled away: the map is a Media Type Object member every version defines, and
+        // the `$ref` it sits beside never trips the ref-siblings hoist.
+        expect(array_map(static fn ($d): string => $d->code, $emitter->emitWithReport($document)->report->diagnostics))->toBe([]);
     }
+})->with([
+    '3.2' => ['3.2', new OpenApi32Emitter],
+    '3.1' => ['3.1', new OpenApi31DownlevelEmitter],
+    '3.0' => ['3.0', new OpenApi30DownlevelEmitter],
+]);
+
+it('emits one illustration as the singular example every version defines', function (string $version, Emitter $emitter): void {
+    // A one-entry map would cost a key nobody asked for, and `example` is what an unmerged document
+    // already published — so the common case pays nothing for the rare one.
+    $body = examplableBody(['code' => 'forbidden']);
+    $doc = errorDoc(['/a' => ['403' => $body], '/b' => ['403' => $body]]);
+
+    $document = UirDocument::fromArray(['openapi' => '3.2.0', 'info' => ['title' => 'API', 'version' => '1.0.0']] + $doc);
+    $media = json_decode($emitter->emit($document), true, flags: JSON_THROW_ON_ERROR)['components']['responses']['Error403']['content']['application/problem+json'];
+
+    expect($media['example'])->toBe(['code' => 'forbidden'])
+        ->and($media)->not->toHaveKey('examples');
 })->with([
     '3.2' => ['3.2', new OpenApi32Emitter],
     '3.1' => ['3.1', new OpenApi31DownlevelEmitter],
@@ -687,12 +818,16 @@ it('publishes one id per component', function (): void {
 });
 
 it('retires the plain response name when two responses contest a status', function (): void {
-    // The response bucket mints names the same way the schema bucket does, and for the same reason.
+    // The response bucket mints names the same way the schema bucket does, and for the same reason. It
+    // takes two genuinely different bodies to get here: arms differing only in how they illustrate one
+    // body are one response, not a contest.
+    $detail = ['description' => 'Forbidden', 'content' => ['application/problem+json' => ['schema' => ['type' => 'object', 'properties' => ['detail' => ['type' => 'string']]]]]];
+
     $doc = errorDoc([
         '/a' => ['403' => examplableBody(['code' => 'forbidden'])],
         '/b' => ['403' => examplableBody(['code' => 'forbidden'])],
-        '/c' => ['403' => examplableBody(['code' => 'denied'])],
-        '/d' => ['403' => examplableBody(['code' => 'denied'])],
+        '/c' => ['403' => $detail],
+        '/d' => ['403' => $detail],
     ]);
 
     $names = array_keys($doc['components']['responses']);
@@ -700,16 +835,29 @@ it('retires the plain response name when two responses contest a status', functi
     expect($names)->toHaveCount(2)
         ->and($names)->not->toContain('Error403')
         ->and($names)->not->toContain('Error403_2')
-        ->and($names)->each->toMatch('/^Error403_[a-z2-7]{8}$/')
-        // …while the one SHAPE underneath them keeps the plain name, uncontested.
+        ->and($names)->each->toMatch('/^Error403_[a-z2-7]{8}$/');
+});
+
+it('spends no name on arms that differ only in how they illustrate one body', function (): void {
+    // The defect this collapse exists to fix, stated as the thing a consumer sees. Four operations, one
+    // contract, two illustrations: without the collapse both arms claim `Error403`, both climb the ladder,
+    // and an SDK consumer is handed two structurally identical types, neither named after anything.
+    $doc = errorDoc([
+        '/a' => ['403' => examplableBody(['code' => 'forbidden'])],
+        '/b' => ['403' => examplableBody(['code' => 'forbidden'])],
+        '/c' => ['403' => examplableBody(['code' => 'denied'])],
+        '/d' => ['403' => examplableBody(['code' => 'denied'])],
+    ]);
+
+    expect(array_keys($doc['components']['responses']))->toBe(['Error403'])
         ->and(array_keys($doc['components']['schemas']))->toBe(['Error403'])
-        ->and(schemaRefAt($doc, '/a', '403', 'application/problem+json'))
-        ->toBe(schemaRefAt($doc, '/c', '403', 'application/problem+json'));
+        ->and(examplesAt($doc, '/a', '403'))->toHaveCount(2)
+        ->and(responseRefAt($doc, '/a', '403'))->toBe(responseRefAt($doc, '/c', '403'));
 });
 
 it('names a response the same wherever the document meets it', function (): void {
     $one = ['403' => examplableBody(['code' => 'forbidden'])];
-    $two = ['403' => examplableBody(['code' => 'denied'])];
+    $two = ['403' => examplableBody(['code' => 'forbidden'], 'You may not do that')];
 
     $first = errorDoc(['/a' => $one, '/b' => $one, '/c' => $two, '/d' => $two]);
     $second = errorDoc(['/a' => $two, '/b' => $two, '/c' => $one, '/d' => $one]);
@@ -779,6 +927,28 @@ it('gives two declared names that share a body a component each', function (): v
         // Two published components are two published nodes, so they cannot share one id.
         ->and($doc['components']['schemas']['NotFound']['x-docuccino']['id'])
         ->not->toBe($doc['components']['schemas']['GoneAway']['x-docuccino']['id']);
+});
+
+it('keeps two declared names that differ only by illustration apart, each with its own', function (): void {
+    // Where the two features meet. Arms that only illustrate one body differently collapse onto one
+    // component; a declaration is what says these are two errors, not two pictures of one — so the collapse
+    // stops at the name, and neither component is handed the other's illustration.
+    $one = claimedBody('TokenRejected', examplableBody(['code' => 'token']));
+    $two = claimedBody('RegionBlocked', examplableBody(['code' => 'region']));
+
+    $doc = errorDoc([
+        '/a' => ['403' => $one], '/b' => ['403' => $one],
+        '/c' => ['403' => $two], '/d' => ['403' => $two],
+    ]);
+
+    expect(array_keys($doc['components']['responses']))->toBe(['RegionBlocked', 'TokenRejected'])
+        ->and(responseRefAt($doc, '/a', '403'))->toBe('#/components/responses/TokenRejected')
+        ->and(responseRefAt($doc, '/c', '403'))->toBe('#/components/responses/RegionBlocked')
+        // One illustration each, so each stays the singular `example` it arrived as.
+        ->and(exampleAt($doc, '/a', '403'))->toBe(['code' => 'token'])
+        ->and(exampleAt($doc, '/c', '403'))->toBe(['code' => 'region'])
+        ->and(examplesAt($doc, '/a', '403'))->toBe([])
+        ->and(examplesAt($doc, '/c', '403'))->toBe([]);
 });
 
 it('leaves an undeclared body exactly where it was when a declared one arrives', function (string $case, array $arriving): void {

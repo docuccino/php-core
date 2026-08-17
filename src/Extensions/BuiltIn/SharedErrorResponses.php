@@ -30,10 +30,15 @@ use Docuccino\Core\Support\Json;
  * ({@see ResponseDraft::claimComponentName()}) decides only what the component is called — so a
  * declaration can add a component and never take one away. Design §"Shared error components".
  *
+ * A media type's `example` is how an operation ILLUSTRATES the body, not what the body IS, so the second
+ * pass keeps it out of the key and republishes every arm's illustration on the one shared response —
+ * design §"Shared error components".
+ *
  * Deliberately narrow: 4xx/5xx only, only bodies that actually repeat, and only responses carrying
  * `content`. Anything already a `$ref` is left alone, which is what makes a second run a no-op.
  *
- * @phpstan-type Occurrence array{scope: string, group: string, base: string, body: array<array-key, mixed>, count: int, rejected: array<string, array{string, string|null}>}
+ * @phpstan-type Illustrations array<string, array<string, mixed>>
+ * @phpstan-type Occurrence array{scope: string, group: string, base: string, body: array<array-key, mixed>, illustrations: Illustrations, count: int, rejected: array<string, array{string, string|null}>}
  */
 final class SharedErrorResponses implements DocumentTransformer
 {
@@ -42,6 +47,11 @@ final class SharedErrorResponses implements DocumentTransformer
 
     /** The provenance key stripped from a hoisted body and kept on the referring node. */
     private const PROVENANCE = 'x-docuccino';
+
+    /** The Media Type Object members that illustrate a body: one, and the map of several. */
+    private const EXAMPLE = 'example';
+
+    private const EXAMPLES = 'examples';
 
     /** The buckets this transformer publishes into, as the `$ref`s pointing at them spell them. */
     private const SCHEMAS = '#/components/schemas/';
@@ -69,10 +79,10 @@ final class SharedErrorResponses implements DocumentTransformer
 
         $components = is_array($doc['components'] ?? null) ? $doc['components'] : [];
 
-        $shapes = self::shareable(self::collect($paths, self::schemaSites(...)));
+        $shapes = self::shareable(self::collect($paths, self::schemaSites(...), self::stated(...)));
         [$paths, $schemas, $schemaContests, $aliases] = self::shareShapes($paths, $shapes, self::bucket($components, 'schemas'));
 
-        $bodies = self::shareable(self::collect($paths, self::responseSites(...), $aliases));
+        $bodies = self::shareable(self::collect($paths, self::responseSites(...), self::illustrated(...), $aliases));
         [$paths, $responses, $responseContests] = self::shareResponses($paths, $bodies, self::bucket($components, 'responses'));
 
         foreach ([...self::rejectedClaims($shapes, $bodies), ...$schemaContests, ...$responseContests] as $diagnostic) {
@@ -123,9 +133,9 @@ final class SharedErrorResponses implements DocumentTransformer
         }
 
         $identity = new IdentityGenerator;
-        [$names, $schemas, $contests] = self::mint($shapes, $existing, static fn (array $body, string $scope): array => [
-            self::PROVENANCE => ['id' => $identity->publishedSchemaId($scope, Arr::stringKeyed($body))],
-        ] + $body);
+        [$names, $schemas, $contests] = self::mint($shapes, $existing, static fn (array $occurrence): array => [
+            self::PROVENANCE => ['id' => $identity->publishedSchemaId($occurrence['scope'], Arr::stringKeyed($occurrence['body']))],
+        ] + $occurrence['body']);
 
         $aliases = [];
         foreach ($names as $key => $name) {
@@ -133,7 +143,7 @@ final class SharedErrorResponses implements DocumentTransformer
         }
 
         return [
-            self::rewrite($paths, $names, self::schemaSites(...), self::SCHEMAS),
+            self::rewrite($paths, $names, self::schemaSites(...), self::stated(...), self::SCHEMAS),
             $schemas,
             self::collisions($contests, $names, 'schemas'),
             $aliases,
@@ -141,7 +151,8 @@ final class SharedErrorResponses implements DocumentTransformer
     }
 
     /**
-     * Pass two: hoist every response the rewritten document now states identically two or more times.
+     * Pass two: hoist every response the rewritten document now states identically two or more times,
+     * carrying the illustrations the arms did not agree on into the one component they now share.
      *
      * @param  array<array-key, mixed>  $paths
      * @param  array<string, Occurrence>  $bodies
@@ -154,10 +165,14 @@ final class SharedErrorResponses implements DocumentTransformer
             return [$paths, null, []];
         }
 
-        [$names, $bucket, $contests] = self::mint($bodies, $existing, static fn (array $body, string $scope): array => $body);
+        [$names, $bucket, $contests] = self::mint(
+            $bodies,
+            $existing,
+            static fn (array $occurrence): array => self::illustrate($occurrence['body'], $occurrence['illustrations']),
+        );
 
         return [
-            self::rewrite($paths, $names, self::responseSites(...), self::RESPONSES),
+            self::rewrite($paths, $names, self::responseSites(...), self::illustrated(...), self::RESPONSES),
             $bucket,
             self::collisions($contests, $names, 'responses'),
         ];
@@ -196,16 +211,145 @@ final class SharedErrorResponses implements DocumentTransformer
     }
 
     /**
+     * What a hoistable node STATES, and how it ILLUSTRATES it — the split that decides which half is
+     * dedupe key and which half travels into the shared component. A schema illustrates nothing, so the
+     * shape pass states all of it.
+     *
+     * @param  array<array-key, mixed>  $body
+     * @return array{array<array-key, mixed>, Illustrations}
+     */
+    private static function stated(array $body): array
+    {
+        return [$body, []];
+    }
+
+    /**
+     * The same split for a whole response, where a media type's `example` is illustration: it comes off
+     * the key, so two arms rendering one contract with two example bodies are one response, and the
+     * examples travel with it ({@see illustrate()}).
+     *
+     * Only BESIDE a schema. A media type stating an example and no shape has nothing to illustrate — the
+     * example is the only claim it makes — so that one stays part of what the response is. A media type
+     * already carrying an `examples` MAP is left whole too: those keys were chosen by whoever wrote them,
+     * and this pass has no business renaming names a document already published.
+     *
+     * @param  array<array-key, mixed>  $response
+     * @return array{array<array-key, mixed>, Illustrations}
+     */
+    private static function illustrated(array $response): array
+    {
+        $content = $response['content'] ?? null;
+        if (! is_array($content)) {
+            return [$response, []];
+        }
+
+        $illustrations = [];
+        foreach ($content as $mediaType => $media) {
+            if (! is_array($media) || ! isset($media['schema']) || ! array_key_exists(self::EXAMPLE, $media) || isset($media[self::EXAMPLES])) {
+                continue;
+            }
+
+            $example = $media[self::EXAMPLE];
+            $illustrations[(string) $mediaType] = [Json::stable($example) => $example];
+
+            unset($media[self::EXAMPLE]);
+            $content[$mediaType] = $media;
+        }
+
+        $response['content'] = $content;
+
+        return [$response, $illustrations];
+    }
+
+    /**
+     * The shared response as it publishes: the body every arm agreed on, plus the illustrations they did
+     * not. ONE illustration goes out as the media type's `example` — the simplest thing that says it, the
+     * bytes an unmerged document already published, and a member no OpenAPI version this emits refuses.
+     * Several go out as `examples`, whose keys {@see ComponentNames} mints from each body's own content.
+     *
+     * A content-derived key is opaque, which for a COMPONENT name would be a real cost — a generated
+     * client is written against it. An example key is not: no code generator turns one into a type, so
+     * this is the one place the invariant can be paid for in readability rather than in meaning. Every
+     * key is a function of its own example alone, so an arm arriving or leaving never renames another's.
+     *
+     * Nothing here can make an illustration false. The arms were merged on a key that keeps every media
+     * type and every `schema` in it, so each example sits beside exactly the schema it sat beside before
+     * — a merge widens no contract, and there is none to re-check against.
+     *
+     * @param  array<array-key, mixed>  $body
+     * @param  Illustrations  $illustrations
+     * @return array<array-key, mixed>
+     */
+    private static function illustrate(array $body, array $illustrations): array
+    {
+        if ($illustrations === [] || ! is_array($body['content'] ?? null)) {
+            return $body;
+        }
+
+        $content = $body['content'];
+
+        foreach ($illustrations as $mediaType => $values) {
+            if (! is_array($content[$mediaType] ?? null)) {
+                continue;
+            }
+
+            $media = $content[$mediaType];
+            ksort($values);
+
+            if (count($values) === 1) {
+                $media[self::EXAMPLE] = reset($values);
+                $content[$mediaType] = $media;
+
+                continue;
+            }
+
+            $media[self::EXAMPLES] = self::named($values);
+            $content[$mediaType] = $media;
+        }
+
+        $body['content'] = $content;
+
+        return $body;
+    }
+
+    /**
+     * Each illustration as an Example Object under a minted key, filed in key order so even the bucket's
+     * insertion order is a function of the bodies rather than of the walk that met them.
+     *
+     * @param  array<string, mixed>  $values  canonical bytes → the example they encode
+     * @return array<string, array{value: mixed}>
+     */
+    private static function named(array $values): array
+    {
+        $claims = [];
+        foreach ($values as $content => $value) {
+            $claims[$content] = ['base' => self::EXAMPLE, 'identity' => null, 'content' => $content];
+        }
+
+        [$names] = ComponentNames::mint($claims);
+
+        $examples = [];
+        foreach ($names as $content => $name) {
+            $examples[$name] = ['value' => $values[$content]];
+        }
+
+        ksort($examples);
+
+        return $examples;
+    }
+
+    /**
      * Count what every hoistable node states, keyed by the scope it will PUBLISH under ({@see scope()})
      * and its canonical content, and filed under the GROUP that decides whether it publishes at all:
      * the status and the body, which no declaration has a say in ({@see shareable()}).
      *
      * @param  array<array-key, mixed>  $paths
      * @param  callable(array<array-key, mixed>): list<array{list<array-key>, array<array-key, mixed>}>  $sites
+     * @param  callable(array<array-key, mixed>): array{array<array-key, mixed>, Illustrations}  $split
      * @param  array<string, string>  $aliases  the shapes pass one published, resolved away before grouping
      * @return array<string, Occurrence>
      */
-    private static function collect(array $paths, callable $sites, array $aliases = []): array
+    private static function collect(array $paths, callable $sites, callable $split, array $aliases = []): array
     {
         $out = [];
 
@@ -219,7 +363,7 @@ final class SharedErrorResponses implements DocumentTransformer
             $rejected = self::rejected($response);
 
             foreach ($sites($response) as [, $body]) {
-                $stripped = self::stripProvenance($body);
+                [$stripped, $illustrations] = $split(self::stripProvenance($body));
                 $key = self::key($scope, $stripped);
 
                 $out[$key] ??= [
@@ -227,11 +371,16 @@ final class SharedErrorResponses implements DocumentTransformer
                     'group' => self::key((string) $status, self::withoutMintedNames($stripped, $aliases)),
                     'base' => $name ?? 'Error'.$status,
                     'body' => $stripped,
+                    'illustrations' => [],
                     'count' => 0,
                     'rejected' => [],
                 ];
                 $out[$key]['count']++;
                 $out[$key]['rejected'] += $rejected;
+
+                foreach ($illustrations as $mediaType => $values) {
+                    $out[$key]['illustrations'][$mediaType] = ($out[$key]['illustrations'][$mediaType] ?? []) + $values;
+                }
             }
         }
 
@@ -330,7 +479,7 @@ final class SharedErrorResponses implements DocumentTransformer
      *
      * @param  array<string, Occurrence>  $bodies
      * @param  array<string, mixed>  $existing
-     * @param  callable(array<array-key, mixed>, string): array<array-key, mixed>  $publish
+     * @param  callable(Occurrence): array<array-key, mixed>  $publish
      * @return array{array<string, string>, array<string, mixed>, array<string, list<string>>}
      */
     private static function mint(array $bodies, array $existing, callable $publish): array
@@ -339,7 +488,7 @@ final class SharedErrorResponses implements DocumentTransformer
         $published = [];
         foreach ($bodies as $key => $body) {
             $claims[$key] = ['base' => $body['base'], 'identity' => null, 'content' => $key];
-            $published[$key] = $publish($body['body'], $body['scope']);
+            $published[$key] = $publish($body);
         }
 
         $taken = [];
@@ -408,9 +557,10 @@ final class SharedErrorResponses implements DocumentTransformer
      * @param  array<array-key, mixed>  $paths
      * @param  array<string, string>  $names
      * @param  callable(array<array-key, mixed>): list<array{list<array-key>, array<array-key, mixed>}>  $sites
+     * @param  callable(array<array-key, mixed>): array{array<array-key, mixed>, Illustrations}  $split
      * @return array<array-key, mixed>
      */
-    private static function rewrite(array $paths, array $names, callable $sites, string $prefix): array
+    private static function rewrite(array $paths, array $names, callable $sites, callable $split, string $prefix): array
     {
         foreach ($paths as $path => $operations) {
             if (! is_array($operations)) {
@@ -433,7 +583,8 @@ final class SharedErrorResponses implements DocumentTransformer
                     $scope = self::scope((string) $status, self::claimed($response));
 
                     foreach ($sites($response) as [$pointer, $body]) {
-                        $name = $names[self::key($scope, self::stripProvenance($body))] ?? null;
+                        [$stripped] = $split(self::stripProvenance($body));
+                        $name = $names[self::key($scope, $stripped)] ?? null;
                         if ($name === null) {
                             continue;
                         }

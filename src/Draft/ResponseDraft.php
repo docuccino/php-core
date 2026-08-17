@@ -61,6 +61,9 @@ final class ResponseDraft
 
     private ?string $id = null;
 
+    /** Tracks the winning {@see claimComponentName()} write, so it turns over with the name it belongs to. */
+    private bool $componentIsStatusDefault = false;
+
     public function __construct(
         public readonly string $status,
     ) {
@@ -93,20 +96,38 @@ final class ResponseDraft
      * at all and answers `NoOp`, the same as `null`. Enforced at the write like {@see BODYLESS_STATUS}
      * above it, so a name a `$ref` cannot point at never reaches the document — whether or not the
      * shared-error hoist, which is the only thing that would have refused it, is switched on.
+     *
+     * `$isStatusDefault` is how a producer says the name is the one it derives from the status rather
+     * than one anything named — the difference between "nobody has named this body" and "this body is
+     * called that". Only the writer knows it: a later reader comparing the value against the default
+     * table cannot tell a deliberate `#[ErrorComponent("NotFound")]` on a 404 from the default it
+     * happens to spell.
      */
-    public function claimComponentName(?string $name, Contribution $by): PatchResult
+    public function claimComponentName(?string $name, Contribution $by, bool $isStatusDefault = false): PatchResult
     {
-        return $this->guard->apply(
+        $result = $this->guard->apply(
             self::COMPONENT,
             $name !== null && ComponentNames::isLegal($name) ? $name : null,
             $by,
         );
+
+        if ($result === PatchResult::Accepted) {
+            $this->componentIsStatusDefault = $isStatusDefault;
+        }
+
+        return $result;
     }
 
     /** The component name a producer declared for this response, or null when none did. */
     public function componentClaim(): ?string
     {
         return Hydrate::stringOrNull($this->guard->resolved()[self::COMPONENT] ?? null);
+    }
+
+    /** Whether the standing claim is a status default rather than a name something chose. */
+    public function componentClaimIsStatusDefault(): bool
+    {
+        return $this->componentIsStatusDefault;
     }
 
     public function content(string $mediaType): SchemaDraft

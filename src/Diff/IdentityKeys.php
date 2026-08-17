@@ -17,6 +17,13 @@ namespace Docuccino\Core\Diff;
  * content. The nodes that do correspond still meet, and the extra one reads as the add or the remove it
  * is. A key claimed once is left alone.
  *
+ * Qualifying has to escape that shared key space rather than write further into it, or the last qualifier
+ * hands a node the key another node already holds and hides it exactly as the first collision did — with
+ * nothing left to re-check it against. So a qualified key states its parts length-prefixed, tagged with
+ * the kind of node and the level that minted it, behind a run of `#` no unqualified key starts with
+ * ({@see mark()}): two qualifications spell one string only when every part agrees, and no qualification
+ * can spell a key that was left alone.
+ *
  * Every qualifier is a function of the node, never of the order it was met, so reordering one side invents
  * no churn. Nodes that agree on identity, structure and content are one node stated twice, and share a key.
  *
@@ -36,8 +43,10 @@ final class IdentityKeys
      */
     public static function pair(array $old, array $new): array
     {
-        $oldKeys = array_map(static fn (array $entry): string => self::key($entry, 0), $old);
-        $newKeys = array_map(static fn (array $entry): string => self::key($entry, 0), $new);
+        $oldKeys = array_map(self::baseKey(...), $old);
+        $newKeys = array_map(self::baseKey(...), $new);
+
+        $mark = self::mark([...$oldKeys, ...$newKeys]);
 
         for ($level = 1; $level <= self::QUALIFIERS; $level++) {
             $contested = self::claimedTwice($oldKeys) + self::claimedTwice($newKeys);
@@ -46,32 +55,66 @@ final class IdentityKeys
                 break;
             }
 
-            $oldKeys = self::requalified($old, $oldKeys, $contested, $level);
-            $newKeys = self::requalified($new, $newKeys, $contested, $level);
+            $oldKeys = self::requalified($old, $oldKeys, $contested, $level, $mark);
+            $newKeys = self::requalified($new, $newKeys, $contested, $level, $mark);
         }
 
         return [self::keyed($old, $oldKeys), self::keyed($new, $newKeys)];
     }
 
     /**
-     * A node with no identity is already keyed by its structure, so it has one qualifier where a node
-     * carrying one has two.
+     * The name a node claims outright: its id, or its structure where it carries none.
      *
      * @param  array{0: ?string, 1: string, 2: string, 3: mixed}  $entry
      */
-    private static function key(array $entry, int $level): string
+    private static function baseKey(array $entry): string
+    {
+        return $entry[0] ?? $entry[1];
+    }
+
+    /**
+     * A node with no identity is already keyed by its structure, so it has one qualifier where a node
+     * carrying one has two — and a level that adds no new part still moves it off the key it collided on,
+     * because the level is in the tag.
+     *
+     * @param  array{0: ?string, 1: string, 2: string, 3: mixed}  $entry
+     */
+    private static function qualifiedKey(array $entry, int $level, string $mark): string
     {
         [$id, $structural, $fingerprint] = $entry;
 
-        if ($id === null) {
-            return $level === 0 ? $structural : $structural.'#'.$fingerprint;
+        $parts = match (true) {
+            $id === null => [$structural, $fingerprint],
+            $level === 1 => [$id, $structural],
+            default => [$id, $structural, $fingerprint],
+        };
+
+        // `s` or `i` — keyed by structure or by an identity. The two carry different parts, so without the
+        // tag one node's structure-and-fingerprint could spell another's id-and-structure.
+        $key = $mark.($id === null ? 's' : 'i').$level;
+
+        foreach ($parts as $part) {
+            $key .= '#'.strlen($part).'#'.$part;
         }
 
-        return match (true) {
-            $level === 0 => $id,
-            $level === 1 => $id.'#'.$structural,
-            default => $id.'#'.$structural.'#'.$fingerprint,
-        };
+        return $key;
+    }
+
+    /**
+     * The shortest run of `#` no key a node claims outright begins with. Read off the whole set, so it is a
+     * function of what is being paired rather than of the order any of it arrived in.
+     *
+     * @param  list<string>  $keys
+     */
+    private static function mark(array $keys): string
+    {
+        $longest = 0;
+
+        foreach ($keys as $key) {
+            $longest = max($longest, strspn($key, '#'));
+        }
+
+        return str_repeat('#', $longest + 1);
     }
 
     /**
@@ -80,12 +123,12 @@ final class IdentityKeys
      * @param  array<string, true>  $contested
      * @return list<string>
      */
-    private static function requalified(array $entries, array $keys, array $contested, int $level): array
+    private static function requalified(array $entries, array $keys, array $contested, int $level, string $mark): array
     {
         $out = [];
 
         foreach ($keys as $index => $key) {
-            $out[] = isset($contested[$key]) ? self::key($entries[$index], $level) : $key;
+            $out[] = isset($contested[$key]) ? self::qualifiedKey($entries[$index], $level, $mark) : $key;
         }
 
         return $out;

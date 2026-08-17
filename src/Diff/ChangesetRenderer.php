@@ -13,7 +13,8 @@ use Docuccino\Core\Support\PlainText;
  * a CI log or a PR comment.
  *
  * A removed node is described from the old side, which is whatever document the operator pointed at, so
- * every value that came out of one goes through {@see PlainText} on the way to the terminal.
+ * every value that came out of one goes through {@see PlainText} on the way to the terminal — a field
+ * NAME as much as a field value, since a security scheme's members are the artifact's own keys.
  */
 final class ChangesetRenderer
 {
@@ -34,6 +35,14 @@ final class ChangesetRenderer
         ."than an API change. Check the artifact is this document's own, and re-export it if it predates a\n"
         ."change to how ids are minted.\n\n";
 
+    /**
+     * Printed when a component nothing reaches had a change stood down from breaking, so the downgrade is
+     * never silent: a reader who knows the component IS used can see which verdict to distrust.
+     */
+    private const string UNREFERENCED_NOTE = "Note: nothing in either document references %s.\n"
+        ."Changes to a component nothing reaches are reported but never breaking — it is in no request,\n"
+        ."no response and no security requirement.\n\n";
+
     private const string MARK_ADDED = '+';
 
     private const string MARK_REMOVED = '-';
@@ -44,6 +53,7 @@ final class ChangesetRenderer
     {
         $note = $changeset->pairing === Pairing::Structural ? self::PAIRING_NOTE : '';
         $note .= self::disjointNote($changeset);
+        $note .= self::unreferencedNote($changeset);
 
         if ($changeset->isEmpty()) {
             return $note."No API changes.\n";
@@ -80,6 +90,13 @@ final class ChangesetRenderer
         return $kinds === [] ? '' : sprintf(self::DISJOINT_NOTE, implode(' or ', $kinds));
     }
 
+    private static function unreferencedNote(Changeset $changeset): string
+    {
+        $names = array_map(PlainText::of(...), $changeset->unreferencedComponents);
+
+        return $names === [] ? '' : sprintf(self::UNREFERENCED_NOTE, implode(', ', $names));
+    }
+
     private function summaryLine(Changeset $changeset): string
     {
         $total = count($changeset->changes);
@@ -104,7 +121,7 @@ final class ChangesetRenderer
         $line = sprintf('  %s [%s] %s  (%s)', $mark, $change->target->value, PlainText::of($change->path), $change->code);
 
         foreach ($change->fields as $field) {
-            $line .= sprintf("\n      %s: %s -> %s", $field->field, self::scalar($field->old), self::scalar($field->new));
+            $line .= sprintf("\n      %s: %s -> %s", PlainText::of($field->field), self::scalar($field->old), self::scalar($field->new));
         }
 
         return $line;

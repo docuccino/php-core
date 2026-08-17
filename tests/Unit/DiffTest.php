@@ -6,6 +6,8 @@ use Docuccino\Core\Diff\Change;
 use Docuccino\Core\Diff\Changeset;
 use Docuccino\Core\Diff\ChangesetRenderer;
 use Docuccino\Core\Diff\DocumentDiffer;
+use Docuccino\Core\Diff\FieldChange;
+use Docuccino\Core\Diff\IdentityKeys;
 use Docuccino\Core\Diff\IncomparableDocumentsException;
 use Docuccino\Core\Diff\Pairing;
 use Docuccino\Core\Document\UirDocument;
@@ -735,22 +737,62 @@ it('tells two parameter refs apart by pointer when neither side declares the com
         ->and($changes['parameter.removed']->path)->toContain('#/components/parameters/Status');
 });
 
-it('lets what a $ref parameter states beside the pointer win over the component', function (): void {
-    // A pointer is one use of a shared parameter, not the parameter, so anything stated next to it — its own
-    // identity included — describes that use.
+it('ignores what a $ref parameter states beside the pointer, bar the prose OAS allows there', function (): void {
+    // OAS 3.1 §3.5: a Reference Object's members other than `summary` and `description` SHALL be ignored.
+    // A `required: false` written beside a pointer at a component that says `required: true` describes
+    // nothing, and reading it as the parameter's own reported it becoming optional — or, with the two sides
+    // the other way round, breaking — for a contract that never moved. Identity is the exception: it names
+    // the USE, which is what the diff pairs on, and it is ours rather than OAS's.
     $old = diffHoistedParams(['Status']);
+    $old['components']['parameters']['Status']['required'] = true;
     $old['paths']['/api/v1/forms/{id}']['get']['parameters'][0] += [
         'x-docuccino' => ['id' => 'par:v1:9999999999999999'],
         'description' => 'Filter by state',
     ];
 
-    $new = $old;
-    $new['paths']['/api/v1/forms/{id}']['get']['parameters'][0]['description'] = 'Filter by lifecycle state';
+    $stated = $old;
+    $stated['paths']['/api/v1/forms/{id}']['get']['parameters'][0] += [
+        'required' => false,
+        'deprecated' => true,
+        'schema' => ['type' => 'integer'],
+    ];
 
-    $changes = changesByCode(diffOf($old, $new));
+    $described = $old;
+    $described['paths']['/api/v1/forms/{id}']['get']['parameters'][0]['description'] = 'Filter by lifecycle state';
 
-    expect($changes)->toHaveKey('parameter.description-changed')
+    $changes = changesByCode(diffOf($old, $described));
+
+    expect(diffOf($old, $stated)->isEmpty())->toBeTrue()
+        ->and(diffOf($stated, $old)->isEmpty())->toBeTrue()
+        ->and($changes)->toHaveKey('parameter.description-changed')
         ->and($changes['parameter.description-changed']->id)->toBe('par:v1:9999999999999999');
+});
+
+it('ignores a body stated beside a response $ref, and keeps the description', function (): void {
+    // The same rule on the other node ComponentRefs resolves. A `content` beside a response pointer is
+    // ignored by every generator reading the document, so reading it here reports a body change no client
+    // will ever see.
+    $body = [
+        'description' => 'Not found',
+        'content' => ['application/json' => ['schema' => ['type' => 'object', 'properties' => ['message' => ['type' => 'string']]]]],
+    ];
+
+    $old = diffHoisted404($body);
+
+    $stated = $old;
+    $stated['paths']['/api/v1/forms/{id}']['get']['responses']['404'] += [
+        'content' => ['application/json' => ['schema' => ['type' => 'string']]],
+        'headers' => ['X-Reason' => ['schema' => ['type' => 'string']]],
+    ];
+
+    $described = $old;
+    $described['paths']['/api/v1/forms/{id}']['get']['responses']['404']['description'] = 'No such form';
+
+    $changes = changesByCode(diffOf($old, $described));
+
+    expect(diffOf($old, $stated)->isEmpty())->toBeTrue()
+        ->and(diffOf($stated, $old)->isEmpty())->toBeTrue()
+        ->and($changes)->toHaveKey('response.description-changed');
 });
 
 it('keys a parameter by a pointer it cannot resolve, whatever the pointer names', function (): void {
@@ -1063,6 +1105,34 @@ it('reports a removed parameter that shared both its id and its label with the o
         ->and($changes)->not->toHaveKey('parameter.added');
 });
 
+it('keeps every node when a qualifier spells a key another node claims outright', function (array $entries): void {
+    // Stated in the keys themselves, because this is the one thing the class exists to guarantee and the
+    // crafted collision is invisible from the document side. Qualifying used to write further into the key
+    // space it was escaping: `X` qualified with `S` spells the id `X#S`, and the last qualifier is never
+    // re-checked, so the node it landed on left the comparison and its removal was reported as no change.
+    [$keyed] = IdentityKeys::pair($entries, []);
+
+    $nodes = array_values($keyed);
+    sort($nodes);
+
+    expect($nodes)->toBe(['A', 'B', 'C', 'D']);
+})->with([
+    'ids spelling the qualifiers' => [[
+        ['X', 'S', 'F', 'A'],
+        ['X', 'T', 'G', 'B'],
+        ['X#S', 'U', 'H', 'C'],
+        ['X#S#F', 'V', 'I', 'D'],
+    ]],
+    // And an artifact that writes the qualified form outright: whatever mark it spells, the qualified space
+    // starts one `#` past the longest run any of these ids opens with.
+    'an id spelling the qualified form' => [[
+        ['X', 'S', 'F', 'A'],
+        ['X', 'T', 'G', 'B'],
+        ['#i1#1#X#1#S', 'U', 'H', 'C'],
+        ['#i1#1#X#1#T', 'V', 'I', 'D'],
+    ]],
+]);
+
 // --- Pages with no slug to key on -------------------------------------------
 
 /**
@@ -1134,6 +1204,732 @@ it('invents no churn when both sides carry the same contested page id', function
 
     expect(diffOf($doc, $doc)->isEmpty())->toBeTrue()
         ->and(diffOf($doc, $reordered)->isEmpty())->toBeTrue();
+});
+
+// --- Webhooks ---------------------------------------------------------------
+
+/**
+ * `diffBase()` plus a webhook: an operation the API promises to CALL. It is published in the same
+ * document, and a consumer writes an endpoint against it exactly as it writes a request against a path.
+ *
+ * @return array<string, mixed>
+ */
+function diffWebhook(string $name = 'formSaved'): array
+{
+    $doc = diffBase();
+    $doc['webhooks'][$name] = [
+        'post' => [
+            'x-docuccino' => ['id' => 'op:v1:7777777777777777'],
+            'operationId' => 'forms.saved',
+            'summary' => 'A form was saved',
+            'parameters' => [[
+                'x-docuccino' => ['id' => 'par:v1:5555555555555555'],
+                'name' => 'X-Signature', 'in' => 'header', 'required' => false,
+                'schema' => ['type' => 'string'],
+            ]],
+            'responses' => [
+                '200' => [
+                    'x-docuccino' => ['id' => 'res:v1:6666666666666666'],
+                    'description' => 'Ack',
+                    'content' => ['application/json' => ['schema' => [
+                        'type' => 'object', 'properties' => ['ok' => ['type' => 'boolean']],
+                    ]]],
+                ],
+            ],
+        ],
+    ];
+
+    return $doc;
+}
+
+it('reports a webhook the new document no longer publishes', function (): void {
+    // Walking `paths` alone left every webhook uncompared, so dropping one — the provider stopping a call
+    // its consumers built an endpoint for — read as no change at all.
+    $changes = changesByCode(diffOf(diffWebhook(), diffBase()));
+
+    expect(diffOf(diffWebhook(), diffWebhook())->isEmpty())->toBeTrue()
+        ->and($changes)->toHaveKey('operation.removed')
+        ->and($changes['operation.removed']->breaking)->toBeTrue()
+        ->and($changes['operation.removed']->path)->toBe('POST webhooks.formSaved');
+});
+
+it('diffs a webhook with the machinery an operation under paths gets', function (callable $edit, string $code, bool $breaking): void {
+    $new = $edit(diffWebhook());
+    $changes = changesByCode(diffOf(diffWebhook(), $new));
+
+    expect($changes)->toHaveKey($code)
+        ->and($changes[$code]->breaking)->toBe($breaking)
+        ->and($changes[$code]->path)->toStartWith('POST webhooks.formSaved');
+})->with([
+    'a parameter becoming required' => [function (array $doc): array {
+        $doc['webhooks']['formSaved']['post']['parameters'][0]['required'] = true;
+
+        return $doc;
+    }, 'parameter.became-required', true],
+    'a response dropped' => [function (array $doc): array {
+        unset($doc['webhooks']['formSaved']['post']['responses']['200']);
+
+        return $doc;
+    }, 'response.removed', true],
+    'a property gone from the body it sends' => [function (array $doc): array {
+        unset($doc['webhooks']['formSaved']['post']['responses']['200']['content']['application/json']['schema']['properties']['ok']);
+
+        return $doc;
+    }, 'schema.property-removed', true],
+    'a summary rewritten' => [function (array $doc): array {
+        $doc['webhooks']['formSaved']['post']['summary'] = 'A form was stored';
+
+        return $doc;
+    }, 'operation.summary-changed', false],
+]);
+
+it('keeps a webhook and a path template of the same name apart', function (): void {
+    // Nothing stops a webhook being named like a path, and with neither side carrying identities the name
+    // is all there is to key on: keyed on it alone the two are one operation, and an edit to the webhook
+    // reads as an edit to the path — or, once their content parts them, as both being replaced.
+    $doc = [
+        'uir' => '1.0.0',
+        'openapi' => '3.2.0',
+        'paths' => ['/forms' => ['get' => ['summary' => 'List forms', 'responses' => ['200' => ['description' => 'Forms']]]]],
+        'webhooks' => ['/forms' => ['get' => ['summary' => 'Poll me', 'responses' => ['200' => ['description' => 'Ack']]]]],
+    ];
+
+    $new = $doc;
+    $new['webhooks']['/forms']['get']['summary'] = 'Poll me twice';
+
+    $changeset = diffOf($doc, $new);
+    $summaries = array_values(array_filter($changeset->changes, static fn (Change $c): bool => $c->code === 'operation.summary-changed'));
+
+    expect(diffOf($doc, $doc)->isEmpty())->toBeTrue()
+        ->and($summaries)->toHaveCount(1)
+        ->and($summaries[0]->path)->toBe('GET webhooks./forms');
+});
+
+it('counts a webhook id when judging overlap', function (): void {
+    // The warning that a kind paired nothing reads identity where the pairing reads it, and the pairing
+    // now reads webhooks — otherwise a document whose operations are mostly webhooks goes quiet on exactly
+    // the pairing failure the warning exists to flag.
+    $old = diffWebhook();
+    $old['webhooks']['formDeleted'] = $old['webhooks']['formSaved'];
+    $old['webhooks']['formDeleted']['post']['x-docuccino']['id'] = 'op:v1:8888888888888888';
+    unset($old['paths']);
+
+    $new = $old;
+    $new['webhooks']['formSaved']['post']['x-docuccino']['id'] = 'op:v1:2222222222222222';
+    $new['webhooks']['formDeleted']['post']['x-docuccino']['id'] = 'op:v1:3333333333333333';
+
+    expect(diffOf($old, $new)->disjointIdentities)->toBe(['operation']);
+});
+
+// --- Security schemes -------------------------------------------------------
+
+/**
+ * `diffBase()` with a `components.securitySchemes` entry, and by default an operation requiring it — a
+ * document saying what a client must send to be let in at all.
+ *
+ * @param  array<string, mixed>  $scheme
+ * @return array<string, mixed>
+ */
+function diffSecured(array $scheme = ['type' => 'apiKey', 'in' => 'header', 'name' => 'X-Api-Key'], bool $required = true): array
+{
+    $doc = diffBase();
+    $doc['components']['securitySchemes'] = ['apiKey' => $scheme];
+
+    if ($required) {
+        $doc['paths']['/api/v1/forms/{id}']['get']['security'] = [['apiKey' => []]];
+    }
+
+    return $doc;
+}
+
+it('reports a scheme that changed how a client authenticates as breaking', function (): void {
+    // Never compared at all, this said nothing: the key a client had been sending in a header now has to
+    // go in the query string under another name, and the report was "No API changes."
+    $changeset = diffOf(diffSecured(), diffSecured(['type' => 'apiKey', 'in' => 'query', 'name' => 'token']));
+    $changes = changesByCode($changeset);
+
+    expect($changes)->toHaveKey('securityScheme.changed')
+        ->and($changes['securityScheme.changed']->breaking)->toBeTrue()
+        ->and($changes['securityScheme.changed']->path)->toBe('components.securitySchemes.apiKey')
+        ->and($changes['securityScheme.changed']->target->value)->toBe('securityScheme')
+        ->and(array_map(static fn (array $f): array => $f, $changes['securityScheme.changed']->toArray()['fields']))->toBe([
+            ['field' => 'in', 'old' => 'header', 'new' => 'query'],
+            ['field' => 'name', 'old' => 'X-Api-Key', 'new' => 'token'],
+        ])
+        ->and($changeset->unreferencedComponents)->toBe([]);
+});
+
+it('reads every member that says how to satisfy a scheme as contract', function (array $old, array $new, string $member): void {
+    // The member list is OAS's, not ours, and the ones we cannot name are the ones a later OAS adds — so
+    // anything that is not prose counts, and a scheme's own `type` decides which members it even has.
+    $changes = changesByCode(diffOf(diffSecured($old), diffSecured($new)));
+
+    expect($changes)->toHaveKey('securityScheme.changed')
+        ->and($changes['securityScheme.changed']->breaking)->toBeTrue()
+        ->and(array_map(static fn (FieldChange $f): string => $f->field, $changes['securityScheme.changed']->fields))->toBe([$member]);
+})->with([
+    'type' => [['type' => 'http', 'scheme' => 'bearer'], ['type' => 'mutualTLS', 'scheme' => 'bearer'], 'type'],
+    'in' => [['type' => 'apiKey', 'in' => 'header', 'name' => 'K'], ['type' => 'apiKey', 'in' => 'cookie', 'name' => 'K'], 'in'],
+    'name' => [['type' => 'apiKey', 'in' => 'header', 'name' => 'K'], ['type' => 'apiKey', 'in' => 'header', 'name' => 'J'], 'name'],
+    'scheme' => [['type' => 'http', 'scheme' => 'bearer'], ['type' => 'http', 'scheme' => 'basic'], 'scheme'],
+    'bearerFormat' => [['type' => 'http', 'scheme' => 'bearer', 'bearerFormat' => 'JWT'], ['type' => 'http', 'scheme' => 'bearer', 'bearerFormat' => 'opaque'], 'bearerFormat'],
+    'flows' => [
+        ['type' => 'oauth2', 'flows' => ['implicit' => ['authorizationUrl' => 'https://id.test/a', 'scopes' => ['forms:read' => 'Read forms']]]],
+        ['type' => 'oauth2', 'flows' => ['implicit' => ['authorizationUrl' => 'https://id.test/a', 'scopes' => []]]],
+        'flows',
+    ],
+    'openIdConnectUrl' => [
+        ['type' => 'openIdConnect', 'openIdConnectUrl' => 'https://id.test/a'],
+        ['type' => 'openIdConnect', 'openIdConnectUrl' => 'https://id.test/b'],
+        'openIdConnectUrl',
+    ],
+    'a member a later OAS adds' => [
+        ['type' => 'oauth2', 'oauth2MetadataUrl' => 'https://id.test/a'],
+        ['type' => 'oauth2', 'oauth2MetadataUrl' => 'https://id.test/b'],
+        'oauth2MetadataUrl',
+    ],
+]);
+
+it('never breaks over what a scheme says about itself', function (array $new, ?string $code): void {
+    // Prose and a deprecation announce a change rather than make one, and an extension is a tool's own
+    // business: none of them is a reason to fail a CI gate.
+    $changeset = diffOf(diffSecured(['type' => 'apiKey', 'in' => 'header', 'name' => 'K']), diffSecured($new));
+
+    expect($changeset->isBreaking())->toBeFalse()
+        ->and(array_keys(changesByCode($changeset)))->toBe($code === null ? [] : [$code]);
+})->with([
+    'a description' => [['type' => 'apiKey', 'in' => 'header', 'name' => 'K', 'description' => 'Ask support.'], 'securityScheme.description-changed'],
+    'a summary' => [['type' => 'apiKey', 'in' => 'header', 'name' => 'K', 'summary' => 'The key'], 'securityScheme.summary-changed'],
+    'a deprecation' => [['type' => 'apiKey', 'in' => 'header', 'name' => 'K', 'deprecated' => true], 'securityScheme.deprecated-changed'],
+    'an extension' => [['type' => 'apiKey', 'in' => 'header', 'name' => 'K', 'x-vault' => 'kv/api'], null],
+]);
+
+it('reports a scheme removed while a requirement still names it as breaking', function (): void {
+    // The operation still says "authenticate with apiKey" and the document no longer says how. A client
+    // generated from it cannot be built, let alone authenticate.
+    $new = diffSecured();
+    unset($new['components']['securitySchemes']['apiKey']);
+
+    $changes = changesByCode(diffOf(diffSecured(), $new));
+
+    expect($changes)->toHaveKey('securityScheme.removed')
+        ->and($changes['securityScheme.removed']->breaking)->toBeTrue()
+        ->and($changes['securityScheme.removed']->path)->toBe('components.securitySchemes.apiKey');
+});
+
+it('leaves a scheme dropped along with the requirements naming it non-breaking', function (): void {
+    // An API that stopped asking for a key breaks nobody: every old client still authenticates, and its
+    // credentials are simply ignored.
+    $new = diffBase();
+
+    $changes = changesByCode(diffOf(diffSecured(), $new));
+
+    expect($changes)->toHaveKey('securityScheme.removed')
+        ->and($changes['securityScheme.removed']->breaking)->toBeFalse()
+        ->and($changes['operation.security-removed']->breaking)->toBeFalse();
+});
+
+it('classifies an added scheme as non-breaking', function (): void {
+    $changes = changesByCode(diffOf(diffBase(), diffSecured(required: false)));
+
+    expect($changes)->toHaveKey('securityScheme.added')
+        ->and($changes['securityScheme.added']->breaking)->toBeFalse();
+});
+
+it('never breaks over a scheme no requirement names, and says so', function (): void {
+    // The security half of the unreachable-schema rule: a hand-written artifact routinely carries a shelf
+    // of schemes nothing asks for, and nothing has to satisfy one of those.
+    $changeset = diffOf(
+        diffSecured(required: false),
+        diffSecured(['type' => 'apiKey', 'in' => 'query', 'name' => 'token'], required: false),
+    );
+    $rendered = (new ChangesetRenderer)->render($changeset);
+
+    expect(changesByCode($changeset))->toHaveKey('securityScheme.changed')
+        ->and($changeset->isBreaking())->toBeFalse()
+        ->and($changeset->unreferencedComponents)->toBe(['components.securitySchemes.apiKey'])
+        ->and($rendered)->toContain('nothing in either document references components.securitySchemes.apiKey')
+        ->and($rendered)->toContain('never breaking');
+});
+
+it('finds a requirement wherever an artifact states it', function (callable $require): void {
+    // Where a requirement can be written and is not looked for, a scheme reads as one nothing asks for and
+    // a real break is stood down to a report line.
+    $old = $require(diffSecured(required: false));
+    $new = $require(diffSecured(['type' => 'apiKey', 'in' => 'query', 'name' => 'token'], required: false));
+
+    $changeset = diffOf($old, $new);
+
+    expect($changeset->isBreaking())->toBeTrue()
+        ->and($changeset->unreferencedComponents)->toBe([]);
+})->with([
+    'on the document' => [function (array $doc): array {
+        $doc['security'] = [['apiKey' => []]];
+
+        return $doc;
+    }],
+    'on an operation' => [function (array $doc): array {
+        $doc['paths']['/api/v1/forms/{id}']['get']['security'] = [['apiKey' => []]];
+
+        return $doc;
+    }],
+    'on a webhook' => [function (array $doc): array {
+        $doc['webhooks']['formSaved'] = ['post' => [
+            'security' => [['apiKey' => []]],
+            'responses' => ['200' => ['description' => 'Ack']],
+        ]];
+
+        return $doc;
+    }],
+    'on a callback the operation declares' => [function (array $doc): array {
+        $doc['paths']['/api/v1/forms/{id}']['get']['callbacks'] = ['onSaved' => ['{$request.body#/url}' => ['post' => [
+            'security' => [['apiKey' => []]],
+            'responses' => ['200' => ['description' => 'Ack']],
+        ]]]];
+
+        return $doc;
+    }],
+    'on a path item under components' => [function (array $doc): array {
+        $doc['components']['pathItems'] = ['Saved' => ['post' => [
+            'security' => [['apiKey' => []]],
+            'responses' => ['200' => ['description' => 'Ack']],
+        ]]];
+
+        return $doc;
+    }],
+    'as the bare map an artifact writes where a list belongs' => [function (array $doc): array {
+        $doc['components']['pathItems'] = ['Saved' => ['post' => [
+            'security' => ['apiKey' => []],
+            'responses' => ['200' => ['description' => 'Ack']],
+        ]]];
+
+        return $doc;
+    }],
+]);
+
+it('reads no scheme out of a requirement that names none', function (mixed $security, string $scheme): void {
+    // The other half of the shape above: a `security` member an artifact wrote that names nothing readable.
+    // Each row sits beside the scheme a reader that took the shape at face value would have named — an
+    // empty key, or a requirement's VALUES — so over-collecting stands this cosmetic edit up as a break.
+    $secured = static function (array $definition) use ($security, $scheme): array {
+        $doc = diffBase();
+        $doc['components']['securitySchemes'] = [$scheme => $definition];
+        // A component path item, so the malformed member reaches the reader exactly as written — an
+        // operation's own `security` is modelled as a list and would tidy half of these away first.
+        $doc['components']['pathItems'] = ['Saved' => ['post' => [
+            'security' => $security,
+            'responses' => ['200' => ['description' => 'Ack']],
+        ]]];
+
+        return $doc;
+    };
+
+    $changeset = diffOf(
+        $secured(['type' => 'apiKey', 'in' => 'header', 'name' => 'X-Api-Key']),
+        $secured(['type' => 'apiKey', 'in' => 'query', 'name' => 'token']),
+    );
+
+    expect(changesByCode($changeset))->toHaveKey('securityScheme.changed')
+        ->and($changeset->isBreaking())->toBeFalse()
+        ->and($changeset->unreferencedComponents)->toBe(['components.securitySchemes.'.$scheme]);
+})->with([
+    'an empty name where the map is written bare' => [['' => []], ''],
+    'an empty name inside a requirement' => [[['' => []]], ''],
+    'a requirement that is not a map at all' => [['see the wiki'], 'apiKey'],
+    'a requirement written as a list of names' => [[['apiKey', 'oauth2']], 'apiKey'],
+]);
+
+it('survives a securitySchemes section that is not what it claims', function (mixed $section): void {
+    // Everything here is read off an artifact nobody validated. A section that is a string, or a scheme
+    // that is, describes no way in — and must not be a crash or a type error on the way to saying so.
+    $doc = diffBase();
+    $doc['components']['securitySchemes'] = $section;
+
+    expect(diffOf($doc, $doc)->isEmpty())->toBeTrue()
+        ->and(diffOf($doc, diffBase())->isBreaking())->toBeFalse();
+})->with([
+    'a string' => ['#/components/securitySchemes'],
+    'a list' => [[['type' => 'apiKey']]],
+    'a scheme that is a string' => [['apiKey' => 'see the wiki']],
+    'a scheme that is null' => [['apiKey' => null]],
+]);
+
+it('escapes a scheme member name it reads straight off the artifact', function (): void {
+    // Every other field name in a changeset is a literal of ours; a scheme's members are whatever keys the
+    // artifact wrote. Left raw, one of them erases and rewrites the line that just called it BREAKING.
+    $member = "scheme\x1B[2K\rNON-BREAKING: nothing to review\n";
+
+    $changeset = diffOf(
+        diffSecured(['type' => 'http', 'scheme' => 'bearer', $member => 'before']),
+        diffSecured(['type' => 'http', 'scheme' => 'bearer', $member => 'after']),
+    );
+    $rendered = (new ChangesetRenderer)->render($changeset);
+
+    expect($changeset->isBreaking())->toBeTrue()
+        ->and($rendered)->not->toContain("\x1B")
+        ->and($rendered)->not->toContain("\r")
+        ->and($rendered)->toContain('scheme\x1B[2K\x0DNON-BREAKING: nothing to review\x0A: before -> after')
+        // The forged verdict is text inside the one field line, not a line of its own.
+        ->and(substr_count($rendered, "\n"))->toBe(5);
+});
+
+it('invents no churn from the order a document lists its schemes in', function (): void {
+    $old = diffSecured();
+    $old['components']['securitySchemes']['oauth2'] = ['type' => 'oauth2', 'flows' => []];
+
+    $new = $old;
+    $new['components']['securitySchemes'] = array_reverse($old['components']['securitySchemes'], preserve_keys: true);
+
+    expect(diffOf($old, $new)->isEmpty())->toBeTrue();
+});
+
+// --- Schemas nothing references ---------------------------------------------
+
+/**
+ * `diffBase()`'s component schema, referenced from the 200 response. `diffBase()` itself declares it and
+ * points at nothing, which is the unreachable half of every pair below: one mutation, two documents, and
+ * the only difference is whether an operation can reach the schema it edits.
+ *
+ * @return array<string, mixed>
+ */
+function diffReferencedSchema(): array
+{
+    $doc = diffBase();
+    $doc['paths']['/api/v1/forms/{id}']['get']['responses']['200']['content']['application/json']['schema'] = [
+        '$ref' => '#/components/schemas/FormData',
+    ];
+
+    return $doc;
+}
+
+/**
+ * The edit under test: the schema loses a property and changes its type — breaking wherever a consumer
+ * can reach it.
+ *
+ * @param  array<string, mixed>  $doc
+ * @return array<string, mixed>
+ */
+function diffShrunkSchema(array $doc, string $name = 'FormData'): array
+{
+    unset($doc['components']['schemas'][$name]['properties']['id']);
+    $doc['components']['schemas'][$name]['type'] = 'string';
+
+    return $doc;
+}
+
+it('reports a change to a schema nothing references, but never as breaking', function (): void {
+    // `docuccino:diff <file>` reads an artifact another tool wrote, and an unreferenced `components.schemas`
+    // entry is ordinary there. A schema no operation reaches is in no request and no response, so no edit to
+    // it can break a consumer — calling one breaking fails a CI gate over a contract that did not move.
+    $changeset = diffOf(diffBase(), diffShrunkSchema(diffBase()));
+    $changes = changesByCode($changeset);
+
+    expect($changes)->toHaveKey('schema.property-removed')
+        ->and($changes)->toHaveKey('schema.type-changed')
+        ->and($changeset->isBreaking())->toBeFalse()
+        ->and($changeset->unreferencedComponents)->toBe(['components.schemas.FormData'])
+        ->and($changeset->toArray()['unreferencedComponents'])->toBe(['components.schemas.FormData']);
+});
+
+it('keeps the very same change breaking once an operation references that schema', function (): void {
+    $changeset = diffOf(diffReferencedSchema(), diffShrunkSchema(diffReferencedSchema()));
+    $changes = changesByCode($changeset);
+
+    expect($changes['schema.property-removed']->breaking)->toBeTrue()
+        ->and($changes['schema.type-changed']->breaking)->toBeTrue()
+        ->and($changeset->unreferencedComponents)->toBe([]);
+});
+
+it('finds the reference wherever an artifact put it', function (callable $reference): void {
+    // Reachability decides whether a breaking rule applies, so a place it cannot look is a place a real
+    // break is quietly downgraded. Every one of these is a shape a hand-written artifact reaches for.
+    $old = $reference(diffBase());
+    $changeset = diffOf($old, diffShrunkSchema($old));
+
+    expect($changeset->isBreaking())->toBeTrue()
+        ->and($changeset->unreferencedComponents)->toBe([]);
+})->with([
+    'a response schema' => [fn (array $doc): array => diffReferencedSchema()],
+    'a response schema under items' => [function (array $doc): array {
+        $doc['paths']['/api/v1/forms/{id}']['get']['responses']['200']['content']['application/json']['schema'] = [
+            'type' => 'array', 'items' => ['$ref' => '#/components/schemas/FormData'],
+        ];
+
+        return $doc;
+    }],
+    'a pointer into the schema' => [function (array $doc): array {
+        $doc['paths']['/api/v1/forms/{id}']['get']['responses']['200']['content']['application/json']['schema'] = [
+            'properties' => ['id' => ['$ref' => '#/components/schemas/FormData/properties/id']],
+        ];
+
+        return $doc;
+    }],
+    'a request body' => [function (array $doc): array {
+        $doc['paths']['/api/v1/forms/{id}']['get']['requestBody'] = [
+            'content' => ['application/json' => ['schema' => ['$ref' => '#/components/schemas/FormData']]],
+        ];
+
+        return $doc;
+    }],
+    'a parameter schema' => [function (array $doc): array {
+        $doc['paths']['/api/v1/forms/{id}']['get']['parameters'][1]['schema'] = ['$ref' => '#/components/schemas/FormData'];
+
+        return $doc;
+    }],
+    'a response header' => [function (array $doc): array {
+        $doc['paths']['/api/v1/forms/{id}']['get']['responses']['200']['headers'] = [
+            'X-Form' => ['schema' => ['$ref' => '#/components/schemas/FormData']],
+        ];
+
+        return $doc;
+    }],
+    'a hoisted response' => [function (array $doc): array {
+        $doc['components']['responses']['NotFound'] = [
+            'description' => 'Not found',
+            'content' => ['application/json' => ['schema' => ['$ref' => '#/components/schemas/FormData']]],
+        ];
+        $doc['paths']['/api/v1/forms/{id}']['get']['responses']['404'] = ['$ref' => '#/components/responses/NotFound'];
+
+        return $doc;
+    }],
+    'a hoisted parameter' => [function (array $doc): array {
+        $doc['components']['parameters']['Filter'] = [
+            'name' => 'filter', 'in' => 'query', 'schema' => ['$ref' => '#/components/schemas/FormData'],
+        ];
+        $doc['paths']['/api/v1/forms/{id}']['get']['parameters'][] = ['$ref' => '#/components/parameters/Filter'];
+
+        return $doc;
+    }],
+    'a webhook' => [function (array $doc): array {
+        $doc['webhooks']['formSaved'] = ['post' => ['responses' => [
+            '200' => ['description' => 'Ack', 'content' => ['application/json' => ['schema' => ['$ref' => '#/components/schemas/FormData']]]],
+        ]]];
+
+        return $doc;
+    }],
+    'a discriminator mapping' => [function (array $doc): array {
+        $doc['components']['schemas']['Envelope'] = [
+            'x-docuccino' => ['id' => 'sch:v1:1111111111111111'],
+            'oneOf' => [['type' => 'object']],
+            'discriminator' => ['propertyName' => 'kind', 'mapping' => ['form' => '#/components/schemas/FormData']],
+        ];
+        $doc['paths']['/api/v1/forms/{id}']['get']['responses']['200']['content']['application/json']['schema'] = [
+            '$ref' => '#/components/schemas/Envelope',
+        ];
+
+        return $doc;
+    }],
+    'another schema that is itself referenced' => [function (array $doc): array {
+        $doc['components']['schemas']['FormEnvelope'] = [
+            'x-docuccino' => ['id' => 'sch:v1:1111111111111111'],
+            'type' => 'object',
+            'properties' => ['form' => ['$ref' => '#/components/schemas/FormData']],
+        ];
+        $doc['paths']['/api/v1/forms/{id}']['get']['responses']['200']['content']['application/json']['schema'] = [
+            '$ref' => '#/components/schemas/FormEnvelope',
+        ];
+
+        return $doc;
+    }],
+]);
+
+it('reads a schema name a pointer had to escape', function (string $name, string $ref): void {
+    // A component name is free-form, so the pointer that names it escapes `/` and `~` the JSON-Pointer way
+    // and the rest the URI way. Read literally, an escaped name matches nothing and the schema it names
+    // looks unused.
+    $old = diffBase();
+    $old['components']['schemas'][$name] = $old['components']['schemas']['FormData'];
+    unset($old['components']['schemas']['FormData']);
+    $old['paths']['/api/v1/forms/{id}']['get']['responses']['200']['content']['application/json']['schema'] = ['$ref' => $ref];
+
+    expect(diffOf($old, diffShrunkSchema($old, $name))->isBreaking())->toBeTrue();
+})->with([
+    'a slash' => ['Form/Data', '#/components/schemas/Form~1Data'],
+    'a tilde' => ['Form~Data', '#/components/schemas/Form~0Data'],
+    'a space' => ['Form Data', '#/components/schemas/Form%20Data'],
+]);
+
+it('reads every schema one string names, not only the first', function (): void {
+    // The scan resumes INSIDE the pointer it just read rather than past it, so a second pointer in the same
+    // string is still found. A description citing two components is the shape that needs it, and stopping at
+    // the first would leave the second schema looking unused — standing a real break down to a report line.
+    $old = diffBase();
+    $old['components']['schemas']['FormNote'] = [
+        'x-docuccino' => ['id' => 'sch:v1:1111111111111111'],
+        'type' => 'object',
+        'properties' => ['note' => ['type' => 'string']],
+    ];
+    $old['paths']['/api/v1/forms/{id}']['get']['responses']['200']['description'] =
+        'Either #/components/schemas/FormNote/properties/note or #/components/schemas/FormData';
+
+    $changeset = diffOf($old, diffShrunkSchema($old));
+
+    expect($changeset->isBreaking())->toBeTrue()
+        ->and($changeset->unreferencedComponents)->toBe([]);
+});
+
+it('survives a pointer that names nothing', function (): void {
+    // An artifact nobody validated can point at a component it never declares, or at no component at all.
+    $old = diffBase();
+    $old['paths']['/api/v1/forms/{id}']['get']['responses']['200']['content']['application/json']['schema'] = [
+        'oneOf' => [['$ref' => '#/components/schemas/Missing'], ['$ref' => '#/components/schemas/']],
+    ];
+
+    $changeset = diffOf($old, diffShrunkSchema($old));
+
+    expect($changeset->isBreaking())->toBeFalse()
+        ->and($changeset->unreferencedComponents)->toBe(['components.schemas.FormData']);
+});
+
+it('does not let one unreachable schema vouch for another', function (): void {
+    // Reachability is transitive from the operations, not "something points at it": a pointer held by a
+    // schema nobody reaches reaches nothing itself.
+    $old = diffBase();
+    $old['components']['schemas']['FormHolder'] = [
+        'x-docuccino' => ['id' => 'sch:v1:1111111111111111'],
+        'type' => 'object',
+        'properties' => ['form' => ['$ref' => '#/components/schemas/FormData']],
+    ];
+
+    $changeset = diffOf($old, diffShrunkSchema($old));
+
+    expect($changeset->isBreaking())->toBeFalse()
+        ->and($changeset->unreferencedComponents)->toBe(['components.schemas.FormData']);
+});
+
+it('terminates on a cycle between the schemas it does reach', function (): void {
+    // Nothing stops an artifact pointing two schemas at each other, and a recursive type is the ordinary
+    // reason to. Walked without a visited set this never returns — a hang, not a wrong answer.
+    $old = diffReferencedSchema();
+    $old['components']['schemas']['FormData']['properties']['loop'] = ['$ref' => '#/components/schemas/FormLoop'];
+    $old['components']['schemas']['FormLoop'] = [
+        'x-docuccino' => ['id' => 'sch:v1:1111111111111111'],
+        'type' => 'object',
+        'properties' => ['back' => ['$ref' => '#/components/schemas/FormData']],
+    ];
+
+    $new = $old;
+    unset($new['components']['schemas']['FormLoop']['properties']['back']);
+
+    $changeset = diffOf($old, $new);
+
+    expect($changeset->isBreaking())->toBeTrue()
+        ->and($changeset->unreferencedComponents)->toBe([]);
+});
+
+it('keeps a cycle between unreachable schemas unreachable', function (): void {
+    $old = diffBase();
+    $old['components']['schemas']['FormData']['properties']['loop'] = ['$ref' => '#/components/schemas/FormLoop'];
+    $old['components']['schemas']['FormLoop'] = [
+        'x-docuccino' => ['id' => 'sch:v1:1111111111111111'],
+        'type' => 'object',
+        'properties' => ['back' => ['$ref' => '#/components/schemas/FormData']],
+    ];
+
+    $new = $old;
+    unset($new['components']['schemas']['FormLoop']['properties']['back']);
+
+    $changeset = diffOf($old, $new);
+
+    expect($changeset->isBreaking())->toBeFalse()
+        ->and($changeset->unreferencedComponents)->toBe(['components.schemas.FormLoop']);
+});
+
+it('stands nothing down for a schema either side still reaches', function (): void {
+    // Reachable on ONE side is enough: the old document's consumers read it, so what changed under them is
+    // a break whether or not the new document still points at it.
+    $shrunk = diffShrunkSchema(diffBase());
+
+    expect(diffOf(diffReferencedSchema(), $shrunk)->isBreaking())->toBeTrue()
+        ->and(diffOf(diffBase(), diffShrunkSchema(diffReferencedSchema()))->isBreaking())->toBeTrue();
+});
+
+it('calls deleting a schema a live pointer still names breaking', function (): void {
+    // The mirror of the rule above: the reference stays, the schema goes, and the pointer names nothing.
+    // The document is invalid AND every client generated from it loses the type that pointer stood for —
+    // reported, as it was, as an ordinary non-breaking `schema.removed`, that passes `--enforce`.
+    $new = diffReferencedSchema();
+    unset($new['components']['schemas']['FormData']);
+
+    $changes = changesByCode(diffOf(diffReferencedSchema(), $new));
+
+    expect($changes)->toHaveKey('schema.removed-still-referenced')
+        ->and($changes['schema.removed-still-referenced']->breaking)->toBeTrue()
+        ->and($changes['schema.removed-still-referenced']->path)->toBe('components.schemas.FormData')
+        ->and($changes)->not->toHaveKey('schema.removed');
+});
+
+it('leaves a schema deleted along with the pointers at it non-breaking', function (): void {
+    // Nothing dangles, so nothing broke: the response that used to point at the schema states its own body
+    // now, and that body is compared where it lives.
+    $new = diffBase();
+    unset($new['components']['schemas']['FormData']);
+
+    $changes = changesByCode(diffOf(diffReferencedSchema(), $new));
+
+    expect($changes)->toHaveKey('schema.removed')
+        ->and($changes['schema.removed']->breaking)->toBeFalse()
+        ->and($changes)->not->toHaveKey('schema.removed-still-referenced');
+});
+
+it('reads a pointer held only by a schema nothing reaches as no reference at all', function (): void {
+    // Reachability is transitive, here as everywhere: a pointer inside an unreachable schema is one no
+    // consumer can follow, so the removal it survives breaks nobody.
+    $old = diffBase();
+    $old['components']['schemas']['FormHolder'] = [
+        'x-docuccino' => ['id' => 'sch:v1:1111111111111111'],
+        'type' => 'object',
+        'properties' => ['form' => ['$ref' => '#/components/schemas/FormData']],
+    ];
+
+    $new = $old;
+    unset($new['components']['schemas']['FormData']);
+
+    $changes = changesByCode(diffOf($old, $new));
+
+    expect($changes)->toHaveKey('schema.removed')
+        ->and($changes['schema.removed']->breaking)->toBeFalse();
+});
+
+it('does not call a schema re-minted under its own name a dangling pointer', function (): void {
+    // Pairing is by identity, so a schema whose id changed is a removal and an addition — and the name it
+    // was published under still resolves. Reading "the new document points at a name it no longer declares"
+    // off the removal alone invents a break out of a re-mint.
+    $old = diffReferencedSchema();
+
+    $new = $old;
+    $new['components']['schemas']['FormData']['x-docuccino']['id'] = 'sch:v1:1111111111111111';
+
+    $changes = changesByCode(diffOf($old, $new));
+
+    expect($changes)->toHaveKey('schema.removed')
+        ->and($changes['schema.removed']->breaking)->toBeFalse()
+        ->and($changes)->toHaveKey('schema.added');
+});
+
+it('says in the rendered report which schema it stood down', function (): void {
+    // A breaking change silently reclassified is the one thing a differ must not do quietly: a reader who
+    // knows the schema IS used needs to see which verdict to distrust.
+    $rendered = (new ChangesetRenderer)->render(diffOf(diffBase(), diffShrunkSchema(diffBase())));
+
+    expect($rendered)->toContain('nothing in either document references components.schemas.FormData')
+        ->and($rendered)->toContain('never breaking')
+        ->and($rendered)->toContain('(0 breaking)');
+
+    // …and stays quiet where the schema is reachable, so the note keeps meaning something.
+    expect((new ChangesetRenderer)->render(diffOf(diffReferencedSchema(), diffShrunkSchema(diffReferencedSchema()))))
+        ->not->toContain('nothing in either document references');
+});
+
+it('escapes a schema name it names in that note', function (): void {
+    $old = diffBase();
+    $old['components']['schemas']["Form\x1B[31mData"] = $old['components']['schemas']['FormData'];
+    unset($old['components']['schemas']['FormData']);
+
+    $rendered = (new ChangesetRenderer)->render(diffOf($old, diffShrunkSchema($old, "Form\x1B[31mData")));
+
+    expect($rendered)->not->toContain("\x1B")
+        ->and($rendered)->toContain('nothing in either document references components.schemas.Form\x1B[31mData');
 });
 
 // --- Determinism, model and rendering --------------------------------------

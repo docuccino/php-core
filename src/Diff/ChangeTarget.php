@@ -10,5 +10,6 @@ enum ChangeTarget: string
     case Parameter = 'parameter';
     case Response = 'response';
     case Schema = 'schema';
+    case SecurityScheme = 'securityScheme';
     case ContentPage = 'page';
 }
