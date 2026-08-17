@@ -515,11 +515,17 @@ final class SharedErrorResponses implements DocumentTransformer
     }
 
     /**
-     * One warning per name more than one thing asked for. `Error404` is a name a client's generated
-     * type is called after, and a second 404 shape retires it and repoints every operation that
-     * referenced it — a real change to what the document publishes, and the trade this transformer
-     * makes deliberately (naming the common single-shape case `Error404_a1b2c3d4` to spare a few
-     * documents a one-time rename would be worse for everyone). What it must not be is silent.
+     * One warning per name a body could not keep. `Error404` is a name a client's generated type is
+     * called after, and a second 404 shape retires it and repoints every operation that referenced it —
+     * a real change to what the document publishes, and the trade this transformer makes deliberately
+     * (naming the common single-shape case `Error404_a1b2c3d4` to spare a few documents a one-time
+     * rename would be worse for everyone). What it must not be is silent.
+     *
+     * Two things send a body up the ladder, and the reader can only act on the one that happened: several
+     * bodies wanting one name, or ONE body wanting a name an existing component already holds
+     * ({@see mint()}'s `$taken`, which arrives here as a lone claimant). Neither may be reported as a name
+     * somebody "claimed" — a base name is `Error<status>` until a producer says otherwise, so the common
+     * reading of that word sends an author hunting for a declaration that was never written.
      *
      * @param  array<string, list<string>>  $contests  asked name → the bodies that asked for it
      * @param  array<string, string>  $names  body → the name it was published under
@@ -534,16 +540,28 @@ final class SharedErrorResponses implements DocumentTransformer
             $published = array_map(static fn (string $key): string => $names[$key] ?? $key, $claimants);
             sort($published);
 
+            // A lone claimant climbed past a name it never contested with another body.
+            $incumbent = count($claimants) === 1;
+
             $out[] = new Diagnostic(
                 severity: Severity::Warning,
                 code: 'components.name-collision',
-                message: sprintf(
-                    'Component name "%s" is claimed by more than one shape, so each shared error body that asked for it was published under a name derived from its own content (%s) in components.%s.',
-                    $asked,
-                    implode(', ', $published),
-                    $bucket,
-                ),
-                help: 'A name belongs to one shape while that shape holds it alone, and is retired when a second arrives. Nothing to do if the shapes really do differ; otherwise have the operations state one body — or declare a name apiece — and the plain name comes back.',
+                message: $incumbent
+                    ? sprintf(
+                        'A component in components.%s already holds the name "%s", so the shared error body that would have taken it was published under a name derived from its own content (%s) instead.',
+                        $bucket,
+                        $asked,
+                        implode(', ', $published),
+                    )
+                    : sprintf(
+                        'More than one shared error body would have taken the component name "%s", so each was published under a name derived from its own content (%s) in components.%s.',
+                        $asked,
+                        implode(', ', $published),
+                        $bucket,
+                    ),
+                help: $incumbent
+                    ? 'The component already holding the name was published before this pass ran and cannot move. Give the error body a name of its own with #[ErrorComponent], or rename the component holding this one, and it publishes under a plain name again.'
+                    : 'A shared error body is named after its status unless something names it, and a name belongs to one body only while it holds it alone. Nothing to do if these really are different errors and the derived names read well enough; otherwise have the operations state one body, or name each body with #[ErrorComponent] — one name per body, since a name spread over an exception family, or over a method answering at several statuses, is contested the same way.',
             );
         }
 

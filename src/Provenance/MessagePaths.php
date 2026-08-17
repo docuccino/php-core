@@ -5,15 +5,21 @@ declare(strict_types=1);
 namespace Docuccino\Core\Provenance;
 
 /**
- * Relativises the machine paths inside a free-text message — a third-party exception's, nearly
- * always — so a diagnostic built from it can be published. Every absolute run it finds goes through
- * {@see SourcePathResolver}, so the ladder and its degradation are the ones
+ * Relativises the machine paths inside a fragment of diagnostic text — a third-party exception's
+ * message, or a locator naming the file something anonymous was written in — so a diagnostic built
+ * from it can be published. Diagnostics are embedded in the document, so a diagnostic that names the
+ * build machine breaks byte-identical output where it is hardest to notice; every absolute run this
+ * finds goes through {@see SourcePathResolver}, so the ladder and its degradation are the ones
  * {@see RootRelativeSourcePathResolver} already owns and there is no second notion of a publishable
  * path.
  *
- * Only ever hand it text we did not write. A route signature (`GET /api/forms`) and a JSON pointer
- * (`/paths/~1forms/get`) are absolute-looking runs too, so compose our own words AROUND a scrubbed
- * fragment rather than scrubbing the finished message.
+ * Hand it only a fragment whose absolute-looking runs are all really machine paths, and compose our
+ * own words AROUND the result rather than scrubbing a finished message. That rule cannot be moved to
+ * the crossing where a diagnostic is reported, because syntax does not say where a path came from: a
+ * route signature (`GET /api/forms`), a JSON pointer (`#/components/schemas/User/properties/password`)
+ * and a path an attribute or a config key states in the source are absolute-looking runs too, and each
+ * is identical on every machine and worth exactly the characters it is written with. Only the code
+ * composing the message knows which half reflection supplied.
  */
 final readonly class MessagePaths
 {

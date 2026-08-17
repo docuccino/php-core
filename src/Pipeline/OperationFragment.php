@@ -6,6 +6,8 @@ namespace Docuccino\Core\Pipeline;
 
 use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Document\Operation;
+use Docuccino\Core\Extensions\Context\RouteNotes;
+use Docuccino\Core\Extensions\Contracts\RouteNoteCollector;
 use Docuccino\Core\Extensions\Schema\ComponentNames;
 use Docuccino\Core\Support\Hydrate;
 
@@ -17,6 +19,10 @@ use Docuccino\Core\Support\Hydrate;
  * reconstructs the operation, restores every component it points at and replays its diagnostics
  * without the type engine — and can't leave a dangling `$ref` when the route that first owned a
  * shared component goes away.
+ *
+ * Its {@see $notes} are the same idea for a finding the whole DOCUMENT reports rather than this route:
+ * they travel here and are replayed into their {@see RouteNoteCollector} on every build, so the summary a
+ * document transformer publishes is the same warm as cold ({@see RouteNotes}).
  *
  * @internal
  */
@@ -32,6 +38,7 @@ final readonly class OperationFragment
      * @param  array<string, array<string, mixed>>  $componentSecuritySchemes  name → the security scheme this operation's `security` requirement names
      * @param  array<string, string>  $componentResponseBases  name → the name that response asked for, for the same reason the schema bases exist
      * @param  array<string, string>  $componentSecuritySchemeBases  name → the name that scheme asked for
+     * @param  array<string, array<string, list<string>>>  $notes  {@see RouteNotes} channel → key → values this route contributed to a document-level aggregate
      */
     public function __construct(
         public string $path,
@@ -47,6 +54,7 @@ final readonly class OperationFragment
         public array $componentSecuritySchemes = [],
         public array $componentResponseBases = [],
         public array $componentSecuritySchemeBases = [],
+        public array $notes = [],
     ) {}
 
     /**
@@ -96,6 +104,7 @@ final readonly class OperationFragment
             componentSecuritySchemes: ComponentNames::rekey($this->componentSecuritySchemes, $securitySchemes),
             componentResponseBases: ComponentNames::rekey($this->componentResponseBases, $responses),
             componentSecuritySchemeBases: ComponentNames::rekey($this->componentSecuritySchemeBases, $securitySchemes),
+            notes: $this->notes,
         );
     }
 
@@ -142,6 +151,7 @@ final readonly class OperationFragment
             'componentSecuritySchemes' => $this->componentSecuritySchemes,
             'componentResponseBases' => $this->componentResponseBases,
             'componentSecuritySchemeBases' => $this->componentSecuritySchemeBases,
+            'notes' => $this->notes,
         ];
     }
 
@@ -167,6 +177,10 @@ final readonly class OperationFragment
             componentSecuritySchemes: Hydrate::mapOfArrays($data['componentSecuritySchemes'] ?? null),
             componentResponseBases: Hydrate::stringMap($data['componentResponseBases'] ?? null),
             componentSecuritySchemeBases: Hydrate::stringMap($data['componentSecuritySchemeBases'] ?? null),
+            notes: Hydrate::mapOf($data['notes'] ?? null, static fn (array $keys): array => array_map(
+                static fn (mixed $values): array => Hydrate::stringList($values),
+                $keys,
+            )),
         );
     }
 }

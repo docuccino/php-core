@@ -20,7 +20,11 @@ use JsonException;
  * out-of-band dependency file)`, so any changed or removed dependency invalidates it. TraceReport
  * and {@see RouteDependencies} files merge into that one list — {@see put()} is the seam.
  *
- * Storage is a flat directory of `{key}.json` files written atomically (temp file + rename).
+ * Storage is a flat directory of `{key}.json` files written atomically (temp file + rename), each
+ * stamped with {@see FORMAT} — the shape of what a fragment carries. Bump it whenever the fragment gains
+ * something a warm build now needs, because an entry written before that member existed reads back as
+ * "this route had none", which is a warm build quietly saying less than a cold one. A miss costs one
+ * rebuild; a wrong warm answer costs the document.
  *
  * Dependency hashing goes through {@see FileDigests}, so one build hashes each file once — one cache
  * instance is one build's worth of memo, and callers get a fresh one per build.
@@ -29,6 +33,9 @@ use JsonException;
  */
 final readonly class FragmentCache
 {
+    /** The entry format {@see get()} will read. An entry stamped anything else is a miss. */
+    public const FORMAT = 2;
+
     public function __construct(
         private bool $enabled,
         private string $path,
@@ -66,8 +73,9 @@ final readonly class FragmentCache
     }
 
     /**
-     * The cached fragment, if the entry exists and every recorded dependency file still hashes to
-     * its stored value. Null otherwise — a miss and a stale entry are indistinguishable to callers.
+     * The cached fragment, if the entry is in the format this build reads and every recorded dependency
+     * file still hashes to its stored value. Null otherwise — a miss, an entry from an older format and a
+     * stale entry are all indistinguishable to callers, and all three simply rebuild.
      */
     public function get(string $key): ?OperationFragment
     {
@@ -84,6 +92,10 @@ final readonly class FragmentCache
             /** @var array<string, mixed> $decoded */
             $decoded = json_decode($raw, true, flags: JSON_THROW_ON_ERROR);
         } catch (JsonException) {
+            return null;
+        }
+
+        if (($decoded['format'] ?? null) !== self::FORMAT) {
             return null;
         }
 
@@ -118,7 +130,7 @@ final readonly class FragmentCache
 
         try {
             $payload = json_encode(
-                ['fragment' => $fragment->toArray(), 'dependencies' => $dependencies],
+                ['format' => self::FORMAT, 'fragment' => $fragment->toArray(), 'dependencies' => $dependencies],
                 JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
             );
         } catch (JsonException) {

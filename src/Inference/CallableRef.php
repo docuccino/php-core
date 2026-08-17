@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Inference;
 
+use Docuccino\Core\Provenance\MessagePaths;
+
 /**
  * Identifies a callable to analyse that isn't a route action: an exception handler's `render()`, an
  * exception class's own `render()`/`toResponse()`, or a render-callback closure located by file+line.
@@ -39,6 +41,9 @@ final readonly class CallableRef
      * The callable's identity without the per-narrow suffix, so it's the same across every thrown type
      * it's analysed for. Lets the handler tier summarise deferrals per callback instead of one
      * diagnostic per exception type.
+     *
+     * A closure has no class, so what identifies it here is its FILE — which makes this an identity
+     * key and not something a diagnostic may print: relativise it through {@see MessagePaths} first.
      */
     public function target(): string
     {

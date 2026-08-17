@@ -66,6 +66,27 @@ it('recognises a Windows drive letter as absolute rather than as a relative path
     expect($resolver->relative('C:\\'.uniqid('docuccino-windows-', true).'\\app\\Thing.php'))->toBe('Thing.php');
 });
 
+it('publishes no machine path for a file reached through a symlinked prefix', function (): void {
+    // The base path and reflection can disagree about the same directory — `/tmp` is a symlink to
+    // `/private/tmp`, a checkout can live under one — so the prefix compare finds nothing to strip. The
+    // composer walk follows the link and answers instead, which is the point of having a second rung.
+    $real = sys_get_temp_dir().'/'.uniqid('docuccino-symlink-real-', true);
+    $link = sys_get_temp_dir().'/'.uniqid('docuccino-symlink-', true);
+    mkdir($real.'/package/src', 0777, true);
+    file_put_contents($real.'/package/composer.json', '{}');
+    symlink($real, $link);
+
+    $resolver = new RootRelativeSourcePathResolver($real);
+
+    expect($resolver->relative($link.'/package/src/Thing.php'))->toBe('src/Thing.php');
+
+    unlink($link);
+    unlink($real.'/package/composer.json');
+    rmdir($real.'/package/src');
+    rmdir($real.'/package');
+    rmdir($real);
+});
+
 it('emits no leading slash for any path it is given', function (string $case, string $base, string $file): void {
     // The invariant behind the rows above, as one statement: whatever comes in, what goes out is a
     // relative path, so nothing downstream has to know which of the three routes answered.

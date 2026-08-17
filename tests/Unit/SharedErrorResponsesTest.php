@@ -1052,7 +1052,33 @@ it('retires a declared name two different bodies contest, and says who asked', f
 
     expect($collision)->not->toBeEmpty()
         ->and($collision[0]->message)->toContain('"NotFound"')
-        ->and($collision[0]->message)->toContain($names[0]);
+        ->and($collision[0]->message)->toContain($names[0])
+        ->and($collision[0]->message)->toContain('More than one shared error body')
+        // The remedy by name, and the shape of it: a name per body, since one spread over a family lands
+        // right back here.
+        ->and($collision[0]->help)->toContain('#[ErrorComponent]')
+        ->and($collision[0]->help)->toContain('one name per body');
+});
+
+it('does not tell a reader a defaulted name was claimed', function (): void {
+    // `Error404` is what a body is called when NOBODY named it, so a message about a name someone
+    // "claimed" sends the author hunting through their code for a declaration that was never written.
+    $one = messageBody();
+    $two = ['description' => 'Not Found', 'content' => ['application/json' => ['schema' => ['type' => 'object', 'properties' => ['detail' => ['type' => 'string']]]]]];
+
+    $collision = array_values(array_filter(
+        errorDocReport(['paths' => array_map(static fn (array $r): array => ['get' => ['responses' => $r]], [
+            '/a' => ['404' => $one], '/b' => ['404' => $one],
+            '/c' => ['404' => $two], '/d' => ['404' => $two],
+        ])]),
+        static fn ($d): bool => $d->code === 'components.name-collision',
+    ));
+
+    expect($collision)->not->toBeEmpty()
+        ->and($collision[0]->message)->toContain('"Error404"')
+        ->and($collision[0]->message)->not->toContain('claim')
+        // Where the default came from belongs in the help, which is where the author reads it.
+        ->and($collision[0]->help)->toContain('named after its status');
 });
 
 it('climbs past a declared name a component already holds with another body', function (): void {
@@ -1070,6 +1096,28 @@ it('climbs past a declared name a component already holds with another body', fu
 
     expect($doc['components']['schemas']['NotFound'])->toBe(['type' => 'string'])
         ->and(schemaRefAt($doc, '/a', '404'))->toMatch('#^\#/components/schemas/NotFound_[a-z2-7]{8}$#');
+});
+
+it('says an incumbent holds the name when only one body wanted it', function (): void {
+    // One body climbing past a component that already exists is not a contest between bodies, and telling
+    // the reader several of them wanted the name would send them looking for the other one.
+    $body = claimedBody('NotFound', messageBody());
+
+    $collision = array_values(array_filter(
+        errorDocReport([
+            'paths' => [
+                '/a' => ['get' => ['responses' => ['404' => $body]]],
+                '/b' => ['get' => ['responses' => ['404' => $body]]],
+            ],
+            'components' => ['schemas' => ['NotFound' => ['type' => 'string']]],
+        ]),
+        static fn ($d): bool => $d->code === 'components.name-collision',
+    ));
+
+    expect($collision)->toHaveCount(1)
+        ->and($collision[0]->message)->toContain('A component in components.schemas already holds the name "NotFound"')
+        ->and($collision[0]->message)->not->toContain('More than one')
+        ->and($collision[0]->help)->toContain('#[ErrorComponent]');
 });
 
 it('refuses a declared name no component key could carry, and says whose it was', function (): void {

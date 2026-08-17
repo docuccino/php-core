@@ -54,6 +54,9 @@ final class RouteContext
     /** Files the action analysis didn't surface (traces, integrations); merged into {@see dependencyFiles()}. */
     private RouteDependencies $dependencies;
 
+    /** Facts this route found that the whole document reports; travel on the fragment. {@see notes()}. */
+    private RouteNotes $notes;
+
     /**
      * @param  list<TypeToSchema>  $typeMappers  the resolved type→schema chain (document-wide)
      * @param  list<ExceptionToResponse>  $exceptionMappers  the resolved exception→response chain
@@ -97,6 +100,7 @@ final class RouteContext
         public readonly array $routeBindingFieldSchemaResolvers = [],
     ) {
         $this->dependencies = new RouteDependencies;
+        $this->notes = new RouteNotes;
     }
 
     /** Where to analyse the success body, or null to analyse the dispatched action itself. */
@@ -219,6 +223,17 @@ final class RouteContext
     public function dependencies(): RouteDependencies
     {
         return $this->dependencies;
+    }
+
+    /**
+     * The note bag (design §10) — where a fact belongs when the document reports it once for the many
+     * routes that found it. Write it here rather than into a document-level aggregate of your own: notes
+     * ride the operation fragment, so a warm cache hit replays them, and an aggregate written directly is
+     * an aggregate a warm build comes back without. {@see RouteNotes}.
+     */
+    public function notes(): RouteNotes
+    {
+        return $this->notes;
     }
 
     /** The action's inference result, computed once and memoised. */

@@ -47,6 +47,22 @@ it('scrubs every path in a message that names more than one', function (): void 
     expect($scrubbed)->toBe('Could not copy config/one.yaml to "config/two.yaml"');
 });
 
+it('scrubs the file a callable label names and leaves the rest of the label alone', function (string $case, string $label, string $expected): void {
+    // The other kind of fragment that reaches it: not a thrown message but a locator for something
+    // anonymous, where the file IS the name. Whichever side of the file the locator sits on, the run
+    // ends at the `:` before the line, so what the author needs — a file they can open and a line to
+    // open it at — survives the scrub.
+    expect((new MessagePaths(new RootRelativeSourcePathResolver('/app/root')))->relative($label))
+        ->toBe($expected);
+})->with([
+    ['a closure named after its file', '/app/root/bootstrap/app.php::closure@42', 'bootstrap/app.php::closure@42'],
+    ['a closure named before its file', 'closure@/app/root/bootstrap/app.php:42', 'closure@bootstrap/app.php:42'],
+    ['a closure in a package', '/app/root/vendor/acme/src/Handlers.php::closure@7', 'vendor/acme/src/Handlers.php::closure@7'],
+    ['a class and a method', 'App\\Exceptions\\Renderer::__invoke', 'App\\Exceptions\\Renderer::__invoke'],
+    ['a label already relative', 'bootstrap/app.php::closure@42', 'bootstrap/app.php::closure@42'],
+    ['a label naming one segment', 'app.php::closure@42', 'app.php::closure@42'],
+]);
+
 it('leaves alone the runs that only look absolute', function (string $case, string $message): void {
     // A URL's slashes follow a colon or another slash, a namespace separator follows a word character,
     // and a single-segment word is prose — none of them is a path, and mistaking one for a path would
