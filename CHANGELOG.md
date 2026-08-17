@@ -7,6 +7,29 @@ User-facing changes to `docuccino/core` — features, fixes, performance work an
 taken from the commit messages scoped `core`. Entries begin after v0.1.2; older history is in
 the [repository](https://github.com/docuccino/docuccino) git log.
 
+## v0.5.0
+
+### Breaking changes
+
+- share one error response between arms that only illustrate it differently ([#51](https://github.com/docuccino/docuccino/pull/51))
+  - an application whose operations state one error response with differing examples now publishes one `components.responses` entry with an `examples` map, where it previously published either an inline response per operation or one hash-discriminated component per illustration. The `$ref`s those operations emit, and the type names a client generated from them carries, change accordingly.
+- diff what a client must satisfy, not only what it asks for ([#55](https://github.com/docuccino/docuccino/pull/55))
+  - `Changeset::$unreferencedSchemas` is now `$unreferencedComponents` (`unreferencedComponents` in the JSON payload), since a security scheme nothing requires is stood down into the same list. The `ChangeTarget` enum gains a `securityScheme` case.
+- count every parameter an old artifact declares, and print none of its text as written ([#46](https://github.com/docuccino/docuccino/pull/46))
+  - a diff whose old side declares parameters on a path item, or reuses one `x-docuccino.id` across two nodes, now reports removals, additions and edits it previously passed over in silence, so `docuccino:diff --enforce` can fail a comparison it used to allow. The finding is real either way — the gate was reading a document it could not see all of.
+- read a diff's $ref'd parameters as the parameters they name ([#43](https://github.com/docuccino/docuccino/pull/43))
+  - a diff of a document whose operations share parameters through `components.parameters` now reports parameter removals, additions and edits it previously passed over in silence, so `docuccino:diff --enforce` can fail a comparison it used to allow. The finding is real either way — the gate was reading a document it could not see all of.
+- let the producer of an error response name the component it publishes under ([#40](https://github.com/docuccino/docuccino/pull/40))
+  - shared error components are published under the name of the error rather than its status. Laravel's own errors become `BadRequest`, `Unauthorized`, `Forbidden`, `NotFound`, `UnprocessableEntity` and `TooManyRequests` in `components.schemas` and `components.responses`, in place of `Error400`, `Error401`, `Error403`, `Error404`, `Error422` and `Error429`; their `x-docuccino` component ids change with them. Regenerating a client renames its error types to match — the statuses and bodies are unchanged, so only a hand-written `catch` on the old type name needs updating. A status nothing claims a name for is still `Error<status>`. To choose your own names, register an `ExceptionToResponse` or claim over a built-in from an `OperationExtension`; see the docs at /extending/extension-authoring/#naming-the-component-an-error-publishes-under.
+- pair an exported artifact's parameters and schemas by the id it carries ([#38](https://github.com/docuccino/docuccino/pull/38))
+  - emitted documents change for existing projects. Response component names are content-derived, so dropping an unbindable member's placeholder from an example re-mints the hash suffix of any component whose example carried one, and those names flow into generated client type names. A request property recovered as `array<string, V>` whose class overrides `rules()` now emits `{"type":"object","additionalProperties":{}}` where it emitted `{"type":"array"}`. Regenerate and re-commit the artifact you diff against.
+
+### Bug fixes
+
+- tell the truth about two changes the diff went quiet on ([#61](https://github.com/docuccino/docuccino/pull/61))
+- make every byte a diff prints, and every node it pairs, survive the artifact ([#56](https://github.com/docuccino/docuccino/pull/56))
+- stop a schema no operation reaches failing the diff gate as breaking ([#50](https://github.com/docuccino/docuccino/pull/50))
+
 ## v0.4.0
 
 ### Breaking changes
