@@ -43,6 +43,42 @@ final class IdentityKeys
      */
     public static function pair(array $old, array $new): array
     {
+        [$oldKeys, $newKeys] = self::keys($old, $new);
+
+        return [self::keyed($old, $oldKeys), self::keyed($new, $newKeys)];
+    }
+
+    /**
+     * Pairs by identity as {@see pair()} does, then pairs what that left over by STRUCTURE: where one node
+     * on each side is unpaired and the two claim one structural key, they are one node.
+     *
+     * For a node whose id is minted from its own content — a schema published under a component name, whose
+     * bytes ARE what it publishes — every edit re-mints the id, so pairing by identity alone reads the edit
+     * as a removal and an addition and nothing compares the two bodies. Identity stays primary because it
+     * answers the case structure cannot: a node whose content did not move but whose name did keeps its id,
+     * and that is a rename rather than remove + add. A structural key two unpaired nodes on one side claim
+     * names no single node to pair with, so it is left alone.
+     *
+     * @template T
+     *
+     * @param  list<array{0: ?string, 1: string, 2: string, 3: T}>  $old
+     * @param  list<array{0: ?string, 1: string, 2: string, 3: T}>  $new
+     * @return array{array<string, T>, array<string, T>}
+     */
+    public static function pairLeftoversByStructure(array $old, array $new): array
+    {
+        [$oldKeys, $newKeys] = self::keys($old, $new);
+
+        return [self::keyed($old, self::repaired($old, $oldKeys, $new, $newKeys)), self::keyed($new, $newKeys)];
+    }
+
+    /**
+     * @param  list<array{0: ?string, 1: string, 2: string, 3: mixed}>  $old
+     * @param  list<array{0: ?string, 1: string, 2: string, 3: mixed}>  $new
+     * @return array{list<string>, list<string>}
+     */
+    private static function keys(array $old, array $new): array
+    {
         $oldKeys = array_map(self::baseKey(...), $old);
         $newKeys = array_map(self::baseKey(...), $new);
 
@@ -59,7 +95,66 @@ final class IdentityKeys
             $newKeys = self::requalified($new, $newKeys, $contested, $level, $mark);
         }
 
-        return [self::keyed($old, $oldKeys), self::keyed($new, $newKeys)];
+        return [$oldKeys, $newKeys];
+    }
+
+    /**
+     * The old side's keys, with each re-paired node moved onto the key its counterpart already holds. Only
+     * a key the OTHER side does not hold is moved, and only onto one that side holds alone, so no move can
+     * land on a key another node is keyed by and hide it.
+     *
+     * @param  list<array{0: ?string, 1: string, 2: string, 3: mixed}>  $old
+     * @param  list<string>  $oldKeys
+     * @param  list<array{0: ?string, 1: string, 2: string, 3: mixed}>  $new
+     * @param  list<string>  $newKeys
+     * @return list<string>
+     */
+    private static function repaired(array $old, array $oldKeys, array $new, array $newKeys): array
+    {
+        $sources = self::soleLeftovers($old, $oldKeys, $newKeys);
+        $targets = self::soleLeftovers($new, $newKeys, $oldKeys);
+
+        $moved = [];
+        foreach ($sources as $structural => $key) {
+            if (isset($targets[$structural])) {
+                $moved[$key] = $targets[$structural];
+            }
+        }
+
+        return array_map(static fn (string $key): string => $moved[$key] ?? $key, $oldKeys);
+    }
+
+    /**
+     * Every key one side claims that the other does not, by the structural key of the node claiming it —
+     * dropping any structural key two of them claim, which names no single node.
+     *
+     * @param  list<array{0: ?string, 1: string, 2: string, 3: mixed}>  $entries
+     * @param  list<string>  $keys
+     * @param  list<string>  $otherKeys
+     * @return array<array-key, string>
+     */
+    private static function soleLeftovers(array $entries, array $keys, array $otherKeys): array
+    {
+        $other = array_flip($otherKeys);
+
+        $out = [];
+        $ambiguous = [];
+
+        foreach ($keys as $index => $key) {
+            if (isset($other[$key])) {
+                continue;
+            }
+
+            $structural = $entries[$index][1];
+
+            if (isset($out[$structural])) {
+                $ambiguous[$structural] = true;
+            }
+
+            $out[$structural] = $key;
+        }
+
+        return array_diff_key($out, $ambiguous);
     }
 
     /**

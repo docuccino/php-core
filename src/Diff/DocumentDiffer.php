@@ -358,12 +358,16 @@ final class DocumentDiffer
      * stood for. That is breaking however small the schema was, and it gets its own code — "removed" alone
      * would read as tidying up.
      *
+     * The one kind of node paired through {@see IdentityKeys::pairLeftoversByStructure()}: a hoisted body's
+     * id is minted from the bytes it publishes, so an edit re-mints it and identity pairing alone would
+     * compare the edited component against nothing at all.
+     *
      * @param  list<Change>  $changes
      * @param  array<string, true>  $unreferenced
      */
     private function diffComponentSchemas(UirDocument $old, UirDocument $new, array &$changes, array &$unreferenced, Pairing $pairing): void
     {
-        [$oldSchemas, $newSchemas] = IdentityKeys::pair(
+        [$oldSchemas, $newSchemas] = IdentityKeys::pairLeftoversByStructure(
             $this->componentSchemaEntries($old, $pairing),
             $this->componentSchemaEntries($new, $pairing),
         );
@@ -377,8 +381,8 @@ final class DocumentDiffer
 
             if (! $inNew) {
                 $entry = $oldSchemas[$key];
-                // Pairing is by identity, so a schema re-minted under the same name is a removal here and
-                // an addition below. The name still resolves, and nothing dangles.
+                // A schema paired away under another name leaves the name it used to be published under to
+                // whatever still declares it, so a removal whose name the new document declares resolves.
                 $dangling = $newReach->reaches($entry['name']) && ! isset($declared[$entry['name']]);
                 $code = $dangling ? 'schema.removed-still-referenced' : 'schema.removed';
                 $changes[] = new Change(ChangeKind::Removed, ChangeTarget::Schema, $key, 'components.schemas.'.$entry['name'], $dangling, $code);

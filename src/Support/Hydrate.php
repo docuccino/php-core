@@ -116,8 +116,8 @@ final class Hydrate
     }
 
     /**
-     * Raw map members (non-arrays dropped), or null when the value isn't an array at all —
-     * the shape `servers`, `security` and `tags` want.
+     * Raw map members (non-arrays dropped), or null when the value isn't an array at all — the shape
+     * `servers` and `tags` want. `security` is a list too and still wants {@see securityRequirements()}.
      *
      * @return list<array<string, mixed>>|null
      */
@@ -133,6 +133,45 @@ final class Hydrate
                 /** @var array<string, mixed> $item */
                 $out[] = $item;
             }
+        }
+
+        return $out;
+    }
+
+    /**
+     * The Security Requirement Objects a `security` member states. OAS says that member IS a list of them,
+     * so an artifact that wrote one requirement without the list around it is malformed — and unambiguous:
+     * the string keys are scheme names, which is one requirement. Recovered rather than dropped, because a
+     * reader that never sees the names reads a document demanding a scheme as one demanding nothing — and
+     * the differ stands a real break down to silence on the strength of it.
+     *
+     * {@see listOfMaps()} cannot serve here: `servers` and `tags` recover from a bare map by UNWRAPPING it
+     * (`{"prod": {"url": …}}` is one server), which for `security` throws the scheme name away.
+     *
+     * @return list<array<string, mixed>>|null
+     */
+    public static function securityRequirements(mixed $value): ?array
+    {
+        if (! is_array($value)) {
+            return null;
+        }
+
+        $out = [];
+        $bare = [];
+
+        foreach ($value as $key => $item) {
+            if (is_string($key)) {
+                $bare[$key] = $item;
+            } elseif (is_array($item)) {
+                /** @var array<string, mixed> $item */
+                $out[] = $item;
+            }
+        }
+
+        // Never as an empty requirement alongside: `[]` in the list is how a document says the API may also
+        // be called with no credentials at all, which is the opposite of what a bare map states.
+        if ($bare !== []) {
+            $out[] = $bare;
         }
 
         return $out;

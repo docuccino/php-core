@@ -13,6 +13,7 @@ use Docuccino\Core\Diff\Pairing;
 use Docuccino\Core\Document\UirDocument;
 use Docuccino\Core\Emit\EmitOptions;
 use Docuccino\Core\Emit\OpenApi32Emitter;
+use Docuccino\Core\Identity\IdentityGenerator;
 
 /**
  * @param  array<string, mixed>  $old
@@ -419,6 +420,24 @@ it('classifies a removed operation security requirement as non-breaking', functi
     expect($changes['operation.security-removed']->breaking)->toBeFalse();
 });
 
+it('reads a requirement an operation wrote without the list around it', function (): void {
+    // Read the way `servers` and `tags` recover from a bare map — unwrapped — the scheme name never reaches
+    // the comparison, and the report names a requirement that says nothing about which scheme it is.
+    $old = diffBase();
+    $old['paths']['/api/v1/forms/{id}']['get']['security'] = ['apiKey' => []];
+
+    $new = diffBase();
+    $new['paths']['/api/v1/forms/{id}']['get']['security'] = ['oauth2' => ['read']];
+
+    $changes = changesByCode(diffOf($old, $new));
+
+    expect($changes)->toHaveKey('operation.security-added')
+        ->and($changes['operation.security-added']->breaking)->toBeTrue()
+        ->and($changes['operation.security-added']->fields[0]->new)->toBe(['oauth2' => ['read']])
+        ->and($changes['operation.security-removed']->fields[0]->old)->toBe(['apiKey' => []])
+        ->and(diffOf($old, $old)->isEmpty())->toBeTrue();
+});
+
 it('is insensitive to security scheme-map key order', function (): void {
     $old = diffBase();
     $old['paths']['/api/v1/forms/{id}']['get']['security'] = [['apiKey' => [], 'oauth2' => ['read']]];
@@ -613,6 +632,103 @@ it('reports nothing for a response ref naming a component neither side declares'
     unset($dangling['components']['responses']);
 
     expect(diffOf($dangling, $dangling)->isEmpty())->toBeTrue();
+});
+
+// --- Hoisted error SHAPES (the body in components.schemas) -----------------
+
+/**
+ * What the shared-error transformer's two passes actually leave: the body SHAPE under
+ * `components.schemas`, the whole RESPONSE under `components.responses` pointing at it, and both
+ * operations pointing at the response. The shape's id is minted the way the transformer mints it — from
+ * the bytes it publishes — so every edit to the body re-mints it.
+ *
+ * @param  array<string, mixed>  $shape
+ * @return array<string, mixed>
+ */
+function diffHoistedShape(array $shape): array
+{
+    $doc = diffHoisted404([
+        'description' => 'Not found',
+        'content' => ['application/json' => ['schema' => ['$ref' => '#/components/schemas/Error404']]],
+    ]);
+
+    $doc['components']['schemas']['Error404'] =
+        ['x-docuccino' => ['id' => (new IdentityGenerator)->publishedSchemaId('404:application/json', $shape)]] + $shape;
+
+    return $doc;
+}
+
+/**
+ * The shared error shape, with `code` the required property an edit takes away.
+ *
+ * @return array<string, mixed>
+ */
+function diffErrorShape(bool $withCode = true): array
+{
+    $properties = ['message' => ['type' => 'string']];
+
+    if ($withCode) {
+        $properties['code'] = ['type' => 'string'];
+    }
+
+    return [
+        'type' => 'object',
+        'required' => $withCode ? ['message', 'code'] : ['message'],
+        'properties' => $properties,
+    ];
+}
+
+it('calls dropping a required property from a hoisted error shape breaking', function (): void {
+    // A schema published under a component name carries an id minted from the bytes it publishes, so the
+    // edit re-mints it. Paired by identity alone the old body and the new one are two nodes that never meet:
+    // one name yields a removal AND an addition, neither breaking, nothing compares the two bodies, and
+    // `--enforce` passes a break to the error contract every operation in the document shares.
+    $changes = changesByCode(diffOf(diffHoistedShape(diffErrorShape()), diffHoistedShape(diffErrorShape(withCode: false))));
+
+    expect($changes)->toHaveKey('schema.property-removed')
+        ->and($changes['schema.property-removed']->breaking)->toBeTrue()
+        ->and($changes['schema.property-removed']->path)->toBe('components.schemas.Error404.properties.code')
+        ->and($changes)->not->toHaveKey('schema.removed')
+        ->and($changes)->not->toHaveKey('schema.added');
+});
+
+it('still reads a hoisted shape that only changed component name as a rename', function (): void {
+    // Identity pairing stays primary, and this is the case only it can answer: same bytes, new name, so the
+    // id is the same and the two are one schema. Read by name first, this would be a removal and an addition.
+    $old = diffHoistedShape(diffErrorShape());
+
+    $new = $old;
+    $new['components']['schemas']['Problem'] = $old['components']['schemas']['Error404'];
+    unset($new['components']['schemas']['Error404']);
+    $new['components']['responses']['Error404']['content']['application/json']['schema']['$ref'] = '#/components/schemas/Problem';
+
+    $changes = changesByCode(diffOf($old, $new));
+
+    expect($changes)->not->toHaveKey('schema.removed')
+        ->and($changes)->not->toHaveKey('schema.added')
+        ->and($changes)->not->toHaveKey('schema.removed-still-referenced');
+});
+
+it('still reads a deleted schema and an unrelated new one as a removal and an addition', function (): void {
+    // One schema left unpaired on each side is not a pair: they are re-paired by the name they publish
+    // under, and these publish under two.
+    $old = diffHoistedShape(diffErrorShape());
+
+    $new = $old;
+    unset($new['components']['schemas']['Error404']);
+    $new['components']['responses']['Error404']['content']['application/json']['schema'] = diffErrorShape();
+    $new['components']['schemas']['Envelope'] = [
+        'x-docuccino' => ['id' => 'sch:v1:4444444444444444'],
+        'type' => 'object',
+        'properties' => ['data' => ['type' => 'string']],
+    ];
+
+    $changes = changesByCode(diffOf($old, $new));
+
+    expect($changes)->toHaveKey('schema.removed')
+        ->and($changes['schema.removed']->path)->toBe('components.schemas.Error404')
+        ->and($changes)->toHaveKey('schema.added')
+        ->and($changes['schema.added']->path)->toBe('components.schemas.Envelope');
 });
 
 // --- Hoisted parameters ($ref parameters) ----------------------------------
@@ -1133,6 +1249,33 @@ it('keeps every node when a qualifier spells a key another node claims outright'
     ]],
 ]);
 
+it('moves a node onto its counterpart\'s key only where one node on each side is left over', function (): void {
+    // Stated in the keys, because the repair writes into the same key space the pairing already used: land
+    // a re-paired node on a key another node holds and that node leaves the comparison entirely.
+    [$old, $new] = IdentityKeys::pairLeftoversByStructure(
+        [['X', 'name:A', 'F', 'old A'], ['Y', 'name:B', 'G', 'old B']],
+        [['Z', 'name:A', 'H', 'new A'], ['Y', 'name:C', 'I', 'renamed B']],
+    );
+
+    expect($old)->toBe(['Z' => 'old A', 'Y' => 'old B'])
+        ->and($new)->toBe(['Z' => 'new A', 'Y' => 'renamed B']);
+});
+
+it('leaves a structural key two left-over nodes claim alone', function (): void {
+    // Two nodes on one side claiming one structural key name no single node to pair with, and moving both
+    // onto the one counterpart's key would hide whichever moved first.
+    [$old, $new] = IdentityKeys::pairLeftoversByStructure(
+        [['X', 'name:A', 'F', 'old A'], ['W', 'name:A', 'G', 'old A twice']],
+        [['Z', 'name:A', 'H', 'new A']],
+    );
+
+    $nodes = [...array_values($old), ...array_values($new)];
+    sort($nodes);
+
+    expect($nodes)->toBe(['new A', 'old A', 'old A twice'])
+        ->and(array_intersect(array_keys($old), array_keys($new)))->toBe([]);
+});
+
 // --- Pages with no slug to key on -------------------------------------------
 
 /**
@@ -1497,7 +1640,19 @@ it('finds a requirement wherever an artifact states it', function (callable $req
 
         return $doc;
     }],
-    'as the bare map an artifact writes where a list belongs' => [function (array $doc): array {
+    // OAS says `security` IS a list, so each of these is malformed — and states one requirement all the
+    // same. Read as the list they are not, the scheme name is gone before anything asks who requires it.
+    'as a bare map on the document' => [function (array $doc): array {
+        $doc['security'] = ['apiKey' => []];
+
+        return $doc;
+    }],
+    'as a bare map on an operation' => [function (array $doc): array {
+        $doc['paths']['/api/v1/forms/{id}']['get']['security'] = ['apiKey' => []];
+
+        return $doc;
+    }],
+    'as a bare map on a path item under components' => [function (array $doc): array {
         $doc['components']['pathItems'] = ['Saved' => ['post' => [
             'security' => ['apiKey' => []],
             'responses' => ['200' => ['description' => 'Ack']],
@@ -1629,6 +1784,21 @@ it('reports a change to a schema nothing references, but never as breaking', fun
         ->and($changeset->isBreaking())->toBeFalse()
         ->and($changeset->unreferencedComponents)->toBe(['components.schemas.FormData'])
         ->and($changeset->toArray()['unreferencedComponents'])->toBe(['components.schemas.FormData']);
+});
+
+it('stands the same change down where the schema was re-minted along with the edit', function (): void {
+    // The edit reaches the comparison however the artifact minted the id — and a schema nothing reaches is
+    // still in no request and no response, so the stand-down is the same one.
+    $new = diffShrunkSchema(diffBase());
+    $new['components']['schemas']['FormData']['x-docuccino']['id'] = 'sch:v1:5555555555555555';
+
+    $changeset = diffOf(diffBase(), $new);
+    $changes = changesByCode($changeset);
+
+    expect($changes)->toHaveKey('schema.property-removed')
+        ->and($changes['schema.property-removed']->breaking)->toBeFalse()
+        ->and($changeset->isBreaking())->toBeFalse()
+        ->and($changeset->unreferencedComponents)->toBe(['components.schemas.FormData']);
 });
 
 it('keeps the very same change breaking once an operation references that schema', function (): void {
@@ -1891,20 +2061,16 @@ it('reads a pointer held only by a schema nothing reaches as no reference at all
         ->and($changes['schema.removed']->breaking)->toBeFalse();
 });
 
-it('does not call a schema re-minted under its own name a dangling pointer', function (): void {
-    // Pairing is by identity, so a schema whose id changed is a removal and an addition — and the name it
-    // was published under still resolves. Reading "the new document points at a name it no longer declares"
-    // off the removal alone invents a break out of a re-mint.
+it('reads a schema re-minted under its own name as the same schema', function (): void {
+    // Nothing about the published contract moved: the name resolves to a body stating exactly what it
+    // stated before. Read as a removal and an addition it would be neither compared nor, once the removal
+    // met the dangling check, reliably harmless.
     $old = diffReferencedSchema();
 
     $new = $old;
     $new['components']['schemas']['FormData']['x-docuccino']['id'] = 'sch:v1:1111111111111111';
 
-    $changes = changesByCode(diffOf($old, $new));
-
-    expect($changes)->toHaveKey('schema.removed')
-        ->and($changes['schema.removed']->breaking)->toBeFalse()
-        ->and($changes)->toHaveKey('schema.added');
+    expect(diffOf($old, $new)->isEmpty())->toBeTrue();
 });
 
 it('says in the rendered report which schema it stood down', function (): void {

@@ -55,7 +55,7 @@ final readonly class UirDocument
         }
 
         $servers = Hydrate::listOfMaps($data['servers'] ?? null);
-        $security = Hydrate::listOfMaps($data['security'] ?? null);
+        $security = Hydrate::securityRequirements($data['security'] ?? null);
         $tags = Hydrate::listOfMaps($data['tags'] ?? null);
 
         $paths = self::pathMap($data['paths'] ?? null);

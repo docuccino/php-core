@@ -28,6 +28,27 @@ it('returns a list of maps, dropping non-arrays, and null when not a list', func
     expect(Hydrate::listOfMaps(null))->toBeNull();
 });
 
+it('reads a security member the way OAS says it is written', function (): void {
+    expect(Hydrate::securityRequirements([['bearerAuth' => []]]))->toBe([['bearerAuth' => []]])
+        ->and(Hydrate::securityRequirements([]))->toBe([])
+        ->and(Hydrate::securityRequirements([[], ['bearerAuth' => ['read']]]))->toBe([[], ['bearerAuth' => ['read']]])
+        ->and(Hydrate::securityRequirements('nope'))->toBeNull()
+        ->and(Hydrate::securityRequirements(null))->toBeNull();
+});
+
+it('keeps the scheme name of a requirement written without the list around it', function (): void {
+    // A bare map is malformed and unambiguous: it states one requirement. Unwrapped the way `servers` and
+    // `tags` are, the names go and a document demanding a scheme reads as one demanding nothing.
+    expect(Hydrate::securityRequirements(['bearerAuth' => []]))->toBe([['bearerAuth' => []]])
+        ->and(Hydrate::securityRequirements(['bearerAuth' => [], 'apiKey' => ['read']]))
+        ->toBe([['bearerAuth' => [], 'apiKey' => ['read']]])
+        // Never an empty requirement alongside, which is how a document says credentials are optional.
+        ->and(Hydrate::securityRequirements(['bearerAuth' => 'not scopes']))->toBe([['bearerAuth' => 'not scopes']])
+        // And a list that also carries stray string keys keeps both halves.
+        ->and(Hydrate::securityRequirements([['apiKey' => []], 'skip', 'bearerAuth' => []]))
+        ->toBe([['apiKey' => []], ['bearerAuth' => []]]);
+});
+
 it('hydrates each map member of a list through the factory, dropping non-arrays', function (): void {
     $factory = static fn (array $m): string => (string) ($m['v'] ?? '');
 

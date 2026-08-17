@@ -15,7 +15,8 @@ namespace Docuccino\Core\Provenance;
  * and loses the rest. That is a degraded answer and deliberately so: the emitted document may carry
  * no absolute machine path, since the same code on two machines would then emit different bytes. That
  * is the whole rule, and this is the only place it is written down: {@see Source::fromLocation()}
- * relativises by coming here.
+ * relativises by coming here, and {@see MessagePaths} brings it the paths buried in a thrown message
+ * before that message becomes a diagnostic.
  *
  * The composer-ancestor walk is framework-neutral, so it lives in core; each adapter constructs it
  * with its own base path (the Laravel one binds `base_path()`).

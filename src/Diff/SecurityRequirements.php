@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Docuccino\Core\Diff;
 
 use Docuccino\Core\Document\UirDocument;
+use Docuccino\Core\Support\Hydrate;
 
 /**
  * Which `components.securitySchemes` a document actually makes a client satisfy. A requirement names a
@@ -60,9 +61,9 @@ final readonly class SecurityRequirements
     /**
      * A requirement is a map of scheme name → scopes, and `security` a list of them. A string key at either
      * level names a scheme, because an artifact that wrote the map without the list around it is malformed
-     * and still means one. That half reaches here only where `security` sits somewhere the document model
-     * keeps verbatim — a callback, a path item under `components`. Where the model owns the member it has
-     * already read the bare map as a list of one empty requirement, and the name is gone before this looks.
+     * and still means one. Where the model owns the member that recovery has happened already
+     * ({@see Hydrate::securityRequirements()}), so the key read here is the one under a `security` the
+     * model keeps verbatim — a callback, a path item under `components`.
      *
      * @param  array<array-key, mixed>  $requirements
      * @param  array<string, true>  $out
