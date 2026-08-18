@@ -7,6 +7,7 @@ use Docuccino\Core\Emit\EmitOptions;
 use Docuccino\Core\Emit\OpenApi30DownlevelEmitter;
 use Docuccino\Core\Emit\OpenApi31DownlevelEmitter;
 use Docuccino\Core\Emit\OpenApi32Emitter;
+use Docuccino\Core\Emit\Postman\CollectionEmitter;
 use Docuccino\Core\Emit\UirEmitter;
 
 /**
@@ -49,6 +50,12 @@ it('emits OpenAPI 3.0 JSON byte-identical to the committed golden', function (st
     $document = UirDocument::fromArray(loadFixture($fixture));
 
     expect((new OpenApi30DownlevelEmitter)->emit($document))->toBe(loadGolden($base.'.openapi30.json'));
+})->with(goldenFixtures());
+
+it('emits a Postman collection byte-identical to the committed golden', function (string $fixture, string $base): void {
+    $document = UirDocument::fromArray(loadFixture($fixture));
+
+    expect((new CollectionEmitter)->emit($document))->toBe(loadGolden($base.'.postman.json'));
 })->with(goldenFixtures());
 
 it('emits OpenAPI 3.2 YAML byte-identical to the committed golden', function (string $fixture, string $base): void {

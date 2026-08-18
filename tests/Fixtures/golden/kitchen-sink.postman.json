@@ -1,0 +1,392 @@
+{
+  "info": {
+    "name": "Kitchen Sink API",
+    "description": "Exercises the full UIR shape for the emitter/validator/diff battery.\n\n## Variables\n\nSet these collection variables before sending a request:\n\n- `apiKey` — The API key, sent as the `X-Api-Key` header.\n- `oauth2ClientId` — The OAuth client id.\n- `oauth2ClientSecret` — The OAuth client secret.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Widgets",
+      "description": "Widget management",
+      "item": [
+        {
+          "name": "Show a widget",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Trace-Id",
+                "value": "string",
+                "disabled": true
+              },
+              {
+                "key": "Cookie",
+                "value": "session=string",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/widgets/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "widgets",
+                ":id"
+              ],
+              "query": [
+                {
+                  "key": "precision",
+                  "value": "0.25",
+                  "disabled": true
+                }
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                }
+              ]
+            },
+            "description": "> **Deprecated.** This endpoint may be removed in a future version of the API.\n\n[Show endpoint](https://docs.example.com/widgets/show)"
+          },
+          "response": [
+            {
+              "name": "200 OK — The widget",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "X-Trace-Id",
+                    "value": "string",
+                    "disabled": true
+                  },
+                  {
+                    "key": "Cookie",
+                    "value": "session=string",
+                    "disabled": true
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/widgets/:id",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "widgets",
+                    ":id"
+                  ],
+                  "query": [
+                    {
+                      "key": "precision",
+                      "value": "0.25",
+                      "disabled": true
+                    }
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                    }
+                  ]
+                },
+                "description": "> **Deprecated.** This endpoint may be removed in a future version of the API.\n\n[Show endpoint](https://docs.example.com/widgets/show)"
+              },
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"café\": \"string\",\n  \"id\": \"string\",\n  \"weight\": 0,\n  \"日本語\": \"string\"\n}",
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "404 Not Found — Not found",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "X-Trace-Id",
+                    "value": "string",
+                    "disabled": true
+                  },
+                  {
+                    "key": "Cookie",
+                    "value": "session=string",
+                    "disabled": true
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/widgets/:id",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "widgets",
+                    ":id"
+                  ],
+                  "query": [
+                    {
+                      "key": "precision",
+                      "value": "0.25",
+                      "disabled": true
+                    }
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                    }
+                  ]
+                },
+                "description": "> **Deprecated.** This endpoint may be removed in a future version of the API.\n\n[Show endpoint](https://docs.example.com/widgets/show)"
+              },
+              "status": "Not Found",
+              "code": 404,
+              "header": [],
+              "cookie": [],
+              "body": "",
+              "_postman_previewlanguage": "text"
+            }
+          ]
+        },
+        {
+          "name": "Replace a widget",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"café\": \"string\",\n  \"id\": \"string\",\n  \"weight\": 0,\n  \"日本語\": \"string\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/widgets/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "widgets",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK — Updated",
+              "originalRequest": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"café\": \"string\",\n  \"id\": \"string\",\n  \"weight\": 0,\n  \"日本語\": \"string\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/widgets/:id",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "widgets",
+                    ":id"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "header": [],
+              "cookie": [],
+              "body": "",
+              "_postman_previewlanguage": "text"
+            }
+          ]
+        },
+        {
+          "name": "Query widgets via the 3.2 query method",
+          "request": {
+            "method": "QUERY",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"filter\": \"string\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/widgets/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "widgets",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK — Query results",
+              "originalRequest": {
+                "method": "QUERY",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"filter\": \"string\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/widgets/:id",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "widgets",
+                    ":id"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "header": [],
+              "cookie": [],
+              "body": "",
+              "_postman_previewlanguage": "text"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      {
+        "key": "key",
+        "value": "X-Api-Key",
+        "type": "string"
+      },
+      {
+        "key": "value",
+        "value": "{{apiKey}}",
+        "type": "string"
+      },
+      {
+        "key": "in",
+        "value": "header",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://{{tenant}}.example.com/{{basePath}}",
+      "type": "string"
+    },
+    {
+      "key": "basePath",
+      "value": "v2",
+      "type": "string"
+    },
+    {
+      "key": "tenant",
+      "value": "acme",
+      "type": "string",
+      "description": "Tenant slug"
+    },
+    {
+      "key": "apiKey",
+      "value": "",
+      "type": "string",
+      "description": "The API key, sent as the `X-Api-Key` header."
+    },
+    {
+      "key": "oauth2ClientId",
+      "value": "",
+      "type": "string",
+      "description": "The OAuth client id."
+    },
+    {
+      "key": "oauth2ClientSecret",
+      "value": "",
+      "type": "string",
+      "description": "The OAuth client secret."
+    }
+  ]
+}

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Extensions\Context;
 
+use Docuccino\Core\Emit\Formats;
 use Docuccino\Core\Extensions\Contracts\TagMapper;
 use Docuccino\Core\Support\Fqcn;
 use Docuccino\Core\Support\Hydrate;
@@ -129,13 +130,22 @@ final readonly class DocumentConfig
     }
 
     /**
-     * A deterministic fingerprint of this document's config — the sole owner of the config-hash (a
-     * fragment-cache key input and the document's `configHash`). Goes through {@see Json::stable()}
-     * so key order can't perturb it; falls back to the document key if the bag won't encode.
+     * A deterministic fingerprint of the config that SHAPES this document — the sole owner of the
+     * config-hash (a fragment-cache key input and the document's `configHash`). Goes through
+     * {@see Json::stable()} so key order can't perturb it; falls back to the document key if the bag
+     * won't encode.
+     *
+     * `export` is excluded on purpose: it says where artifacts are written, never what they contain.
+     * Folding it in would make adding a second export target rewrite the document's `configHash` —
+     * changing emitted bytes, and cold-busting every cached fragment — over a filename. Nothing a
+     * fragment holds can read an export destination, so this is not under-keying.
      */
     public function hash(): string
     {
-        $stable = Json::stable($this->raw);
+        $shaping = $this->raw;
+        unset($shaping['export']);
+
+        $stable = Json::stable($shaping);
 
         return hash('sha256', $stable === '' ? $this->key : $stable);
     }
@@ -312,11 +322,149 @@ final readonly class DocumentConfig
      * Where `docuccino:export` writes and the viewer's `artifact` source reads, from `export.path`,
      * defaulting to `docs/openapi.json`. May be relative — the adapter resolves it against the app
      * base path.
+     *
+     * The one-target shorthand. {@see exportTargets()} is the full answer, and reads this when
+     * `export.targets` is absent.
      */
     public function exportPath(): string
     {
-        $export = is_array($this->raw['export'] ?? null) ? $this->raw['export'] : [];
+        return is_string($this->export()['path'] ?? null) ? $this->export()['path'] : 'docs/openapi.json';
+    }
 
-        return is_string($export['path'] ?? null) ? $export['path'] : 'docs/openapi.json';
+    /**
+     * Every artifact this document writes: `export.targets` when it holds at least one usable entry,
+     * else the one-target {@see exportPath()} shorthand.
+     *
+     * Malformed entries are dropped rather than guessed at — {@see exportTargetIssues()} reports each
+     * one, and the adapter refuses to build until they are fixed, so nothing here ships a half-read
+     * target list.
+     *
+     * @return list<ExportTarget>
+     */
+    public function exportTargets(): array
+    {
+        $targets = [];
+
+        foreach ($this->rawTargets() as $entry) {
+            if (! is_array($entry)) {
+                continue;
+            }
+
+            $format = $entry['format'] ?? null;
+            $path = $entry['path'] ?? null;
+
+            if (is_string($format) && $format !== '' && is_string($path) && $path !== '') {
+                $targets[] = new ExportTarget($format, $path);
+            }
+        }
+
+        return $targets === []
+            ? [new ExportTarget(Formats::DEFAULT, $this->exportPath())]
+            : $targets;
+    }
+
+    /**
+     * Everything wrong with `export.targets`, as structured problems the adapter names and phrases.
+     * `index` is -1 for a problem with the list as a whole.
+     *
+     * @return list<array{index: int, problem: string, detail: string}>
+     */
+    public function exportTargetIssues(): array
+    {
+        $raw = $this->export()['targets'] ?? null;
+
+        if ($raw === null) {
+            return [];
+        }
+
+        if (! is_array($raw) || ! array_is_list($raw) || $raw === []) {
+            return [['index' => -1, 'problem' => 'empty', 'detail' => '']];
+        }
+
+        $issues = [];
+        foreach ($raw as $index => $entry) {
+            $issues = [...$issues, ...$this->entryIssues((int) $index, $entry)];
+        }
+
+        return [...$issues, ...$this->setIssues()];
+    }
+
+    /**
+     * @return list<array{index: int, problem: string, detail: string}>
+     */
+    private function entryIssues(int $index, mixed $entry): array
+    {
+        if (! is_array($entry)) {
+            return [['index' => $index, 'problem' => 'shape', 'detail' => get_debug_type($entry)]];
+        }
+
+        $format = $entry['format'] ?? null;
+        $path = $entry['path'] ?? null;
+
+        if (! is_string($format) || $format === '' || ! is_string($path) || $path === '') {
+            return [['index' => $index, 'problem' => 'shape', 'detail' => '']];
+        }
+
+        if (! Formats::supports($format)) {
+            return [['index' => $index, 'problem' => 'unknown-format', 'detail' => $format]];
+        }
+
+        $target = new ExportTarget($format, $path);
+
+        return $target->yamlUnsupported()
+            ? [['index' => $index, 'problem' => 'yaml-unsupported', 'detail' => $format.' => '.$path]]
+            : [];
+    }
+
+    /**
+     * Problems only the whole target set shows: two targets writing one file, two naming one format
+     * (which is what keeps `--format` and the viewer's pick order-independent), and an `export.path`
+     * left behind next to a list that supersedes it.
+     *
+     * @return list<array{index: int, problem: string, detail: string}>
+     */
+    private function setIssues(): array
+    {
+        $issues = [];
+        /** @var array<string, true> $seenPaths */
+        $seenPaths = [];
+        /** @var array<string, true> $seenFormats */
+        $seenFormats = [];
+
+        foreach ($this->exportTargets() as $index => $target) {
+            if (isset($seenPaths[$target->path])) {
+                $issues[] = ['index' => $index, 'problem' => 'duplicate-path', 'detail' => $target->path];
+            }
+            if (isset($seenFormats[$target->format])) {
+                $issues[] = ['index' => $index, 'problem' => 'duplicate-format', 'detail' => $target->format];
+            }
+
+            $seenPaths[$target->path] = true;
+            $seenFormats[$target->format] = true;
+        }
+
+        if (is_string($this->export()['path'] ?? null)) {
+            $issues[] = ['index' => -1, 'problem' => 'path-ignored', 'detail' => $this->exportPath()];
+        }
+
+        return $issues;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function export(): array
+    {
+        return Hydrate::map($this->raw['export'] ?? null);
+    }
+
+    /**
+     * @return list<mixed>
+     */
+    private function rawTargets(): array
+    {
+        $raw = $this->export()['targets'] ?? null;
+
+        return is_array($raw) && array_is_list($raw) ? $raw : [];
     }
 }

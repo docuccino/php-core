@@ -21,7 +21,7 @@ use Docuccino\Core\Document\UirDocument;
  *
  * @internal
  */
-final readonly class OpenApi32Emitter implements Emitter
+final readonly class OpenApi32Emitter implements ReportingEmitter
 {
     public function __construct(
         private Canonicalizer $canonicalizer = new Canonicalizer,
@@ -41,6 +41,12 @@ final readonly class OpenApi32Emitter implements Emitter
         return $options->yaml
             ? $this->yaml->serialize($canonical)
             : $this->serializer->serialize($canonical);
+    }
+
+    /** 3.2 is the UIR's own OAS version, so nothing is downlevelled and the report is always empty. */
+    public function emitWithReport(UirDocument $document, EmitOptions $options = new EmitOptions): EmitResult
+    {
+        return new EmitResult($this->emit($document, $options), new EmitReport);
     }
 
     /**

@@ -25,7 +25,7 @@ use Docuccino\Core\Support\Arr;
  *
  * @internal
  */
-final readonly class OpenApi31DownlevelEmitter implements Emitter
+final readonly class OpenApi31DownlevelEmitter implements ReportingEmitter
 {
     private const string DIALECT_32 = 'https://spec.openapis.org/oas/3.2/dialect/base';
 

@@ -1,0 +1,202 @@
+{
+  "info": {
+    "name": "Forms API",
+    "description": "## Variables\n\nSet these collection variables before sending a request:\n\n- `baseUrl` — The API base URL.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Forms",
+      "description": "Form management",
+      "item": [
+        {
+          "name": "List forms",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/forms",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "forms"
+              ],
+              "query": [
+                {
+                  "key": "filter[status]",
+                  "value": "draft",
+                  "disabled": true,
+                  "description": "One of: draft, published, archived."
+                },
+                {
+                  "key": "per_page",
+                  "value": "15",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK — Paginated list of forms",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/forms",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "forms"
+                  ],
+                  "query": [
+                    {
+                      "key": "filter[status]",
+                      "value": "draft",
+                      "disabled": true,
+                      "description": "One of: draft, published, archived."
+                    },
+                    {
+                      "key": "per_page",
+                      "value": "15",
+                      "disabled": true
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"data\": [\n    {\n      \"id\": 0,\n      \"title\": \"string\"\n    }\n  ]\n}",
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "401 Unauthorized — Unauthenticated",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/forms",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "forms"
+                  ],
+                  "query": [
+                    {
+                      "key": "filter[status]",
+                      "value": "draft",
+                      "disabled": true,
+                      "description": "One of: draft, published, archived."
+                    },
+                    {
+                      "key": "per_page",
+                      "value": "15",
+                      "disabled": true
+                    }
+                  ]
+                }
+              },
+              "status": "Unauthorized",
+              "code": 401,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/problem+json"
+                }
+              ],
+              "cookie": [],
+              "body": "{}",
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "422 Unprocessable Content — Validation failed",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/forms",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "forms"
+                  ],
+                  "query": [
+                    {
+                      "key": "filter[status]",
+                      "value": "draft",
+                      "disabled": true,
+                      "description": "One of: draft, published, archived."
+                    },
+                    {
+                      "key": "per_page",
+                      "value": "15",
+                      "disabled": true
+                    }
+                  ]
+                }
+              },
+              "status": "Unprocessable Content",
+              "code": 422,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/problem+json"
+                }
+              ],
+              "cookie": [],
+              "body": "{}",
+              "_postman_previewlanguage": "json"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "",
+      "type": "string",
+      "description": "The API base URL."
+    }
+  ]
+}

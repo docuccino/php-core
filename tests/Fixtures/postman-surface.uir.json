@@ -1,0 +1,207 @@
+{
+  "$schema": "https://spec.docuccino.app/uir/1.0/schema.json",
+  "uir": "1.0.0",
+  "openapi": "3.2.0",
+  "jsonSchemaDialect": "https://spec.openapis.org/oas/3.2/dialect/base",
+  "info": {
+    "title": "Surface API",
+    "version": "3.1.0",
+    "description": "Every auth shape, body mode and degradation the Postman emitter has to answer for.",
+    "termsOfService": "https://example.com/terms",
+    "contact": { "name": "API Team", "email": "api@example.com" },
+    "license": { "name": "MIT", "url": "https://opensource.org/licenses/MIT" }
+  },
+  "servers": [
+    { "url": "https://api.example.com/{version}", "description": "Production", "variables": { "version": { "enum": ["v1", "v2"] } } },
+    { "url": "https://sandbox.example.com", "description": "Sandbox" }
+  ],
+  "security": [{ "bearer": [] }],
+  "tags": [
+    { "name": "Accounts", "description": "Account management." }
+  ],
+  "paths": {
+    "/accounts": {
+      "post": {
+        "operationId": "accounts.store",
+        "summary": "Open an account",
+        "tags": ["Accounts"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "required": ["email"],
+                "properties": {
+                  "email": { "type": "string", "format": "email" },
+                  "referrer": { "type": "string", "description": "Who sent them." }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Account" } } } },
+          "400": { "description": "Bad request" },
+          "401": { "description": "Unauthenticated" },
+          "403": { "description": "Forbidden" },
+          "409": { "description": "Already exists" },
+          "422": { "description": "Validation failed" },
+          "429": { "description": "Too many requests" },
+          "default": { "description": "Unexpected" }
+        }
+      },
+      "get": {
+        "operationId": "accounts.index",
+        "summary": "List accounts",
+        "tags": ["Accounts", "Reporting"],
+        "security": [],
+        "parameters": [
+          {
+            "name": "filter",
+            "in": "query",
+            "style": "deepObject",
+            "explode": true,
+            "schema": {
+              "type": "object",
+              "properties": {
+                "status": { "type": "string", "enum": ["open", "closed"] },
+                "owner": { "type": "string" }
+              }
+            }
+          },
+          { "name": "sort", "in": "query", "schema": { "type": "array", "items": { "type": "string", "enum": ["name", "-name"] } } }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page",
+            "headers": { "X-Total-Count": { "description": "Total rows.", "schema": { "type": "integer", "minimum": 42 } } },
+            "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Account" } } } }
+          }
+        }
+      }
+    },
+    "/accounts/{id}/avatar": {
+      "put": {
+        "operationId": "accounts.avatar",
+        "summary": "Replace the avatar",
+        "tags": ["Accounts"],
+        "security": [{ "bearer": [], "apiKey": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["file"],
+                "properties": {
+                  "file": { "type": "string", "format": "binary" },
+                  "caption": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "204": { "description": "Replaced" } }
+      }
+    },
+    "/exports/{name}.csv": {
+      "get": {
+        "operationId": "exports.download",
+        "summary": "Download an export",
+        "tags": ["Reporting"],
+        "security": [{ "basic": [] }],
+        "parameters": [{ "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "The file", "content": { "text/csv": { "schema": { "type": "string" } } } } }
+      }
+    },
+    "/legacy": {
+      "post": {
+        "operationId": "legacy.push",
+        "summary": "Push a legacy payload",
+        "tags": ["Reporting"],
+        "security": [{ "digest": [] }],
+        "requestBody": { "content": { "application/xml": { "schema": { "type": "object", "properties": { "id": { "type": "integer" } } } } } },
+        "responses": { "200": { "description": "Accepted" } }
+      }
+    },
+    "/legacy/also-xml": {
+      "post": {
+        "operationId": "legacy.push2",
+        "summary": "Push another legacy payload",
+        "tags": ["Reporting"],
+        "requestBody": { "content": { "application/xml": { "schema": { "type": "object", "properties": { "id": { "type": "integer" } } } } } },
+        "responses": { "200": { "description": "Accepted" } }
+      }
+    },
+    "/tree": {
+      "get": {
+        "operationId": "tree.show",
+        "summary": "Show the category tree",
+        "security": [{ "oidc": [] }],
+        "responses": { "200": { "description": "The tree", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Node" } } } } }
+      }
+    },
+    "/vault": {
+      "get": {
+        "operationId": "vault.show",
+        "summary": "Show the vault",
+        "security": [{ "mtls": [] }],
+        "responses": { "200": { "description": "The vault" } }
+      }
+    },
+    "/scoped": {
+      "get": {
+        "operationId": "scoped.show",
+        "summary": "Show a scoped resource",
+        "security": [{ "oauth": ["accounts:read"] }],
+        "responses": { "200": { "description": "OK" } }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Account": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "email": { "type": "string", "format": "email" },
+          "closedAt": { "type": ["string", "null"], "format": "date-time" },
+          "tier": { "type": "string", "enum": ["free", "pro"] }
+        }
+      },
+      "Node": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "children": { "type": "array", "items": { "$ref": "#/components/schemas/Node" } }
+        }
+      }
+    },
+    "securitySchemes": {
+      "bearer": { "type": "http", "scheme": "bearer", "bearerFormat": "JWT" },
+      "basic": { "type": "http", "scheme": "basic" },
+      "digest": { "type": "http", "scheme": "digest" },
+      "apiKey": { "type": "apiKey", "in": "query", "name": "api_key" },
+      "sessionCookie": { "type": "apiKey", "in": "cookie", "name": "session" },
+      "oidc": { "type": "openIdConnect", "openIdConnectUrl": "https://auth.example.com/.well-known/openid-configuration" },
+      "mtls": { "type": "mutualTLS" },
+      "oauth": {
+        "type": "oauth2",
+        "flows": {
+          "implicit": { "authorizationUrl": "https://auth.example.com/authorize", "scopes": { "accounts:read": "Read accounts" } },
+          "password": { "tokenUrl": "https://auth.example.com/token", "scopes": { "accounts:read": "Read accounts" } },
+          "authorizationCode": {
+            "authorizationUrl": "https://auth.example.com/authorize",
+            "tokenUrl": "https://auth.example.com/token",
+            "scopes": { "accounts:read": "Read accounts", "accounts:write": "Write accounts" }
+          }
+        }
+      }
+    }
+  },
+  "x-docuccino": {
+    "document": { "id": "doc:surface", "configHash": "0000000000000000000000000000000000000000000000000000000000000000" },
+    "generator": { "name": "docuccino/core", "version": "1.0.0", "specVersion": "1.0.0" }
+  }
+}

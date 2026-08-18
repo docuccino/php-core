@@ -28,7 +28,7 @@ use Docuccino\Core\Support\Arr;
  *
  * @internal
  */
-final readonly class OpenApi30DownlevelEmitter implements Emitter
+final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
 {
     /** The latest 3.0 patch release; 3.0.x are editorial revisions of one spec. */
     private const string VERSION = '3.0.4';

@@ -1,0 +1,1115 @@
+{
+  "info": {
+    "name": "Surface API",
+    "description": "Every auth shape, body mode and degradation the Postman emitter has to answer for.\n\n## Servers\n\nThis collection targets the first server. The API is also served at:\n\n- `https://sandbox.example.com` — Sandbox\n\n## Variables\n\nSet these collection variables before sending a request:\n\n- `apiKey` — The API key, sent as the `api_key` query.\n- `basicUsername` — The username to authenticate with.\n- `basicPassword` — The password to authenticate with.\n- `bearer` — The bearer token sent in the `Authorization` header.\n- `digestUsername` — The username to authenticate with.\n- `digestPassword` — The password to authenticate with.\n- `oauthClientId` — The OAuth client id.\n- `oauthClientSecret` — The OAuth client secret.\n- `sessionCookie` — The API key, sent as the `session` cookie.\n\n## About\n\n- Contact: API Team <api@example.com>\n- Licence: [MIT](https://opensource.org/licenses/MIT)\n- Terms of service: https://example.com/terms",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Accounts",
+      "description": "Account management.",
+      "item": [
+        {
+          "name": "List accounts",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts"
+              ],
+              "query": [
+                {
+                  "key": "filter[owner]",
+                  "value": "string",
+                  "disabled": true
+                },
+                {
+                  "key": "filter[status]",
+                  "value": "open",
+                  "disabled": true,
+                  "description": "One of: open, closed."
+                },
+                {
+                  "key": "sort",
+                  "value": "name",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK — A page",
+              "originalRequest": {
+                "auth": {
+                  "type": "noauth"
+                },
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/accounts",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "accounts"
+                  ],
+                  "query": [
+                    {
+                      "key": "filter[owner]",
+                      "value": "string",
+                      "disabled": true
+                    },
+                    {
+                      "key": "filter[status]",
+                      "value": "open",
+                      "disabled": true,
+                      "description": "One of: open, closed."
+                    },
+                    {
+                      "key": "sort",
+                      "value": "name",
+                      "disabled": true
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "X-Total-Count",
+                  "value": "42",
+                  "description": "Total rows."
+                }
+              ],
+              "cookie": [],
+              "body": "[\n  {\n    \"closedAt\": \"2024-01-01T00:00:00Z\",\n    \"email\": \"user@example.com\",\n    \"id\": \"3fa85f64-5717-4562-b3fc-2c963f66afa6\",\n    \"tier\": \"free\"\n  }\n]",
+              "_postman_previewlanguage": "json"
+            }
+          ]
+        },
+        {
+          "name": "Open an account",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "email",
+                  "value": "user@example.com",
+                  "type": "text"
+                },
+                {
+                  "key": "referrer",
+                  "value": "string",
+                  "type": "text",
+                  "disabled": true,
+                  "description": "Who sent them."
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created — Created",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/x-www-form-urlencoded"
+                  },
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "urlencoded",
+                  "urlencoded": [
+                    {
+                      "key": "email",
+                      "value": "user@example.com",
+                      "type": "text"
+                    },
+                    {
+                      "key": "referrer",
+                      "value": "string",
+                      "type": "text",
+                      "disabled": true,
+                      "description": "Who sent them."
+                    }
+                  ]
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/accounts",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "accounts"
+                  ]
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"closedAt\": \"2024-01-01T00:00:00Z\",\n  \"email\": \"user@example.com\",\n  \"id\": \"3fa85f64-5717-4562-b3fc-2c963f66afa6\",\n  \"tier\": \"free\"\n}",
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "400 Bad Request — Bad request",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/x-www-form-urlencoded"
+                  },
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "urlencoded",
+                  "urlencoded": [
+                    {
+                      "key": "email",
+                      "value": "user@example.com",
+                      "type": "text"
+                    },
+                    {
+                      "key": "referrer",
+                      "value": "string",
+                      "type": "text",
+                      "disabled": true,
+                      "description": "Who sent them."
+                    }
+                  ]
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/accounts",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "accounts"
+                  ]
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "header": [],
+              "cookie": [],
+              "body": "",
+              "_postman_previewlanguage": "text"
+            },
+            {
+              "name": "401 Unauthorized — Unauthenticated",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/x-www-form-urlencoded"
+                  },
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "urlencoded",
+                  "urlencoded": [
+                    {
+                      "key": "email",
+                      "value": "user@example.com",
+                      "type": "text"
+                    },
+                    {
+                      "key": "referrer",
+                      "value": "string",
+                      "type": "text",
+                      "disabled": true,
+                      "description": "Who sent them."
+                    }
+                  ]
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/accounts",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "accounts"
+                  ]
+                }
+              },
+              "status": "Unauthorized",
+              "code": 401,
+              "header": [],
+              "cookie": [],
+              "body": "",
+              "_postman_previewlanguage": "text"
+            },
+            {
+              "name": "403 Forbidden — Forbidden",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/x-www-form-urlencoded"
+                  },
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "urlencoded",
+                  "urlencoded": [
+                    {
+                      "key": "email",
+                      "value": "user@example.com",
+                      "type": "text"
+                    },
+                    {
+                      "key": "referrer",
+                      "value": "string",
+                      "type": "text",
+                      "disabled": true,
+                      "description": "Who sent them."
+                    }
+                  ]
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/accounts",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "accounts"
+                  ]
+                }
+              },
+              "status": "Forbidden",
+              "code": 403,
+              "header": [],
+              "cookie": [],
+              "body": "",
+              "_postman_previewlanguage": "text"
+            },
+            {
+              "name": "409 Conflict — Already exists",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/x-www-form-urlencoded"
+                  },
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "urlencoded",
+                  "urlencoded": [
+                    {
+                      "key": "email",
+                      "value": "user@example.com",
+                      "type": "text"
+                    },
+                    {
+                      "key": "referrer",
+                      "value": "string",
+                      "type": "text",
+                      "disabled": true,
+                      "description": "Who sent them."
+                    }
+                  ]
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/accounts",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "accounts"
+                  ]
+                }
+              },
+              "status": "Conflict",
+              "code": 409,
+              "header": [],
+              "cookie": [],
+              "body": "",
+              "_postman_previewlanguage": "text"
+            },
+            {
+              "name": "422 Unprocessable Content — Validation failed",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/x-www-form-urlencoded"
+                  },
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "urlencoded",
+                  "urlencoded": [
+                    {
+                      "key": "email",
+                      "value": "user@example.com",
+                      "type": "text"
+                    },
+                    {
+                      "key": "referrer",
+                      "value": "string",
+                      "type": "text",
+                      "disabled": true,
+                      "description": "Who sent them."
+                    }
+                  ]
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/accounts",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "accounts"
+                  ]
+                }
+              },
+              "status": "Unprocessable Content",
+              "code": 422,
+              "header": [],
+              "cookie": [],
+              "body": "",
+              "_postman_previewlanguage": "text"
+            }
+          ]
+        },
+        {
+          "name": "Replace the avatar",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "multipart/form-data"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "caption",
+                  "value": "string",
+                  "type": "text",
+                  "disabled": true
+                },
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": null
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/accounts/:id/avatar",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                ":id",
+                "avatar"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "204 No Content — Replaced",
+              "originalRequest": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "multipart/form-data"
+                  }
+                ],
+                "body": {
+                  "mode": "formdata",
+                  "formdata": [
+                    {
+                      "key": "caption",
+                      "value": "string",
+                      "type": "text",
+                      "disabled": true
+                    },
+                    {
+                      "key": "file",
+                      "type": "file",
+                      "src": null
+                    }
+                  ]
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/accounts/:id/avatar",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "accounts",
+                    ":id",
+                    "avatar"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                    }
+                  ]
+                }
+              },
+              "status": "No Content",
+              "code": 204,
+              "header": [],
+              "cookie": [],
+              "body": "",
+              "_postman_previewlanguage": "text"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Reporting",
+      "item": [
+        {
+          "name": "Download an export",
+          "request": {
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{basicUsername}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{basicPassword}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "text/csv"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/exports/{name}.csv",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "exports",
+                "{name}.csv"
+              ],
+              "variable": [
+                {
+                  "key": "name",
+                  "value": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK — The file",
+              "originalRequest": {
+                "auth": {
+                  "type": "basic",
+                  "basic": [
+                    {
+                      "key": "username",
+                      "value": "{{basicUsername}}",
+                      "type": "string"
+                    },
+                    {
+                      "key": "password",
+                      "value": "{{basicPassword}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "text/csv"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/exports/{name}.csv",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "exports",
+                    "{name}.csv"
+                  ],
+                  "variable": [
+                    {
+                      "key": "name",
+                      "value": "string"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "text/csv"
+                }
+              ],
+              "cookie": [],
+              "body": "",
+              "_postman_previewlanguage": "text"
+            }
+          ]
+        },
+        {
+          "name": "Push a legacy payload",
+          "request": {
+            "auth": {
+              "type": "digest",
+              "digest": [
+                {
+                  "key": "username",
+                  "value": "{{digestUsername}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{digestPassword}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/xml"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "",
+              "options": {
+                "raw": {
+                  "language": "text"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/legacy",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "legacy"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK — Accepted",
+              "originalRequest": {
+                "auth": {
+                  "type": "digest",
+                  "digest": [
+                    {
+                      "key": "username",
+                      "value": "{{digestUsername}}",
+                      "type": "string"
+                    },
+                    {
+                      "key": "password",
+                      "value": "{{digestPassword}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/xml"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "",
+                  "options": {
+                    "raw": {
+                      "language": "text"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/legacy",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "legacy"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "header": [],
+              "cookie": [],
+              "body": "",
+              "_postman_previewlanguage": "text"
+            }
+          ]
+        },
+        {
+          "name": "Push another legacy payload",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/xml"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "",
+              "options": {
+                "raw": {
+                  "language": "text"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/legacy/also-xml",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "legacy",
+                "also-xml"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK — Accepted",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/xml"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "",
+                  "options": {
+                    "raw": {
+                      "language": "text"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/legacy/also-xml",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "legacy",
+                    "also-xml"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "header": [],
+              "cookie": [],
+              "body": "",
+              "_postman_previewlanguage": "text"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Show a scoped resource",
+      "request": {
+        "auth": {
+          "type": "oauth2",
+          "oauth2": [
+            {
+              "key": "grant_type",
+              "value": "authorizationCode",
+              "type": "string"
+            },
+            {
+              "key": "clientId",
+              "value": "{{oauthClientId}}",
+              "type": "string"
+            },
+            {
+              "key": "clientSecret",
+              "value": "{{oauthClientSecret}}",
+              "type": "string"
+            },
+            {
+              "key": "addTokenTo",
+              "value": "header",
+              "type": "string"
+            },
+            {
+              "key": "authUrl",
+              "value": "https://auth.example.com/authorize",
+              "type": "string"
+            },
+            {
+              "key": "accessTokenUrl",
+              "value": "https://auth.example.com/token",
+              "type": "string"
+            },
+            {
+              "key": "scope",
+              "value": "accounts:read",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/scoped",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "scoped"
+          ]
+        }
+      },
+      "response": [
+        {
+          "name": "200 OK — OK",
+          "originalRequest": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "grant_type",
+                  "value": "authorizationCode",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "{{oauthClientId}}",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "{{oauthClientSecret}}",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://auth.example.com/authorize",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://auth.example.com/token",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "accounts:read",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/scoped",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "scoped"
+              ]
+            }
+          },
+          "status": "OK",
+          "code": 200,
+          "header": [],
+          "cookie": [],
+          "body": "",
+          "_postman_previewlanguage": "text"
+        }
+      ]
+    },
+    {
+      "name": "Show the category tree",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/tree",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "tree"
+          ]
+        }
+      },
+      "response": [
+        {
+          "name": "200 OK — The tree",
+          "originalRequest": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tree",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tree"
+              ]
+            }
+          },
+          "status": "OK",
+          "code": 200,
+          "header": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n  \"children\": [\n    {}\n  ],\n  \"name\": \"string\"\n}",
+          "_postman_previewlanguage": "json"
+        }
+      ]
+    },
+    {
+      "name": "Show the vault",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/vault",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "vault"
+          ]
+        }
+      },
+      "response": [
+        {
+          "name": "200 OK — The vault",
+          "originalRequest": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/vault",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "vault"
+              ]
+            }
+          },
+          "status": "OK",
+          "code": 200,
+          "header": [],
+          "cookie": [],
+          "body": "",
+          "_postman_previewlanguage": "text"
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{bearer}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://api.example.com/{{version}}",
+      "type": "string"
+    },
+    {
+      "key": "version",
+      "value": "v1",
+      "type": "string"
+    },
+    {
+      "key": "apiKey",
+      "value": "",
+      "type": "string",
+      "description": "The API key, sent as the `api_key` query."
+    },
+    {
+      "key": "basicUsername",
+      "value": "",
+      "type": "string",
+      "description": "The username to authenticate with."
+    },
+    {
+      "key": "basicPassword",
+      "value": "",
+      "type": "string",
+      "description": "The password to authenticate with."
+    },
+    {
+      "key": "bearer",
+      "value": "",
+      "type": "string",
+      "description": "The bearer token sent in the `Authorization` header."
+    },
+    {
+      "key": "digestUsername",
+      "value": "",
+      "type": "string",
+      "description": "The username to authenticate with."
+    },
+    {
+      "key": "digestPassword",
+      "value": "",
+      "type": "string",
+      "description": "The password to authenticate with."
+    },
+    {
+      "key": "oauthClientId",
+      "value": "",
+      "type": "string",
+      "description": "The OAuth client id."
+    },
+    {
+      "key": "oauthClientSecret",
+      "value": "",
+      "type": "string",
+      "description": "The OAuth client secret."
+    },
+    {
+      "key": "sessionCookie",
+      "value": "",
+      "type": "string",
+      "description": "The API key, sent as the `session` cookie."
+    }
+  ]
+}

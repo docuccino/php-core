@@ -24,7 +24,7 @@ use Docuccino\Core\Document\UirDocument;
  *
  * @internal
  */
-final readonly class UirEmitter implements Emitter
+final readonly class UirEmitter implements ReportingEmitter
 {
     public function __construct(
         private Canonicalizer $canonicalizer = new Canonicalizer,
@@ -39,6 +39,12 @@ final readonly class UirEmitter implements Emitter
     public function emit(UirDocument $document, EmitOptions $options = new EmitOptions(provenance: ProvenanceLevel::Full)): string
     {
         return $this->emitArray($document->toArray(), $options);
+    }
+
+    /** UIR emission is never lossy — it is the full document — so the report is always empty. */
+    public function emitWithReport(UirDocument $document, EmitOptions $options = new EmitOptions(provenance: ProvenanceLevel::Full)): EmitResult
+    {
+        return new EmitResult($this->emit($document, $options), new EmitReport);
     }
 
     /**
