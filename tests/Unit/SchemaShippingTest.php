@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-use Docuccino\Core\Validation\Validator;
+use Docuccino\Core\SpecValidation\Validator;
 
 /**
  * Guards the packaging invariant behind item 1: the UIR schema must resolve from a real
@@ -36,9 +36,9 @@ it('resolves the schema from a simulated vendor/docuccino/core install layout', 
     $pkgRoot = $tmp.'/vendor/docuccino/core';
 
     // Recreate the exact shipped layout the package split produces (src/ + resources/, no monorepo root).
-    @mkdir($pkgRoot.'/src/Validation', 0755, true);
+    @mkdir($pkgRoot.'/src/SpecValidation', 0755, true);
     @mkdir($pkgRoot.'/resources/spec/uir/1.0', 0755, true);
-    copy(dirname(__DIR__, 2).'/src/Validation/Validator.php', $pkgRoot.'/src/Validation/Validator.php');
+    copy(dirname(__DIR__, 2).'/src/SpecValidation/Validator.php', $pkgRoot.'/src/SpecValidation/Validator.php');
     copy(Validator::defaultSchemaPath(), $pkgRoot.'/resources/spec/uir/1.0/schema.json');
 
     // Load the RELOCATED class body in a subprocess (avoids redeclaring the already-autoloaded class)
@@ -47,8 +47,8 @@ it('resolves the schema from a simulated vendor/docuccino/core install layout', 
     $script = $tmp.'/probe.php';
     file_put_contents($script, <<<PHP
         <?php
-        require '{$pkgRoot}/src/Validation/Validator.php';
-        \$path = \\Docuccino\\Core\\Validation\\Validator::defaultSchemaPath();
+        require '{$pkgRoot}/src/SpecValidation/Validator.php';
+        \$path = \\Docuccino\\Core\\SpecValidation\\Validator::defaultSchemaPath();
         echo \$path.PHP_EOL;
         echo (is_file(\$path) ? 'EXISTS' : 'MISSING').PHP_EOL;
         PHP);
@@ -62,11 +62,11 @@ it('resolves the schema from a simulated vendor/docuccino/core install layout', 
 
     // cleanup
     array_map('unlink', (array) glob($pkgRoot.'/resources/spec/uir/1.0/*'));
-    array_map('unlink', (array) glob($pkgRoot.'/src/Validation/*'));
+    array_map('unlink', (array) glob($pkgRoot.'/src/SpecValidation/*'));
     unlink($script);
     foreach ([
         $pkgRoot.'/resources/spec/uir/1.0', $pkgRoot.'/resources/spec/uir', $pkgRoot.'/resources/spec',
-        $pkgRoot.'/resources', $pkgRoot.'/src/Validation', $pkgRoot.'/src', $pkgRoot,
+        $pkgRoot.'/resources', $pkgRoot.'/src/SpecValidation', $pkgRoot.'/src', $pkgRoot,
         $tmp.'/vendor/docuccino', $tmp.'/vendor', $tmp,
     ] as $dir) {
         @rmdir($dir);

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Docuccino\Core\Validation;
+namespace Docuccino\Core\SpecValidation;
 
 use Docuccino\Core\Canonical\Canonicalizer;
 use Docuccino\Core\Canonical\CanonicalJsonSerializer;
@@ -17,6 +17,9 @@ use RuntimeException;
  * support (the OAS 3.2 dialect base) and it pulls in no illuminate/symfony. The document is
  * canonicalised and serialised before being decoded to opis's object graph, so validation sees the
  * exact bytes the emitter would write and empty objects show up as `{}`, not `[]`.
+ *
+ * The namespace says "spec" to keep this apart from `Extensions\Validation`, which is about a request's
+ * validation rules — an unrelated meaning of the same word.
  *
  * @internal
  */

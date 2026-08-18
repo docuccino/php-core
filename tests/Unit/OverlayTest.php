@@ -6,7 +6,7 @@ use Docuccino\Core\Diagnostics\Severity;
 use Docuccino\Core\Overlay\InvalidOverlayException;
 use Docuccino\Core\Overlay\OverlayApplier;
 use Docuccino\Core\Overlay\OverlayDocument;
-use Docuccino\Core\Validation\Validator;
+use Docuccino\Core\SpecValidation\Validator;
 
 /**
  * @return array<string, mixed>

@@ -8,6 +8,7 @@ use Docuccino\Core\Extensions\Context\RouteContext;
 use Docuccino\Core\Extensions\Context\RouteDescriptor;
 use Docuccino\Core\Extensions\Contracts\RouteBindingFieldSchemaResolver;
 use Docuccino\Core\Extensions\Contracts\RouteBindingSchemaResolver;
+use Docuccino\Core\Extensions\ResolvedExtensions;
 use Docuccino\Core\Inference\ActionRef;
 use Docuccino\Core\Tests\Support\StubTypeEngine;
 
@@ -24,8 +25,10 @@ $context = static function (array $keyResolvers, array $fieldResolvers): RouteCo
         attributes: new AttributeSet,
         engine: new StubTypeEngine,
         document: new DocumentConfig('default', []),
-        routeBindingSchemaResolvers: $keyResolvers,
-        routeBindingFieldSchemaResolvers: $fieldResolvers,
+        extensions: new ResolvedExtensions(
+            routeBindingSchemaResolvers: $keyResolvers,
+            routeBindingFieldSchemaResolvers: $fieldResolvers,
+        ),
     );
 };
 

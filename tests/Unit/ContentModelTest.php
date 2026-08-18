@@ -7,7 +7,7 @@ use Docuccino\Core\Document\Content\ContentExtension;
 use Docuccino\Core\Document\Content\NavNode;
 use Docuccino\Core\Document\Content\Page;
 use Docuccino\Core\Document\DocumentExtension;
-use Docuccino\Core\Validation\Validator;
+use Docuccino\Core\SpecValidation\Validator;
 
 /**
  * The content value objects (round-trip fidelity), the canonical member order for the content

@@ -4,16 +4,11 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Extensions\Context;
 
-use Docuccino\Core\Extensions\Contracts\ExceptionToResponse;
 use Docuccino\Core\Extensions\Contracts\OperationExtension;
-use Docuccino\Core\Extensions\Contracts\PayloadMediaTypeResolver;
-use Docuccino\Core\Extensions\Contracts\ResponseAnalysisTarget;
-use Docuccino\Core\Extensions\Contracts\ResponseStatusResolver;
 use Docuccino\Core\Extensions\Contracts\RouteBindingFieldSchemaResolver;
-use Docuccino\Core\Extensions\Contracts\RouteBindingSchemaResolver;
-use Docuccino\Core\Extensions\Contracts\RuleTransformer;
-use Docuccino\Core\Extensions\Contracts\TypeToSchema;
+use Docuccino\Core\Extensions\Contracts\TypeSchemaConverter;
 use Docuccino\Core\Extensions\Contracts\ValidationRulesToSchema;
+use Docuccino\Core\Extensions\ResolvedExtensions;
 use Docuccino\Core\Extensions\Schema\ComponentRegistry;
 use Docuccino\Core\Extensions\Schema\SchemaConverter;
 use Docuccino\Core\Extensions\Validation\DefaultValidationRulesToSchema;
@@ -45,7 +40,7 @@ final class RouteContext
 {
     private ?ActionAnalysis $analysis = null;
 
-    private ?SchemaConverter $converter = null;
+    private ?TypeSchemaConverter $converter = null;
 
     private ?RepresentationPolicy $representation = null;
 
@@ -58,20 +53,16 @@ final class RouteContext
     private RouteNotes $notes;
 
     /**
-     * @param  list<TypeToSchema>  $typeMappers  the resolved type→schema chain (document-wide)
-     * @param  list<ExceptionToResponse>  $exceptionMappers  the resolved exception→response chain
-     * @param  list<RuleTransformer>  $ruleTransformers  the resolved validation rule vocabulary chain
      * @param  list<string>  $pathParameters  route template parameter names, in template order
      * @param  list<string>  $optionalPathParameters  the subset declared optional (`{param?}`)
      * @param  array<string, string>  $routeBindings  path parameter name → bound model FQCN
      * @param  array<string, string>  $routeBindingFields  path parameter name → the column it binds on,
      *                                                     for the subset that names one (`{post:slug}`)
-     * @param  list<ResponseAnalysisTarget>  $responseAnalysisTargets  gated success-body analysis redirects
-     * @param  list<ResponseStatusResolver>  $responseStatusResolvers  gated success-status overrides
-     * @param  list<PayloadMediaTypeResolver>  $payloadMediaTypeResolvers  gated response media-type matchers
-     * @param  list<RouteBindingSchemaResolver>  $routeBindingSchemaResolvers  gated route-key schema typers
-     * @param  list<RouteBindingFieldSchemaResolver>  $routeBindingFieldSchemaResolvers  gated `{post:slug}` column typers
      * @param  ?string  $formRequestClass  the FormRequest class type-hinted on the action, if any
+     *
+     * @internal an extension is HANDED a context and never builds one, so the constructor is not part
+     * of the author surface — which is what lets it take the whole internal {@see ResolvedExtensions}
+     * the chain methods read off. The promoted public properties are still swept by the boundary test.
      */
     public function __construct(
         public readonly RouteDescriptor $route,
@@ -79,9 +70,7 @@ final class RouteContext
         public readonly AttributeSet $attributes,
         public readonly TypeEngine $engine,
         public readonly DocumentConfig $document,
-        public readonly array $typeMappers = [],
-        public readonly array $exceptionMappers = [],
-        public readonly array $ruleTransformers = [],
+        private readonly ResolvedExtensions $extensions = new ResolvedExtensions,
         public readonly array $pathParameters = [],
         public readonly array $optionalPathParameters = [],
         public readonly array $routeBindings = [],
@@ -91,13 +80,8 @@ final class RouteContext
         public readonly ?SourcePathResolver $pathResolver = null,
         public readonly ?string $documentedMethod = null,
         public readonly bool $allowsTrashedBindings = false,
-        public readonly array $responseAnalysisTargets = [],
-        public readonly array $responseStatusResolvers = [],
-        public readonly array $payloadMediaTypeResolvers = [],
-        public readonly array $routeBindingSchemaResolvers = [],
         public readonly ?string $formRequestClass = null,
         public readonly array $routeBindingFields = [],
-        public readonly array $routeBindingFieldSchemaResolvers = [],
     ) {
         $this->dependencies = new RouteDependencies;
         $this->notes = new RouteNotes;
@@ -106,7 +90,7 @@ final class RouteContext
     /** Where to analyse the success body, or null to analyse the dispatched action itself. */
     public function responseAnalysisRedirect(): ?ResponseAnalysisRedirect
     {
-        foreach ($this->responseAnalysisTargets as $target) {
+        foreach ($this->extensions->responseAnalysisTargets as $target) {
             $redirect = $target->resolve($this);
             if ($redirect !== null) {
                 return $redirect;
@@ -123,7 +107,7 @@ final class RouteContext
      */
     public function mapThrow(ThrownException $throw): ?MappedResponse
     {
-        foreach ($this->exceptionMappers as $mapper) {
+        foreach ($this->extensions->exceptionToResponse as $mapper) {
             if (! $mapper->supports($throw, $this)) {
                 continue;
             }
@@ -144,7 +128,7 @@ final class RouteContext
      */
     public function resolveResponseStatuses(string $fqcn): array
     {
-        foreach ($this->responseStatusResolvers as $resolver) {
+        foreach ($this->extensions->responseStatusResolvers as $resolver) {
             $statuses = $resolver->resolveStatuses($this, $fqcn);
             if ($statuses !== []) {
                 return $statuses;
@@ -157,7 +141,7 @@ final class RouteContext
     /** The media type a response payload serialises as, defaulting to `application/json`. */
     public function payloadMediaType(DType $payload): string
     {
-        foreach ($this->payloadMediaTypeResolvers as $resolver) {
+        foreach ($this->extensions->payloadMediaTypeResolvers as $resolver) {
             $mediaType = $resolver->mediaTypeFor($payload);
             if ($mediaType !== null) {
                 return $mediaType;
@@ -174,7 +158,7 @@ final class RouteContext
      */
     public function routeBindingKeySchema(string $modelFqcn): ?array
     {
-        foreach ($this->routeBindingSchemaResolvers as $resolver) {
+        foreach ($this->extensions->routeBindingSchemaResolvers as $resolver) {
             $schema = $resolver->keySchemaFor($modelFqcn);
             if ($schema !== null) {
                 return $schema;
@@ -193,7 +177,7 @@ final class RouteContext
      */
     public function routeBindingFieldSchema(string $modelFqcn, string $field): ?array
     {
-        foreach ($this->routeBindingFieldSchemaResolvers as $resolver) {
+        foreach ($this->extensions->routeBindingFieldSchemaResolvers as $resolver) {
             $schema = $resolver->fieldSchemaFor($this, $modelFqcn, $field);
             if ($schema !== null) {
                 return $schema;
@@ -292,7 +276,7 @@ final class RouteContext
     /** The rule→schema chain driver over the resolved transformers; feed it a {@see RuleSet}. */
     public function validation(): ValidationRulesToSchema
     {
-        return $this->validation ??= new DefaultValidationRulesToSchema($this->ruleTransformers);
+        return $this->validation ??= new DefaultValidationRulesToSchema($this->extensions->ruleTransformers);
     }
 
     /**
@@ -325,13 +309,14 @@ final class RouteContext
 
     /**
      * The type→schema converter for this route, hoisting into the document-wide component
-     * registry so cross-route `$ref`s stay consistent and named schemas dedupe once.
+     * registry so cross-route `$ref`s stay consistent and named schemas dedupe once. The contract is
+     * what extensions may rely on; {@see SchemaConverter} behind it is internal.
      */
-    public function converter(): SchemaConverter
+    public function converter(): TypeSchemaConverter
     {
         // The converter gets this route's dependency bag so mappers recording files via
         // SchemaContext::dependsOn() widen the fragment cache key — see dependencies().
-        return $this->converter ??= new SchemaConverter($this->typeMappers, $this->engine, $this->components, $this->representation(), $this->dependencies);
+        return $this->converter ??= new SchemaConverter($this->extensions->typeToSchema, $this->engine, $this->components, $this->representation(), $this->dependencies);
     }
 
     /** The document's representation policy, resolved once. */

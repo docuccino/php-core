@@ -33,6 +33,10 @@ use UnitEnum;
  * {@see ExtensionSorter}. One instance may satisfy several contracts and then appears in every
  * matching partition.
  *
+ * It travels whole — into the pipeline, and on into every RouteContext — rather than being
+ * unpacked chain by chain at each seam. That is the point: a new contract adds a partition HERE and a
+ * reader in whatever consumes it, and no signature in between has to grow a parameter for it.
+ *
  * @internal
  */
 final readonly class ResolvedExtensions

@@ -90,6 +90,11 @@ final class SchemaDraft
         return $this->guard;
     }
 
+    /**
+     * @internal Not part of the frozen extension-author surface — it hands back the (also
+     * `@internal`) {@see SchemaObject} document model. Extensions hand drafts back to the pipeline,
+     * which freezes them.
+     */
     public function freeze(): SchemaObject
     {
         $data = $this->guard->resolved();

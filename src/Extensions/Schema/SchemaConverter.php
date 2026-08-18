@@ -8,6 +8,7 @@ use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Extensions\Context\RepresentationPolicy;
 use Docuccino\Core\Extensions\Context\RouteDependencies;
 use Docuccino\Core\Extensions\Contracts\SchemaContext;
+use Docuccino\Core\Extensions\Contracts\TypeSchemaConverter;
 use Docuccino\Core\Extensions\Contracts\TypeToSchema;
 use Docuccino\Core\Inference\DType\DType;
 use Docuccino\Core\Inference\TypeEngine;
@@ -18,9 +19,12 @@ use Docuccino\Core\Inference\TypeEngine;
  * mappers compose without knowing the chain. It's also the {@see SchemaContext} they receive, and it
  * keeps the lowest confidence any mapper reported across a whole top-level conversion.
  *
+ * The class is internal; what extensions are handed is {@see TypeSchemaConverter}, which is the public
+ * half of this — so a method only declared here is not surface anyone may rely on.
+ *
  * @internal
  */
-final class SchemaConverter implements SchemaContext
+final class SchemaConverter implements TypeSchemaConverter
 {
     private float $confidence = 1.0;
 

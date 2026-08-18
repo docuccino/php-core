@@ -5,7 +5,7 @@ declare(strict_types=1);
 use Docuccino\Core\Diff\DocumentDiffer;
 use Docuccino\Core\Document\UirDocument;
 use Docuccino\Core\Emit\UirEmitter;
-use Docuccino\Core\Validation\Validator;
+use Docuccino\Core\SpecValidation\Validator;
 
 /**
  * Edge coverage (QA M8): the smallest document the schema permits must survive the whole pipeline,

@@ -5,9 +5,12 @@ declare(strict_types=1);
 namespace Docuccino\Core\Emit;
 
 /**
- * The shared shape of every emitter: it names the format it produces. `emit()` is intentionally not
- * on here yet — its `EmitOptions` signature isn't settled, so the concrete emitters converge on it
- * before it's frozen into the interface.
+ * The shared shape of every emitter: it names the format it produces.
+ *
+ * @internal Third-party emitters are not supported yet: {@see Formats} is a closed table and no
+ * registration path accepts an emitter from outside core, so implementing this buys nothing. It is
+ * promoted to public API once that path exists and `emit()`'s {@see EmitOptions} signature settles —
+ * which is also why `emit()` isn't declared here and {@see ReportingEmitter} carries it instead.
  */
 interface Emitter
 {

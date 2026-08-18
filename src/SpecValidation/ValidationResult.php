@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Docuccino\Core\Validation;
+namespace Docuccino\Core\SpecValidation;
 
 /**
  * The outcome of validating a document against the bundled UIR JSON Schema.

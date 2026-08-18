@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-use Docuccino\Core\Validation\Validator;
+use Docuccino\Core\SpecValidation\Validator;
 
 beforeEach(function (): void {
     $this->validator = new Validator;

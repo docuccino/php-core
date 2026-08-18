@@ -114,6 +114,11 @@ final class ParameterDraft
         return self::keyFor($this->in, $this->name);
     }
 
+    /**
+     * @internal Not part of the frozen extension-author surface — it hands back the (also
+     * `@internal`) {@see Parameter} document model. Extensions hand drafts back to the pipeline,
+     * which freezes them.
+     */
     public function freeze(): Parameter
     {
         $resolved = $this->guard->resolved();

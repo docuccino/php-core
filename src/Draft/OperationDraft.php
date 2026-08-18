@@ -160,6 +160,11 @@ final class OperationDraft
         }
     }
 
+    /**
+     * @internal Not part of the frozen extension-author surface — it hands back the (also
+     * `@internal`) {@see Operation} document model. Extensions hand drafts back to the pipeline,
+     * which freezes them.
+     */
     public function freeze(): Operation
     {
         $resolved = $this->guard->resolved();

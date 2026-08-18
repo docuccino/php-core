@@ -5,7 +5,7 @@ declare(strict_types=1);
 use Docuccino\Core\Document\UirDocument;
 use Docuccino\Core\Emit\EmitOptions;
 use Docuccino\Core\Emit\OpenApi30DownlevelEmitter;
-use Docuccino\Core\Validation\Validator;
+use Docuccino\Core\SpecValidation\Validator;
 
 /**
  * The 3.0 downlevel. It chains off the 3.1 emitter, so the tests here cover only what 3.0 itself

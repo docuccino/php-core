@@ -200,6 +200,11 @@ final class ResponseDraft
         return $this;
     }
 
+    /**
+     * @internal Not part of the frozen extension-author surface — it hands back the (also
+     * `@internal`) {@see ResponseObject} document model. Extensions hand drafts back to the pipeline,
+     * which freezes them.
+     */
     public function freeze(): ResponseObject
     {
         $resolved = $this->guard->resolved();

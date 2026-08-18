@@ -10,6 +10,13 @@ use Docuccino\Core\Support\Hydrate;
  * The immutable in-memory model of a UIR document. Modelled members are typed; anything
  * not modelled (including arbitrary `x-*` members) is preserved verbatim in `rest`, so
  * `fromArray()` → `toArray()` is a faithful round trip.
+ *
+ * Its audience is the WHOLE-DOCUMENT stage: the framework adapter, which builds one and hands it to
+ * the emitters, the differ and the schema validator. It stays public because that hand-off crosses
+ * the package boundary — everything it is made of ({@see Components}, {@see Operation},
+ * {@see Parameter}, …) is `@internal`, so read those through the emitters and the differ rather
+ * than reaching in. Extension authors never see this model at all: they work with drafts and
+ * contexts, and a document transformer gets `Extensions\Document\UirDocumentDraft` instead.
  */
 final readonly class UirDocument
 {

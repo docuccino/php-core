@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Docuccino\Core\Validation;
+namespace Docuccino\Core\SpecValidation;
 
 /**
  * A single schema-validation failure, anchored to a JSON pointer into the document.
