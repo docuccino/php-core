@@ -479,7 +479,13 @@ final readonly class Url
      */
     private function sample(array $parameter, array $components): string
     {
-        return $this->scalar($this->examples->value($this->schemaOf($parameter, $components), $components));
+        // A Parameter Object illustrates itself the same way a media type does, beside its schema rather
+        // than inside it, and what the author wrote there beats anything derived from the shape.
+        $stated = $this->examples->illustration($parameter);
+
+        return $this->scalar($stated === null
+            ? $this->examples->value($this->schemaOf($parameter, $components), $components)
+            : $stated[0]);
     }
 
     private function scalar(mixed $value): string

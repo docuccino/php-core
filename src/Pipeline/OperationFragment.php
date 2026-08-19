@@ -24,6 +24,9 @@ use Docuccino\Core\Support\Hydrate;
  * they travel here and are replayed into their {@see RouteNoteCollector} on every build, so the summary a
  * document transformer publishes is the same warm as cold ({@see RouteNotes}).
  *
+ * A webhook is the same unit under a different heading — an operation the API promises to call — so it
+ * travels as a fragment too, with {@see $webhook} set and {@see $path} holding its name.
+ *
  * @internal
  */
 final readonly class OperationFragment
@@ -39,6 +42,7 @@ final readonly class OperationFragment
      * @param  array<string, string>  $componentResponseBases  name → the name that response asked for, for the same reason the schema bases exist
      * @param  array<string, string>  $componentSecuritySchemeBases  name → the name that scheme asked for
      * @param  array<string, array<string, list<string>>>  $notes  {@see RouteNotes} channel → key → values this route contributed to a document-level aggregate
+     * @param  bool  $webhook  whether this operation is published under `webhooks` instead of `paths`, in which case {@see $path} is the webhook's name rather than a path template
      */
     public function __construct(
         public string $path,
@@ -55,6 +59,7 @@ final readonly class OperationFragment
         public array $componentResponseBases = [],
         public array $componentSecuritySchemeBases = [],
         public array $notes = [],
+        public bool $webhook = false,
     ) {}
 
     /**
@@ -105,6 +110,7 @@ final readonly class OperationFragment
             componentResponseBases: ComponentNames::rekey($this->componentResponseBases, $responses),
             componentSecuritySchemeBases: ComponentNames::rekey($this->componentSecuritySchemeBases, $securitySchemes),
             notes: $this->notes,
+            webhook: $this->webhook,
         );
     }
 
@@ -152,6 +158,7 @@ final readonly class OperationFragment
             'componentResponseBases' => $this->componentResponseBases,
             'componentSecuritySchemeBases' => $this->componentSecuritySchemeBases,
             'notes' => $this->notes,
+            'webhook' => $this->webhook,
         ];
     }
 
@@ -181,6 +188,7 @@ final readonly class OperationFragment
                 static fn (mixed $values): array => Hydrate::stringList($values),
                 $keys,
             )),
+            webhook: ($data['webhook'] ?? null) === true,
         );
     }
 }

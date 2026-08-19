@@ -32,6 +32,36 @@ it('keeps operation identity across path-parameter renames', function (): void {
     expect($a)->toBe($b);
 });
 
+it('identifies a webhook as an operation, keyed by its name', function (): void {
+    $id = $this->ids->webhookId('doc:default', 'post', 'form.submitted');
+
+    expect($id)->toStartWith('op:v1:')
+        ->and(substr($id, strlen('op:v1:')))->toMatch('/^[a-z2-7]{16}$/')
+        ->and($this->ids->webhookId('doc:default', 'POST', 'form.submitted'))->toBe($id);
+});
+
+it('keeps a webhook apart from the path template that spells it the same way', function (): void {
+    // A webhook name is not a path, and nothing stops one being called `/forms`. With one identity
+    // space between them, an edit to either would read as an edit to the other.
+    expect($this->ids->webhookId('doc:default', 'GET', '/forms'))
+        ->not->toBe($this->ids->operationId('doc:default', 'GET', '/forms'));
+});
+
+it('reads a webhook name verbatim, braces and all', function (): void {
+    // A path template's `{param}` is normalised away because renaming a parameter changes no contract.
+    // A webhook name has no parameters — every byte of it is the name a consumer subscribes to.
+    expect($this->ids->webhookId('doc:default', 'POST', 'form.{id}'))
+        ->not->toBe($this->ids->webhookId('doc:default', 'POST', 'form.{other}'));
+});
+
+it('breaks webhook identity when the name, the method or the document changes', function (): void {
+    $base = $this->ids->webhookId('doc:default', 'POST', 'form.submitted');
+
+    expect($this->ids->webhookId('doc:default', 'POST', 'form.deleted'))->not->toBe($base)
+        ->and($this->ids->webhookId('doc:default', 'PUT', 'form.submitted'))->not->toBe($base)
+        ->and($this->ids->webhookId('doc:public', 'POST', 'form.submitted'))->not->toBe($base);
+});
+
 it('breaks operation identity when the URI changes', function (): void {
     $a = $this->ids->operationId('doc:default', 'GET', '/forms/{form}');
     $b = $this->ids->operationId('doc:default', 'GET', '/forms/{form}/fields');

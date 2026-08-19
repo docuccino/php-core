@@ -21,9 +21,22 @@ final class FileDigests
     /** @var array<string, string|false> */
     private array $digests = [];
 
+    /** @var array<string, bool> */
+    private array $present = [];
+
     /** The file's digest, or `false` when it cannot be read — same contract as `hash_file`. */
     public function of(string $file): string|false
     {
         return $this->digests[$file] ??= @hash_file('sha256', $file);
+    }
+
+    /**
+     * Whether the file is there at all. `hash_file` answers `false` for absent and for unreadable
+     * alike, and the two are different facts to a cache: absent is a state a build can record and
+     * recognise again, unreadable is one it can only give up on.
+     */
+    public function exists(string $file): bool
+    {
+        return $this->present[$file] ??= @is_file($file);
     }
 }

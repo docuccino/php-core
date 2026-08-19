@@ -5,10 +5,11 @@ declare(strict_types=1);
 namespace Docuccino\Core\Extensions\BuiltIn;
 
 use Docuccino\Attributes\DeprecatedOperation;
-use Docuccino\Attributes\DescriptionFromFile;
+use Docuccino\Attributes\Description;
 use Docuccino\Attributes\Group;
 use Docuccino\Attributes\Internal;
 use Docuccino\Attributes\OperationId;
+use Docuccino\Attributes\Summary;
 use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
 use Docuccino\Core\Draft\OperationDraft;
@@ -18,12 +19,17 @@ use Docuccino\Core\Extensions\Contracts\OperationPhase;
 use Docuccino\Core\Patch\Contribution;
 use Docuccino\Core\Support\ConfinedPath;
 use Docuccino\Core\Support\Fqcn;
+use Docuccino\Core\Support\LineEndings;
 
 /**
  * The overrides layer: docblock summary/description (docblock precedence), then the operation
  * attributes (attribute precedence) — `#[OperationId]` over the default route-name strategy,
  * `#[Group]` → tags, `#[DeprecatedOperation]`, `#[Internal]` → `x-internal`, and
- * `#[DescriptionFromFile]` loading a markdown file into the description.
+ * `#[Summary]` / `#[Description]` over whatever the docblock said.
+ *
+ * The last pair exist because one docblock serves two readers. Prose written for whoever maintains
+ * the action is not prose an API consumer can use, and until these there was no way to say the second
+ * thing without deleting the first.
  */
 final class AttributeOverridesExtension implements OperationExtension
 {
@@ -66,38 +72,85 @@ final class AttributeOverridesExtension implements OperationExtension
             $operation->set('x-internal', true, $attribute);
         }
 
-        $fromFile = $context->attributes->first(DescriptionFromFile::class);
-        if ($fromFile !== null) {
-            $this->applyDescriptionFromFile($operation, $context, $fromFile->path, $attribute);
+        $summary = $context->attributes->first(Summary::class);
+        if ($summary !== null) {
+            $operation->setSummary($summary->text, $attribute);
+        }
+
+        $description = $context->attributes->first(Description::class);
+        if ($description !== null) {
+            $this->applyDescription($operation, $context, $description, $attribute);
         }
     }
 
     /**
-     * Load a `#[DescriptionFromFile]` markdown file into the description, confined to the app base
-     * path: a path escaping the base is rejected with an error diagnostic and never read. A file that
-     * is read joins the route's dependencies so editing it invalidates the cached operation.
+     * Apply `#[Description]`: inline `text:`, or the markdown file `file:` names. Exactly one of them
+     * says something, so a declaration carrying both or neither is diagnosed and writes nothing —
+     * picking one would document prose the author never chose.
      */
-    private function applyDescriptionFromFile(OperationDraft $operation, RouteContext $context, string $path, Contribution $attribute): void
+    private function applyDescription(OperationDraft $operation, RouteContext $context, Description $description, Contribution $attribute): void
     {
-        $resolved = ConfinedPath::resolve($this->basePath, $path);
-        if ($resolved === null) {
-            $context->components->addDiagnostic(new Diagnostic(
-                severity: Severity::Error,
-                code: 'description-file.escapes-base-path',
-                message: sprintf('#[DescriptionFromFile] path "%s" escapes the application base path and was rejected.', $path),
-                source: $context->actionSource(),
-            ));
+        if (($description->text === null) === ($description->file === null)) {
+            $this->report($context, Severity::Warning, 'attribute.description-unusable', sprintf(
+                'A #[Description] here carries %s; the description was not documented.',
+                $description->text === null ? 'neither `text:` nor `file:`' : 'both `text:` and `file:`',
+            ), 'One of `text:` (inline prose) or `file:` (a markdown file under the application root) per declaration.');
 
             return;
         }
 
-        $contents = @file_get_contents($resolved);
-        if ($contents === false) {
+        if ($description->file !== null) {
+            $this->applyDescriptionFile($operation, $context, $description->file, $attribute);
+
+            return;
+        }
+
+        $operation->setDescription($description->text, $attribute);
+    }
+
+    /**
+     * Load the markdown file `#[Description(file: …)]` names, confined to the app base path: a path
+     * escaping the base is rejected with an error diagnostic and never read. The resolved path joins
+     * the route's dependencies whether or not the read worked, so a file that isn't there yet still
+     * rebuilds this route when it appears — an absent file hashes to nothing, and gaining contents is
+     * a change like any other.
+     */
+    private function applyDescriptionFile(OperationDraft $operation, RouteContext $context, string $path, Contribution $attribute): void
+    {
+        $resolved = ConfinedPath::resolve($this->basePath, $path);
+        if ($resolved === null) {
+            $this->report($context, Severity::Error, 'description-file.escapes-base-path', sprintf(
+                '#[Description] file "%s" escapes the application base path and was rejected.',
+                $path,
+            ), 'Point `file:` at a path inside the application, written relative to its root.');
+
             return;
         }
 
         $context->dependencies()->addFile($resolved);
-        $operation->setDescription(rtrim($contents, "\n"), $attribute);
+
+        $contents = @file_get_contents($resolved);
+        if ($contents === false) {
+            $this->report($context, Severity::Warning, 'description-file.missing', sprintf(
+                '#[Description] file "%s" could not be read; the description was not documented.',
+                $path,
+            ), 'Create the file, or correct the path — it is read relative to the application root.');
+
+            return;
+        }
+
+        $operation->setDescription(rtrim(LineEndings::normalize($contents), "\n"), $attribute);
+    }
+
+    private function report(RouteContext $context, Severity $severity, string $code, string $message, string $help): void
+    {
+        $context->components->addDiagnostic(new Diagnostic(
+            severity: $severity,
+            code: $code,
+            message: $message,
+            source: $context->actionSource(),
+            help: $help,
+        ));
     }
 
     /**

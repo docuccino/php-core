@@ -5,8 +5,8 @@ declare(strict_types=1);
 use Docuccino\Core\TypeGrammar\DocBlockReader;
 
 /**
- * The docblock prose reader: summary/description split, @example, `@property` tags, and the degradation
- * branches. read() is built on summary(), so this pins the split's own edge cases.
+ * The docblock prose reader: the summary/description split and the `@summary`/`@description` tags that
+ * override it, @example, `@property` tags, and the degradation branches.
  */
 it('splits leading prose into summary (first paragraph) and description (remainder)', function (): void {
     $read = (new DocBlockReader)->read("/**\n * First summary line.\n *\n * Second paragraph with detail.\n */");
@@ -35,6 +35,46 @@ it('returns both null for an empty or absent docblock', function (?string $doc):
     'empty docblock' => ['/** */'],
     'null' => [null],
 ]);
+
+// The tag rung and the prose rung are the same precedence layer, so which of them a field takes has
+// to be decided here rather than by a patch. An explicit tag wins, and it wins for BOTH fields at
+// once — the prose above it was written for whoever maintains the action.
+it('takes summary and description from @summary and @description over the prose', function (): void {
+    $read = (new DocBlockReader)->read(
+        "/**\n * Internal — dispatched by the worker.\n *\n * Retries three times.\n *\n * @summary Void an invoice\n *\n * @description Marks an invoice void. This cannot be undone.\n */"
+    );
+
+    expect($read['summary'])->toBe('Void an invoice')
+        ->and($read['description'])->toBe('Marks an invoice void. This cannot be undone.');
+});
+
+it('drops the free prose from both fields once either tag is declared', function (string $doc, ?string $summary, ?string $description): void {
+    expect((new DocBlockReader)->read($doc))->toBe(['summary' => $summary, 'description' => $description]);
+})->with([
+    '@summary alone' => ["/**\n * Internal note.\n *\n * More of it.\n *\n * @summary Send an invoice\n */", 'Send an invoice', null],
+    '@description alone' => ["/**\n * Internal note.\n *\n * More of it.\n *\n * @description The long version.\n */", null, 'The long version.'],
+]);
+
+it('ignores an empty tag and falls back to the prose convention', function (): void {
+    // A tag with nothing after it states nothing, so it cannot be what the author meant to publish.
+    $read = (new DocBlockReader)->read("/**\n * Summary.\n *\n * Detail.\n *\n * @summary\n */");
+
+    expect($read['summary'])->toBe('Summary.')
+        ->and($read['description'])->toBe('Detail.');
+});
+
+it('keeps the first of a repeated @summary or @description', function (): void {
+    $read = (new DocBlockReader)->read("/**\n * @summary First\n *\n * @summary Second\n *\n * @description One\n *\n * @description Two\n */");
+
+    expect($read['summary'])->toBe('First')
+        ->and($read['description'])->toBe('One');
+});
+
+it('reads a @description that runs over several lines', function (): void {
+    $read = (new DocBlockReader)->read("/**\n * @description Marks an invoice void.\n * Voiding is permanent.\n */");
+
+    expect($read['description'])->toBe("Marks an invoice void.\nVoiding is permanent.");
+});
 
 it('reads the first non-empty @example and the leading prose via summary()', function (): void {
     $reader = new DocBlockReader;

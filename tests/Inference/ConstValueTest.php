@@ -99,3 +99,24 @@ it('carries a reason on an unknown value', function (): void {
     expect($value->render())->toBe('<unknown: non-constant>')
         ->and(ConstValue::fromArray($value->toArray())->render())->toBe($value->render());
 });
+
+it('keeps a spread standing as a run of values nobody can count', function (): void {
+    // Distinct from `unknown`, which is ONE value that would not fold: dropping this one to a plain
+    // unknown leaves the slot after it looking absent, and absent reads as a parameter's default.
+    $value = ConstValue::spread('unplaceable factory arg');
+
+    expect($value->isSpread())->toBeTrue()
+        ->and($value->isScalar())->toBeFalse()
+        ->and($value->render())->toBe('...<unplaceable factory arg>')
+        ->and(ConstValue::fromArray($value->toArray())->toArray())->toBe($value->toArray());
+});
+
+it('renders and round-trips a spread sitting in a descriptor argument list', function (): void {
+    $value = ConstValue::descriptor('Illuminate\\Validation\\Rule::in', [
+        ConstValue::scalar('any'),
+        ConstValue::spread('unplaceable factory arg'),
+    ]);
+
+    expect($value->render())->toBe("Rule::in('any', ...<unplaceable factory arg>)")
+        ->and(ConstValue::fromArray($value->toArray())->toArray())->toBe($value->toArray());
+});

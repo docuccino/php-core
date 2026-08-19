@@ -4,12 +4,13 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\TypeGrammar;
 
+use PHPStan\PhpDocParser\Ast\PhpDoc\PhpDocNode;
 use PHPStan\PhpDocParser\Ast\PhpDoc\PhpDocTextNode;
 
 /**
- * The one docblock reader: prose, `@example`, `@property`/`@param`/`@var` tags — each with its
- * `@phpstan-`/`@psalm-` prefixed forms — and the OAS summary/description split, all through the shared
- * {@see PhpDocParserStack} so there's a single grammar.
+ * The one docblock reader: prose, `@example`, `@summary`/`@description`, `@property`/`@param`/`@var`
+ * tags — each with its `@phpstan-`/`@psalm-` prefixed forms — and the OAS summary/description split,
+ * all through the shared {@see PhpDocParserStack} so there's a single grammar.
  */
 final class DocBlockReader
 {
@@ -36,20 +37,8 @@ final class DocBlockReader
     public function summary(?string $docComment): ?string
     {
         $node = $this->stack->parseDocBlock($docComment);
-        if ($node === null) {
-            return null;
-        }
 
-        foreach ($node->children as $child) {
-            if ($child instanceof PhpDocTextNode) {
-                $text = trim($child->text);
-                if ($text !== '') {
-                    return $text;
-                }
-            }
-        }
-
-        return null;
+        return $node === null ? null : $this->prose($node);
     }
 
     /**
@@ -141,29 +130,35 @@ final class DocBlockReader
     /** The first `@example` value, or null. */
     public function example(?string $docComment): ?string
     {
-        $node = $this->stack->parseDocBlock($docComment);
-        if ($node === null) {
-            return null;
-        }
-
-        foreach ($node->getTagsByName('@example') as $tag) {
-            $value = trim((string) $tag->value);
-            if ($value !== '') {
-                return $value;
-            }
-        }
-
-        return null;
+        return $this->tag($this->stack->parseDocBlock($docComment), '@example');
     }
 
     /**
-     * The leading prose split into an OAS `summary` (first paragraph) and `description` (the rest).
+     * The OAS `summary` and `description` a docblock states.
+     *
+     * By convention that is the leading prose split in two — first paragraph, then the rest — which
+     * makes one text serve both the maintainer reading the code and the consumer reading the document.
+     * `@summary` and `@description` are the way out of that: declaring EITHER hands the consumer-facing
+     * text over to the tags outright, and the free prose above them stops feeding both fields. So a
+     * note about who may call this never reaches the document, and a field the author didn't state
+     * comes out empty rather than half-quoting a note meant for somebody else.
      *
      * @return array{summary: ?string, description: ?string}
      */
     public function read(?string $docComment): array
     {
-        $prose = $this->summary($docComment);
+        $node = $this->stack->parseDocBlock($docComment);
+        if ($node === null) {
+            return ['summary' => null, 'description' => null];
+        }
+
+        $summary = $this->tag($node, '@summary');
+        $description = $this->tag($node, '@description');
+        if ($summary !== null || $description !== null) {
+            return ['summary' => $summary, 'description' => $description];
+        }
+
+        $prose = $this->prose($node);
         if ($prose === null) {
             return ['summary' => null, 'description' => null];
         }
@@ -176,5 +171,37 @@ final class DocBlockReader
             'summary' => $summary === '' ? null : $summary,
             'description' => ($description === null || $description === '') ? null : $description,
         ];
+    }
+
+    /** The first non-empty value of a free-form tag, or null. */
+    private function tag(?PhpDocNode $node, string $name): ?string
+    {
+        if ($node === null) {
+            return null;
+        }
+
+        foreach ($node->getTagsByName($name) as $tag) {
+            $value = trim((string) $tag->value);
+            if ($value !== '') {
+                return $value;
+            }
+        }
+
+        return null;
+    }
+
+    /** The leading prose of an already-parsed docblock. */
+    private function prose(PhpDocNode $node): ?string
+    {
+        foreach ($node->children as $child) {
+            if ($child instanceof PhpDocTextNode) {
+                $text = trim($child->text);
+                if ($text !== '') {
+                    return $text;
+                }
+            }
+        }
+
+        return null;
     }
 }

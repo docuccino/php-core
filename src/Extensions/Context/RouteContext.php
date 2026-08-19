@@ -59,6 +59,12 @@ final class RouteContext
      * @param  array<string, string>  $routeBindingFields  path parameter name → the column it binds on,
      *                                                     for the subset that names one (`{post:slug}`)
      * @param  ?string  $formRequestClass  the FormRequest class type-hinted on the action, if any
+     * @param  ?string  $operationId  this operation's stable `x-docuccino.id`, already minted. The
+     *                                pipeline stamps it onto the frozen node afterwards, but an
+     *                                extension keyed on IDENTITY — a recorded example, filed under the
+     *                                id so it survives a route rename — needs it while the draft is
+     *                                still open, and deriving it a second time is how two answers to
+     *                                "which operation is this" start disagreeing
      *
      * @internal an extension is HANDED a context and never builds one, so the constructor is not part
      * of the author surface — which is what lets it take the whole internal {@see ResolvedExtensions}
@@ -82,6 +88,7 @@ final class RouteContext
         public readonly bool $allowsTrashedBindings = false,
         public readonly ?string $formRequestClass = null,
         public readonly array $routeBindingFields = [],
+        public readonly ?string $operationId = null,
     ) {
         $this->dependencies = new RouteDependencies;
         $this->notes = new RouteNotes;

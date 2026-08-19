@@ -149,3 +149,28 @@ it('ignores a non-array export bag', function (mixed $export): void {
     'null' => [null],
     'int' => [7],
 ]);
+
+it('reads export.mock_faker_key, and treats anything but a non-empty string as unset', function (mixed $configured, ?string $expected): void {
+    expect(configWithExport(['mock_faker_key' => $configured])->mockFakerKey())->toBe($expected);
+})->with([
+    'the conventional member' => ['x-faker', 'x-faker'],
+    'any other member name' => ['x-mock', 'x-mock'],
+    'an empty string is unset' => ['', null],
+    'a null is unset' => [null, null],
+    'a non-string is unset' => [['x-faker'], null],
+]);
+
+it('leaves mock hints out of the OAS artifacts by default', function (): void {
+    // Nothing configured is pure OpenAPI, which is the answer a consumer of the artifact wants; the
+    // UIR carries the hints regardless.
+    expect((new DocumentConfig(key: 'default', info: []))->mockFakerKey())->toBeNull();
+});
+
+it('keeps the faker key out of the config hash, as everything under export is', function (): void {
+    // It shapes the projection, never the document — so turning it on must not rewrite a byte of the
+    // UIR, and must not cold-bust every cached fragment.
+    $bare = new DocumentConfig(key: 'default', info: [], raw: ['export' => ['path' => 'docs/openapi.json']]);
+    $withKey = configWithExport(['path' => 'docs/openapi.json', 'mock_faker_key' => 'x-faker']);
+
+    expect($withKey->hash())->toBe($bare->hash());
+});

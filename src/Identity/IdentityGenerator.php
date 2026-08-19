@@ -55,6 +55,16 @@ final readonly class IdentityGenerator
         return $this->id('op', $tuple);
     }
 
+    /**
+     * A webhook is an operation and carries an operation id, but it is keyed by a NAME rather than a
+     * path template — so the name goes in verbatim (there is nothing to normalise) behind a `webhook`
+     * discriminator, which is what keeps a webhook called `/forms` apart from the path `/forms`.
+     */
+    public function webhookId(string $documentId, string $method, string $name): string
+    {
+        return $this->id('op', [$documentId, 'webhook', strtoupper($method), $name]);
+    }
+
     public function parameterId(string $operationId, string $in, string $name): string
     {
         return $this->id('par', [$operationId, $in, $name]);

@@ -83,6 +83,21 @@ it('prefers the most faithful format the viewer can serve, in table order', func
         ->and(Formats::DEFAULT)->toBe('openapi-3.2');
 });
 
+it('prefers UIR for a contract, and names only formats the table knows', function (): void {
+    // Its own order, not the table's: the viewer wants the most faithful OpenAPI, the contract
+    // assertions want the one artifact that carries provenance.
+    expect(Formats::contractPreference())->toBe(['uir', 'openapi-3.2', 'openapi-3.1', 'openapi-3.0']);
+
+    foreach (Formats::contractPreference() as $format) {
+        expect(Formats::supports($format))->toBeTrue();
+    }
+});
+
+it('leaves a collection out of the contract preference, being a client and not a contract', function (): void {
+    expect(Formats::contractPreference())->not->toContain('postman')
+        ->and(Formats::supports('postman'))->toBeTrue();
+});
+
 it('carries no shared default for provenance, so each format keeps its own', function (): void {
     // UirEmitter defaults to Full and the OpenAPI emitters to None; Formats::emit() takes options
     // explicitly so neither default can leak into the other.

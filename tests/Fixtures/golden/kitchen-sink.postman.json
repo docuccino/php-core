@@ -20,7 +20,7 @@
               },
               {
                 "key": "X-Trace-Id",
-                "value": "string",
+                "value": "abc-123",
                 "disabled": true
               },
               {
@@ -41,7 +41,7 @@
               "query": [
                 {
                   "key": "precision",
-                  "value": "0.25",
+                  "value": "0.1",
                   "disabled": true
                 }
               ],
@@ -66,7 +66,7 @@
                   },
                   {
                     "key": "X-Trace-Id",
-                    "value": "string",
+                    "value": "abc-123",
                     "disabled": true
                   },
                   {
@@ -87,7 +87,7 @@
                   "query": [
                     {
                       "key": "precision",
-                      "value": "0.25",
+                      "value": "0.1",
                       "disabled": true
                     }
                   ],
@@ -109,7 +109,7 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"café\": \"string\",\n  \"id\": \"string\",\n  \"weight\": 0,\n  \"日本語\": \"string\"\n}",
+              "body": "{\n  \"id\": \"w1\",\n  \"weight\": 3.14,\n  \"café\": \"oui\",\n  \"日本語\": \"はい\"\n}",
               "_postman_previewlanguage": "json"
             },
             {
@@ -123,7 +123,7 @@
                   },
                   {
                     "key": "X-Trace-Id",
-                    "value": "string",
+                    "value": "abc-123",
                     "disabled": true
                   },
                   {
@@ -144,7 +144,7 @@
                   "query": [
                     {
                       "key": "precision",
-                      "value": "0.25",
+                      "value": "0.1",
                       "disabled": true
                     }
                   ],

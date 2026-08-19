@@ -22,7 +22,7 @@ use SplFileInfo;
  * sorted order and nothing time- or machine-dependent reaches a page — source paths are
  * project-root-relative — so the output is deterministic.
  *
- * A relative `content.dir` is confined to the app base path, same as `#[DescriptionFromFile]`; an
+ * A relative `content.dir` is confined to the app base path, same as `#[Description(file: …)]`; an
  * absolute dir is trusted as developer-authored config. A configured-but-missing directory warns;
  * an unset or empty one compiles to nothing, leaving no empty content key.
  *
@@ -42,7 +42,7 @@ final readonly class ContentCompiler
             return [new CompiledContent, []];
         }
 
-        $dir = $this->resolveDir($configured);
+        $dir = ConfinedPath::configuredDir($this->basePath, $configured);
         if ($dir === null) {
             return [new CompiledContent, [new Diagnostic(
                 severity: Severity::Warning,
@@ -68,18 +68,6 @@ final readonly class ContentCompiler
         }
 
         return [new CompiledContent($pages), []];
-    }
-
-    /**
-     * Relative dirs are confined to the base path, absolute ones used verbatim. Null = escaped.
-     */
-    private function resolveDir(string $configured): ?string
-    {
-        if (str_starts_with($configured, '/')) {
-            return $configured;
-        }
-
-        return ConfinedPath::resolve($this->basePath, $configured);
     }
 
     private function compilePage(string $absolute, string $dir, string $prefix): CompiledPage

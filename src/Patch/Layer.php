@@ -19,6 +19,18 @@ enum Layer: int
     case Overlay = 45;
     case Config = 50;
 
+    /** The rung a provenance `layer` string names, or null when it names none we know. */
+    public static function fromLabel(string $label): ?self
+    {
+        foreach (self::cases() as $case) {
+            if ($case->label() === $label) {
+                return $case;
+            }
+        }
+
+        return null;
+    }
+
     /** The provenance `layer` string. */
     public function label(): string
     {

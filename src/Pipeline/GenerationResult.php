@@ -33,4 +33,16 @@ final readonly class GenerationResult
 
         return false;
     }
+
+    /** True when anything was reported at $floor or louder — the raw question a severity gate starts from. */
+    public function hasAtLeast(Severity $floor): bool
+    {
+        foreach ($this->diagnostics as $diagnostic) {
+            if ($diagnostic->severity->atLeast($floor)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }

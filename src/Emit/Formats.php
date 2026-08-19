@@ -45,6 +45,16 @@ final class Formats
     ];
 
     /**
+     * Formats a committed artifact can be read back as the contract itself, best first. UIR leads
+     * because provenance only survives there — an OpenAPI artifact still describes the contract, it
+     * just cannot say who wrote a schema — so this is an order of its own rather than the table's.
+     * Postman is absent: a collection is a client, not a contract.
+     *
+     * @var list<string>
+     */
+    private const array CONTRACT_PREFERENCE = ['uir', 'openapi-3.2', 'openapi-3.1', 'openapi-3.0'];
+
+    /**
      * Every known format id, in table order — the order a "valid values are…" message lists them.
      *
      * @return list<string>
@@ -63,6 +73,18 @@ final class Formats
     public static function serialisesYaml(string $format): bool
     {
         return self::TABLE[$format][1] ?? false;
+    }
+
+    /**
+     * {@see CONTRACT_PREFERENCE}, for the contract assertions: which artifact they read, and which they
+     * can compare semantically at all. A function of the table, never of the order a user happened to
+     * list their export targets in.
+     *
+     * @return list<string>
+     */
+    public static function contractPreference(): array
+    {
+        return self::CONTRACT_PREFERENCE;
     }
 
     /**

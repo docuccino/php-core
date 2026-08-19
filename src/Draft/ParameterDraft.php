@@ -30,6 +30,14 @@ final class ParameterDraft
      */
     private array $facts = [];
 
+    /**
+     * The named Example Objects an author declared ({@see declareExamples()}), name-sorted so adding
+     * one never moves another.
+     *
+     * @var array<string, array<string, mixed>>
+     */
+    private array $declaredExamples = [];
+
     private ?string $id = null;
 
     public function __construct(
@@ -63,6 +71,20 @@ final class ParameterDraft
     public function schema(): SchemaDraft
     {
         return $this->schema;
+    }
+
+    /**
+     * Attach named Example Objects to this parameter. Additive rather than guarded — nothing contests
+     * an example — and OAS makes `example` and `examples` mutually exclusive, so a declared map
+     * replaces the singular `example` a parameter attribute wrote.
+     *
+     * @param  array<string, array<string, mixed>>  $named
+     */
+    public function declareExamples(array $named): void
+    {
+        $merged = $this->declaredExamples + $named;
+        ksort($merged);
+        $this->declaredExamples = $merged;
     }
 
     /** Record an additive `x-docuccino` semantic fact on this parameter (e.g. a route-binding note). */
@@ -128,6 +150,11 @@ final class ParameterDraft
         $deprecated = Hydrate::boolOrNull($resolved['deprecated'] ?? null);
 
         unset($resolved['description'], $resolved['required'], $resolved['deprecated']);
+
+        if ($this->declaredExamples !== []) {
+            unset($resolved['example']);
+            $resolved['examples'] = $this->declaredExamples;
+        }
 
         $schema = $this->schema->freeze();
         $schemaOrNull = $schema->toArray() === [] ? null : $schema;

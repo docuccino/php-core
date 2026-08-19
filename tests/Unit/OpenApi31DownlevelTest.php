@@ -121,3 +121,39 @@ it('emits deterministic 3.1 output including in YAML', function (): void {
     expect($yaml)->toContain('openapi: 3.1.1');
     expect($yaml)->toBe($this->emitter->emit($document, (new EmitOptions)->withYaml()));
 });
+
+it('projects a mock hint onto the configured faker member, the same as 3.2 does', function (): void {
+    // Nothing about a hint is 3.2-only — it leaves as an `x-` extension, which every OAS version takes
+    // — so the downlevel has no reason to drop it and no reason to warn.
+    $document = UirDocument::fromArray([
+        'uir' => '1.0.0',
+        'openapi' => '3.2.0',
+        'info' => ['title' => 'API', 'version' => '1.0.0'],
+        'paths' => [],
+        'components' => ['schemas' => ['S' => [
+            'type' => 'object',
+            'properties' => ['email' => ['type' => 'string', 'x-docuccino' => ['mock' => ['faker' => 'safeEmail']]]],
+        ]]],
+    ]);
+
+    $result = $this->emitter->emitWithReport($document, (new EmitOptions)->withMockFakerKey('x-faker'));
+    $decoded = json_decode($result->output, true, flags: JSON_THROW_ON_ERROR);
+
+    expect($decoded['components']['schemas']['S']['properties']['email'])->toBe(['type' => 'string', 'x-faker' => 'safeEmail'])
+        ->and($result->report->diagnostics)->toBe([]);
+});
+
+it('drops a mock hint entirely when no faker key is configured', function (): void {
+    $document = UirDocument::fromArray([
+        'uir' => '1.0.0',
+        'openapi' => '3.2.0',
+        'info' => ['title' => 'API', 'version' => '1.0.0'],
+        'paths' => [],
+        'components' => ['schemas' => ['S' => [
+            'type' => 'object',
+            'properties' => ['email' => ['type' => 'string', 'x-docuccino' => ['mock' => ['faker' => 'safeEmail']]]],
+        ]]],
+    ]);
+
+    expect($this->emitter->emit($document))->not->toContain('safeEmail');
+});

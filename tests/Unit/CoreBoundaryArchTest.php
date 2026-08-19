@@ -27,12 +27,13 @@ arch('core never depends on the Laravel adapter')
 /**
  * The other half of the `@internal` boundary, which an import scan cannot see: a public method may
  * HAND BACK an internal type, and every caller of `$context->converter()->toSchema(…)` then depends on
- * an internal class's methods while importing nothing. So the extension-author surface — the contracts
- * plus the two context objects an extension is passed — may only name types that are public
- * themselves. Annotate the method `@internal` if it really is pipeline-only (Draft::guard()), or
- * promote the return type to a contract (TypeSchemaConverter).
+ * an internal class's methods while importing nothing. So a public surface — the extension-author
+ * contracts plus the two context objects an extension is passed, and the contract-testing surface an
+ * adapter's assertions are built on — may only name types that are public themselves. Annotate the
+ * method `@internal` if it really is pipeline-only (Draft::guard()), or promote the return type to a
+ * contract (TypeSchemaConverter).
  */
-it('never hands an extension author a type marked @internal', function (): void {
+it('never hands a public API consumer a type marked @internal', function (): void {
     $internal = static function (?ReflectionType $type): array {
         $named = match (true) {
             $type instanceof ReflectionUnionType, $type instanceof ReflectionIntersectionType => $type->getTypes(),
@@ -56,6 +57,23 @@ it('never hands an extension author a type marked @internal', function (): void 
     foreach ((array) glob(__DIR__.'/../../src/Extensions/Contracts/*.php') as $file) {
         $surface[] = 'Docuccino\Core\Extensions\Contracts\\'.basename((string) $file, '.php');
     }
+
+    // Everything under Contract/ that is not itself `@internal`: the index, the checker, the values a
+    // caller reads off a result, the coverage and example reports.
+    foreach ((array) glob(__DIR__.'/../../src/Contract/{,*/}*.php', GLOB_BRACE) as $file) {
+        $namespace = str_contains(dirname((string) $file), '/Contract/')
+            ? 'Docuccino\Core\Contract\\'.basename(dirname((string) $file)).'\\'
+            : 'Docuccino\Core\Contract\\';
+        $class = $namespace.basename((string) $file, '.php');
+
+        if (! str_contains((string) (new ReflectionClass($class))->getDocComment(), '@internal')) {
+            $surface[] = $class;
+        }
+    }
+
+    // A glob that stops matching would turn this into a test of nothing.
+    expect($surface)->toContain('Docuccino\Core\Contract\ContractIndex', 'Docuccino\Core\Contract\Coverage\CoverageReport')
+        ->and($surface)->not->toContain('Docuccino\Core\Contract\SchemaCheck');
 
     $leaks = [];
     foreach ($surface as $class) {

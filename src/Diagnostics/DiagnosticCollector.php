@@ -53,7 +53,7 @@ final class DiagnosticCollector
      * Grouped by route signature, then severity, code and message. Nothing time-based.
      *
      * The key is TOTAL — it runs on to `source` and `help` — because two diagnostics agreeing down to
-     * the message are ordinary: one `#[DescriptionFromFile]` escape per controller says the same thing
+     * the message are ordinary: one `#[Description(file: …)]` escape per controller says the same thing
      * about a different file, and neither carries a route signature. A key that cannot tell them apart
      * leaves their order to insertion, which is discovery order.
      *
@@ -77,7 +77,7 @@ final class DiagnosticCollector
 
         return [
             $diagnostic->routeSignature ?? '',
-            self::rank($diagnostic->severity),
+            -$diagnostic->severity->rank(),
             $diagnostic->code,
             $diagnostic->message,
             $source->file,
@@ -85,15 +85,5 @@ final class DiagnosticCollector
             $source->symbol ?? '',
             $diagnostic->help ?? '',
         ];
-    }
-
-    private static function rank(Severity $severity): int
-    {
-        return match ($severity) {
-            Severity::Error => 0,
-            Severity::Warning => 1,
-            Severity::Info => 2,
-            Severity::Hint => 3,
-        };
     }
 }

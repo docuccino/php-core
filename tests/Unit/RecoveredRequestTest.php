@@ -15,6 +15,7 @@ use Docuccino\Core\Extensions\Validation\RequestSchemaBuilder;
 use Docuccino\Core\Extensions\Validation\ValidationSchema;
 use Docuccino\Core\Inference\ActionRef;
 use Docuccino\Core\Inference\NullTypeEngine;
+use Docuccino\Core\Tests\Fixtures\MockedRequestClass;
 use Docuccino\Core\Tests\Fixtures\PinnedRequestClass;
 
 /**
@@ -264,3 +265,47 @@ it('expresses validated query fields as bracketed leaves, stopping at an array n
         ]],
     ],
 ]);
+
+it('carries a source class\'s #[Mock] hints into the hoisted request component', function (): void {
+    // A validated field is named by rules, so nothing on the request side has a PHP property to carry a
+    // hint — the class-level form is the whole answer here.
+    $components = new ComponentRegistry;
+    $schema = objectSchema(['email' => ['type' => 'string'], 'name' => ['type' => 'string']]);
+
+    $op = new OperationDraft;
+    (new RecoveredRequest)->apply($op, requestContext($components), $schema, 'form-request', MockedRequestClass::class);
+
+    expect($components->schemas()['MockedRequestClass']['properties'])->toBe([
+        'email' => ['type' => 'string', 'x-docuccino' => ['mock' => ['faker' => 'safeEmail']]],
+        'name' => ['type' => 'string'],
+    ]);
+});
+
+it('carries a hint onto the query parameter a validated field flattens to', function (): void {
+    // A read verb turns the same fields into parameters, and a hint is an x-docuccino member rather
+    // than a schema keyword — so it has to travel on the draft, not through the guard.
+    $components = new ComponentRegistry;
+    $schema = objectSchema(['per_page' => ['type' => 'integer']]);
+
+    $op = new OperationDraft;
+    (new RecoveredRequest)->apply($op, requestContext($components, method: 'GET'), $schema, 'form-request', MockedRequestClass::class);
+
+    $parameter = $op->parameter('query', 'per_page')->freeze()->toArray();
+
+    expect($parameter['schema']['type'])->toBe('integer')
+        // Never as a keyword of its own: the draft would have published `x-docuccino` alongside `type`,
+        // and then clobbered it with the provenance block beside it.
+        ->and($parameter['schema']['x-docuccino']['mock'])->toBe(['faker' => 'numberBetween:1,100', 'seedGroup' => 'listing'])
+        ->and($parameter['schema']['x-docuccino'])->toHaveKey('provenance');
+});
+
+it('reports a source class\'s unusable #[Mock] against the build', function (): void {
+    // The field the attribute names is not one the rules recovered, so the hint has nowhere to go.
+    $components = new ComponentRegistry;
+    $schema = objectSchema(['name' => ['type' => 'string']]);
+
+    (new RecoveredRequest)->apply(new OperationDraft, requestContext($components), $schema, 'form-request', MockedRequestClass::class);
+
+    expect(array_map(static fn ($d): string => $d->code, $components->diagnostics()))
+        ->toBe(['attribute.mock-unknown-property', 'attribute.mock-unknown-property']);
+});

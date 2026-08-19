@@ -31,6 +31,18 @@ final class OperationDraft
      */
     private array $responses = [];
 
+    /**
+     * Request-body examples per media type ({@see declareRequestBodyExamples()}). The body itself is
+     * one guarded field several producers write whole, so examples are merged into it at {@see freeze()}
+     * rather than contesting it — an example adds to a body, it never disagrees with one.
+     *
+     * @var array<string, array<string, array<string, mixed>>>
+     */
+    private array $requestExamples = [];
+
+    /** @var array<string, mixed> */
+    private array $requestExample = [];
+
     private ?string $id = null;
 
     public function __construct()
@@ -111,6 +123,41 @@ final class OperationDraft
         unset($this->responses[$status]);
     }
 
+    /**
+     * Every status this operation has a response draft for, byte-sorted so the answer is a function of
+     * the statuses rather than of the order the producers registered them.
+     *
+     * @return list<string>
+     */
+    public function responseStatuses(): array
+    {
+        $statuses = array_map(strval(...), array_keys($this->responses));
+        sort($statuses, SORT_STRING);
+
+        return $statuses;
+    }
+
+    /**
+     * Attach examples to a request-body media type: a map of named Example Objects, a singular value,
+     * or both over several calls. They are merged into whatever body wins ({@see $requestExamples}); a
+     * media type the body doesn't carry is left alone, and a non-empty map wins over a singular because
+     * OAS makes the two members mutually exclusive.
+     *
+     * @param  array<string, array<string, mixed>>  $named
+     */
+    public function declareRequestBodyExamples(string $mediaType, array $named, mixed $singular = null): void
+    {
+        if ($named !== []) {
+            $merged = ($this->requestExamples[$mediaType] ?? []) + $named;
+            ksort($merged);
+            $this->requestExamples[$mediaType] = $merged;
+        }
+
+        if ($singular !== null) {
+            $this->requestExample[$mediaType] ??= $singular;
+        }
+    }
+
     /** The provenance producer of the currently-winning contribution for a field, or null if unset. */
     public function producerFor(string $field): ?string
     {
@@ -121,6 +168,42 @@ final class OperationDraft
     public function resolvedField(string $field): mixed
     {
         return $this->guard->resolved()[$field] ?? null;
+    }
+
+    /**
+     * The request body with the declared examples folded into the media types it already carries. A
+     * body shaped like nothing this recognises comes back untouched — an example is never worth
+     * rewriting a contract for.
+     */
+    private function withRequestExamples(mixed $body): mixed
+    {
+        if (($this->requestExamples === [] && $this->requestExample === []) || ! is_array($body)) {
+            return $body;
+        }
+
+        $content = $body['content'] ?? null;
+        if (! is_array($content)) {
+            return $body;
+        }
+
+        $updated = [];
+        foreach ($content as $mediaType => $media) {
+            $key = (string) $mediaType;
+            $named = $this->requestExamples[$key] ?? [];
+
+            if (is_array($media) && $named !== []) {
+                unset($media['example']);
+                $media['examples'] = $named;
+            } elseif (is_array($media) && array_key_exists($key, $this->requestExample)) {
+                $media['example'] = $this->requestExample[$key];
+            }
+
+            $updated[$mediaType] = $media;
+        }
+
+        $body['content'] = $updated;
+
+        return $body;
     }
 
     /**
@@ -180,6 +263,10 @@ final class OperationDraft
             $resolved['operationId'], $resolved['summary'], $resolved['description'],
             $resolved['deprecated'], $resolved['tags'], $resolved['security'],
         );
+
+        if (isset($resolved['requestBody'])) {
+            $resolved['requestBody'] = $this->withRequestExamples($resolved['requestBody']);
+        }
 
         $parameters = [];
         foreach ($this->parameters as $draft) {

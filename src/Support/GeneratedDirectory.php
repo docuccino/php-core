@@ -23,9 +23,7 @@ final class GeneratedDirectory
 
     public static function ensure(string $path): void
     {
-        if (! is_dir($path)) {
-            @mkdir($path, 0755, true);
-        }
+        Directory::ensure($path);
 
         $gitignore = rtrim($path, '/').'/.gitignore';
         if (! file_exists($gitignore)) {

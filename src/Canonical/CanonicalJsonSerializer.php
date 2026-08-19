@@ -28,6 +28,23 @@ final class CanonicalJsonSerializer
         return $this->encode($value, 0)."\n";
     }
 
+    /**
+     * Why this writer would refuse the value, or null when it would take it. A reader pulling a value
+     * INTO a document — an example out of a YAML file, an attribute argument — owes whoever wrote it a
+     * diagnostic naming where it came from; finding out at emit time is an exception with no file, no
+     * attribute and no route in it, and a dead build to go with it.
+     */
+    public function rejects(mixed $value): ?string
+    {
+        try {
+            $this->encode($value, 0);
+
+            return null;
+        } catch (RuntimeException $e) {
+            return rtrim($e->getMessage(), '.');
+        }
+    }
+
     private function encode(mixed $value, int $depth): string
     {
         return match (true) {

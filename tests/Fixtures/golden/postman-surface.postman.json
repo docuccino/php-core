@@ -130,7 +130,7 @@
               "urlencoded": [
                 {
                   "key": "email",
-                  "value": "user@example.com",
+                  "value": "ada@example.com",
                   "type": "text"
                 },
                 {
@@ -172,7 +172,7 @@
                   "urlencoded": [
                     {
                       "key": "email",
-                      "value": "user@example.com",
+                      "value": "ada@example.com",
                       "type": "text"
                     },
                     {
@@ -203,7 +203,7 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"closedAt\": \"2024-01-01T00:00:00Z\",\n  \"email\": \"user@example.com\",\n  \"id\": \"3fa85f64-5717-4562-b3fc-2c963f66afa6\",\n  \"tier\": \"free\"\n}",
+              "body": "{\n  \"id\": \"8ad1e0f6-0f4f-4a1c-9d0a-9a5e9d8c1b2a\",\n  \"email\": \"ada@example.com\",\n  \"closedAt\": null,\n  \"tier\": \"pro\"\n}",
               "_postman_previewlanguage": "json"
             },
             {
@@ -225,7 +225,7 @@
                   "urlencoded": [
                     {
                       "key": "email",
-                      "value": "user@example.com",
+                      "value": "ada@example.com",
                       "type": "text"
                     },
                     {
@@ -273,7 +273,7 @@
                   "urlencoded": [
                     {
                       "key": "email",
-                      "value": "user@example.com",
+                      "value": "ada@example.com",
                       "type": "text"
                     },
                     {
@@ -321,7 +321,7 @@
                   "urlencoded": [
                     {
                       "key": "email",
-                      "value": "user@example.com",
+                      "value": "ada@example.com",
                       "type": "text"
                     },
                     {
@@ -369,7 +369,7 @@
                   "urlencoded": [
                     {
                       "key": "email",
-                      "value": "user@example.com",
+                      "value": "ada@example.com",
                       "type": "text"
                     },
                     {
@@ -417,7 +417,7 @@
                   "urlencoded": [
                     {
                       "key": "email",
-                      "value": "user@example.com",
+                      "value": "ada@example.com",
                       "type": "text"
                     },
                     {
@@ -445,6 +445,87 @@
               "cookie": [],
               "body": "",
               "_postman_previewlanguage": "text"
+            }
+          ]
+        },
+        {
+          "name": "Change an account's tier",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tier\": \"free\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK — Changed",
+              "originalRequest": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"tier\": \"free\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/accounts",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "accounts"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"id\": \"8ad1e0f6-0f4f-4a1c-9d0a-9a5e9d8c1b2a\",\n  \"email\": \"ada@example.com\",\n  \"closedAt\": null,\n  \"tier\": \"free\"\n}",
+              "_postman_previewlanguage": "json"
             }
           ]
         },

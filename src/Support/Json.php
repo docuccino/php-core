@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Docuccino\Core\Support;
 
 use Docuccino\Core\Canonical\CanonicalJsonSerializer;
+use stdClass;
 
 /**
  * A deterministic, order-insensitive JSON encoder for equality and fingerprinting. Not for canonical
@@ -13,7 +14,9 @@ use Docuccino\Core\Canonical\CanonicalJsonSerializer;
  * Arrays are re-keyed in ascending key order before encoding, so structurally-equal values encode to
  * the same bytes whatever their insertion order. List keys (`0,1,2,…`) are already ordered, so element
  * order survives. Objects collapse to their class-string, since closures and mappers have no stable
- * serialisable identity.
+ * serialisable identity — except {@see stdClass}, which is how a JSON object with keys an array cannot
+ * carry travels here, and whose members ARE its identity. It descends, and stays an object so `{}` and
+ * `[]` do not fingerprint alike.
  *
  * Callers hand this arbitrary values — an extension's own properties, a schema an integration built —
  * so the normalizer is TOTAL: anything `json_encode` would refuse is carried as a marker instead of
@@ -46,19 +49,12 @@ final class Json
 
     private static function normalize(mixed $value, int $depth = 0): mixed
     {
+        if ($value instanceof stdClass) {
+            return $depth >= self::MAX_DEPTH ? self::TRUNCATED : (object) self::members((array) $value, $depth);
+        }
+
         if (is_array($value)) {
-            if ($depth >= self::MAX_DEPTH) {
-                return self::TRUNCATED;
-            }
-
-            $keys = array_keys($value);
-            sort($keys);
-            $out = [];
-            foreach ($keys as $key) {
-                $out[self::text((string) $key)] = self::normalize($value[$key], $depth + 1);
-            }
-
-            return $out;
+            return $depth >= self::MAX_DEPTH ? self::TRUNCATED : self::members($value, $depth);
         }
 
         if (is_object($value)) {
@@ -74,6 +70,25 @@ final class Json
         }
 
         return is_resource($value) ? 'resource:'.get_resource_type($value) : $value;
+    }
+
+    /**
+     * Members in ascending key order, each normalized. List keys are already ordered, so element order
+     * survives.
+     *
+     * @param  array<array-key, mixed>  $value
+     * @return array<string, mixed>
+     */
+    private static function members(array $value, int $depth): array
+    {
+        $keys = array_keys($value);
+        sort($keys);
+        $out = [];
+        foreach ($keys as $key) {
+            $out[self::text((string) $key)] = self::normalize($value[$key], $depth + 1);
+        }
+
+        return $out;
     }
 
     /**

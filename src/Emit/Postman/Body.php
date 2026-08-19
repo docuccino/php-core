@@ -12,7 +12,11 @@ use Docuccino\Core\Support\Arr;
 use stdClass;
 
 /**
- * Turns a request body's media type and schema into Postman's `body` member.
+ * Turns a request body's Media Type Object into Postman's `body` member.
+ *
+ * The whole media type, not just its schema: `example` and `examples` sit beside the schema rather than
+ * in it, and they are what an author said the payload looks like — a collection that ignored them would
+ * ship `{"id": 0, "name": "string"}` where the document publishes a real one.
  *
  * The JSON body is itself written through {@see CanonicalJsonSerializer}, so the string nested inside
  * the collection is as deterministic as the collection around it.
@@ -48,25 +52,26 @@ final class Body
     }
 
     /**
-     * @param  array<string, mixed>  $schema
+     * @param  array<string, mixed>  $media  the Media Type Object: `schema`, and whatever illustrates it
      * @param  array<string, mixed>  $components
      * @param  list<Diagnostic>  $diagnostics
      * @return array<string, mixed>|null
      */
-    public static function of(string $mediaType, array $schema, array $components, SchemaExampleFactory $examples, string $signature, array &$diagnostics): ?array
+    public static function of(string $mediaType, array $media, array $components, SchemaExampleFactory $examples, string $signature, array &$diagnostics): ?array
     {
         $base = strtolower(trim(explode(';', $mediaType)[0]));
+        $schema = is_array($media['schema'] ?? null) ? Arr::stringKeyed($media['schema']) : [];
 
         if ($base === 'application/json' || str_ends_with($base, '+json')) {
-            return self::raw(self::json($schema, $components, $examples), 'json');
+            return self::raw(self::json($media, $schema, $components, $examples), 'json');
         }
 
         if ($base === 'application/x-www-form-urlencoded' || $base === 'multipart/form-data') {
-            return self::form($base, $schema, $components, $examples, $signature, $diagnostics);
+            return self::form($base, $media, $schema, $components, $examples, $signature, $diagnostics);
         }
 
         if (str_starts_with($base, 'text/')) {
-            return self::raw(self::text($schema, $components, $examples), 'text');
+            return self::raw(self::text($media, $schema, $components, $examples), 'text');
         }
 
         // XML from a JSON Schema would be a guess, and a guessed body is worse than an empty one the
@@ -79,16 +84,19 @@ final class Body
     }
 
     /**
+     * @param  array<string, mixed>  $media
      * @param  array<string, mixed>  $schema
      * @param  array<string, mixed>  $components
      */
-    private static function json(array $schema, array $components, SchemaExampleFactory $examples): string
+    private static function json(array $media, array $schema, array $components, SchemaExampleFactory $examples): string
     {
-        if ($schema === []) {
+        $stated = $examples->illustration($media);
+
+        if ($stated === null && $schema === []) {
             return '';
         }
 
-        $value = $examples->value($schema, $components);
+        $value = $stated === null ? $examples->value($schema, $components) : $stated[0];
 
         // An object with no properties must serialise as `{}`; an empty PHP array would render `[]`,
         // which is a body that lies about its own shape.
@@ -96,23 +104,28 @@ final class Body
     }
 
     /**
+     * @param  array<string, mixed>  $media
      * @param  array<string, mixed>  $schema
      * @param  array<string, mixed>  $components
      */
-    private static function text(array $schema, array $components, SchemaExampleFactory $examples): string
+    private static function text(array $media, array $schema, array $components, SchemaExampleFactory $examples): string
     {
-        $value = $schema === [] ? '' : $examples->value($schema, $components);
+        $stated = $examples->illustration($media);
+        $value = $stated !== null
+            ? $stated[0]
+            : ($schema === [] ? '' : $examples->value($schema, $components));
 
         return is_string($value) ? $value : '';
     }
 
     /**
+     * @param  array<string, mixed>  $media
      * @param  array<string, mixed>  $schema
      * @param  array<string, mixed>  $components
      * @param  list<Diagnostic>  $diagnostics
      * @return array<string, mixed>|null
      */
-    private static function form(string $base, array $schema, array $components, SchemaExampleFactory $examples, string $signature, array &$diagnostics): ?array
+    private static function form(string $base, array $media, array $schema, array $components, SchemaExampleFactory $examples, string $signature, array &$diagnostics): ?array
     {
         $properties = is_array($schema['properties'] ?? null) ? Arr::stringKeyed($schema['properties']) : [];
 
@@ -135,13 +148,20 @@ final class Body
         $keys = array_keys($properties);
         sort($keys, SORT_STRING);
 
+        // A form body an author illustrated supplies each field it names; the rest still come off the shape.
+        $stated = $examples->illustration($media);
+        $illustrated = is_array($stated[0] ?? null) ? Arr::stringKeyed($stated[0]) : [];
+
         $mode = $base === 'multipart/form-data' ? 'formdata' : 'urlencoded';
         $fields = [];
 
         foreach ($keys as $key) {
             $key = (string) $key;
             $property = Arr::stringKeyed(is_array($properties[$key] ?? null) ? $properties[$key] : []);
-            $fields[] = self::field($mode, $key, $property, $components, $examples, in_array($key, $required, true));
+            $value = array_key_exists($key, $illustrated)
+                ? [$illustrated[$key]]
+                : null;
+            $fields[] = self::field($mode, $key, $property, $components, $examples, in_array($key, $required, true), $value);
         }
 
         return ['mode' => $mode, $mode => $fields];
@@ -150,9 +170,10 @@ final class Body
     /**
      * @param  array<string, mixed>  $property
      * @param  array<string, mixed>  $components
+     * @param  array{mixed}|null  $stated  the value the body's own example gives this field, if any
      * @return array<string, mixed>
      */
-    private static function field(string $mode, string $key, array $property, array $components, SchemaExampleFactory $examples, bool $required): array
+    private static function field(string $mode, string $key, array $property, array $components, SchemaExampleFactory $examples, bool $required, ?array $stated = null): array
     {
         $binary = ($property['format'] ?? null) === 'binary' || isset($property['contentMediaType']);
 
@@ -160,7 +181,7 @@ final class Body
         // machine's filesystem into a committed artifact, and it would be wrong on every other one.
         $field = $binary && $mode === 'formdata'
             ? ['key' => $key, 'type' => 'file', 'src' => null]
-            : ['key' => $key, 'value' => self::scalar($examples->value($property, $components)), 'type' => 'text'];
+            : ['key' => $key, 'value' => self::scalar($stated === null ? $examples->value($property, $components) : $stated[0]), 'type' => 'text'];
 
         if (! $required) {
             $field['disabled'] = true;

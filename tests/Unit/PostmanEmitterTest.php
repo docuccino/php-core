@@ -166,6 +166,36 @@ it('emits a Postman collection byte-identical to the committed golden', function
         ->toBe(loadGolden('postman-surface.postman.json'));
 });
 
+it('sends the payload the document illustrates, not one derived from the schema', function (): void {
+    // `example` and `examples` sit BESIDE the schema, not in it, so reading only the schema silently
+    // threw away every hand-written example the document publishes and shipped `{"id": 0}` placeholders
+    // in their place — the one part of a collection a consumer actually presses Send on.
+    $leaves = postmanLeaves(postman(loadFixture('postman-surface.uir.json'))['item']);
+
+    $patch = $leaves['/Accounts/Change an account\'s tier'];
+    $post = $leaves['/Accounts/Open an account'];
+
+    // A raw JSON body reads the map's lowest key, the same rule every other reader of the document uses.
+    expect($patch['request']['body']['raw'])->toBe("{\n  \"tier\": \"free\"\n}")
+        ->and($patch['response'][0]['body'])->toContain('"tier": "free"')
+        // A form body takes the fields its example supplies and derives only the rest.
+        ->and(array_column($post['request']['body']['urlencoded'], 'value', 'key'))
+        ->toBe(['email' => 'ada@example.com', 'referrer' => 'string'])
+        // …and a saved example answers with what the response says it looks like.
+        ->and($post['response'][0]['body'])->toContain('"email": "ada@example.com"');
+});
+
+it('takes a parameter\'s own example over one derived from its schema', function (): void {
+    $leaves = postmanLeaves(postman(loadFixture('kitchen-sink.uir.json'))['item']);
+    $request = reset($leaves)['request'];
+
+    $header = array_column($request['header'], 'value', 'key');
+    $query = array_column($request['url']['query'], 'value', 'key');
+
+    expect($header['X-Trace-Id'])->toBe('abc-123')
+        ->and($query['precision'])->toBe('0.1');
+});
+
 it('names itself once, unversioned, and publishes the version where a consumer reads it', function (): void {
     $collection = postman(loadFixture('worked-example.json'));
 

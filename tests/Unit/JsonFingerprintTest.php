@@ -40,11 +40,26 @@ it('tells two values of one unencodable kind apart', function (Closure $a, Closu
     'a blob against the empty array' => [fn (): array => ["\xB1\x31"], fn (): array => []],
 ]);
 
-it('reads a resource as its type, the way an object reads as its class', function (): void {
+it('reads a resource as its type, the way a closure reads as its class', function (): void {
     // Neither has a serialisable identity, so two of one kind are one fingerprint. Stated rather than
     // implied: it is the same trade the object rule already makes, and the alternative is `''`.
     expect(Json::stable([fopen('php://memory', 'r')]))->toBe(Json::stable([fopen('php://memory', 'r')]))
-        ->and(Json::stable([new stdClass]))->toBe(Json::stable([new stdClass]));
+        ->and(Json::stable([fn (): int => 1]))->toBe(Json::stable([fn (): int => 2]));
+});
+
+it('descends into a stdClass, which is the one object whose members are its identity', function (): void {
+    // A JSON object whose keys an array cannot carry — `{"1": …}` from a keyBy() payload, or an empty
+    // one — travels as a stdClass. Collapsing it to its class name made every such body one
+    // fingerprint, which is how a ranked recording stopped being decided by its content.
+    $a = (object) ['1' => ['id' => 1], '2' => ['id' => 2]];
+    $b = (object) ['7' => ['id' => 7], '9' => ['id' => 9]];
+
+    expect(Json::stable($a))->not->toBe(Json::stable($b))
+        ->and(Json::stable($a))->toBe(Json::stable((object) ['2' => ['id' => 2], '1' => ['id' => 1]]))
+        // `{}` and `[]` are different claims, so they are different fingerprints.
+        ->and(Json::stable(new stdClass))->not->toBe(Json::stable([]))
+        // …and one nested inside an ordinary array descends too.
+        ->and(Json::stable(['meta' => (object) ['a' => 1]]))->not->toBe(Json::stable(['meta' => (object) ['a' => 2]]));
 });
 
 it('reads two structurally-equal values as one fingerprint whatever order they were built in', function (): void {

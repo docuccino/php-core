@@ -61,7 +61,7 @@ it('breaks ties by code then message with a stable order', function (): void {
 });
 
 it('breaks a tie the message cannot, by source and then help', function (bool $reverse): void {
-    // Two controllers each pointing #[DescriptionFromFile] outside the app say the same thing about a
+    // Two controllers each pointing #[Description(file: …)] outside the app say the same thing about a
     // different file, under no route signature at all — so everything the key looked at agreed and the
     // pair came out in discovery order. The key runs on to what actually differs.
     $collector = new DiagnosticCollector;

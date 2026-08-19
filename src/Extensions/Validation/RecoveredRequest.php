@@ -7,6 +7,8 @@ namespace Docuccino\Core\Extensions\Validation;
 use Docuccino\Attributes\BodyParameter;
 use Docuccino\Core\Draft\OperationDraft;
 use Docuccino\Core\Extensions\Context\RouteContext;
+use Docuccino\Core\Extensions\Schema\DeclarationFiles;
+use Docuccino\Core\Extensions\Schema\MockHints;
 use Docuccino\Core\Extensions\Schema\SchemaIdentity;
 use Docuccino\Core\Patch\Contribution;
 use Docuccino\Core\Support\Fqcn;
@@ -43,6 +45,8 @@ final class RecoveredRequest
             $context->components->addDiagnostic($diagnostic);
         }
 
+        $result = $this->withMockHints($result, $context, $sourceClass);
+
         $contribution = Contribution::integration($producer, $context->actionSource());
 
         if (in_array($context->httpMethod(), self::READ_VERBS, true)) {
@@ -52,6 +56,28 @@ final class RecoveredRequest
         }
 
         $this->applyRequestBody($operation, $context, $result, $contribution, $sourceClass);
+    }
+
+    /**
+     * The schema with whatever `#[Mock]` the source class declares written onto it. A validated field
+     * is named by rules rather than by a property, so it is the class-level form that reaches one —
+     * and the class file is recorded as a dependency, since adding the attribute has to invalidate.
+     */
+    private function withMockHints(ValidationSchema $result, RouteContext $context, ?string $sourceClass): ValidationSchema
+    {
+        if ($sourceClass === null) {
+            return $result;
+        }
+
+        $context->recordDependencyFiles(DeclarationFiles::of($sourceClass));
+
+        [$schema, $diagnostics] = MockHints::apply($result->schema, $sourceClass);
+
+        foreach ($diagnostics as $diagnostic) {
+            $context->components->addDiagnostic($diagnostic);
+        }
+
+        return new ValidationSchema($schema, $result->mediaType);
     }
 
     private function applyRequestBody(OperationDraft $operation, RouteContext $context, ValidationSchema $result, Contribution $contribution, ?string $sourceClass): void
@@ -102,6 +128,16 @@ final class RecoveredRequest
         foreach (self::queryLeaves($result->schema, '') as [$name, $schema, $required]) {
             $parameter = $operation->parameter('query', $name);
             $parameter->setRequired($required, $contribution);
+
+            // A hint is an x-docuccino member, not a schema keyword — it travels on the draft rather
+            // than through the guard, which would publish it as a keyword of that name.
+            $docuccino = $schema['x-docuccino'] ?? null;
+            unset($schema['x-docuccino']);
+            if (is_array($docuccino) && is_array($docuccino['mock'] ?? null)) {
+                /** @var array<string, mixed> $mock */
+                $mock = $docuccino['mock'];
+                $parameter->schema()->assignMock($mock);
+            }
 
             $description = $schema['description'] ?? null;
             if (is_string($description)) {

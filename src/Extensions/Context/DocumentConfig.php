@@ -319,6 +319,36 @@ final readonly class DocumentConfig
     }
 
     /**
+     * The directory `#[Webhook]` classes are discovered under, from `webhooks.dir`, or null when
+     * unset — in which case the document publishes no webhooks. May be relative; the adapter resolves
+     * and confines it against the app base path, the same as {@see contentDir()}.
+     */
+    public function webhooksDir(): ?string
+    {
+        $webhooks = is_array($this->raw['webhooks'] ?? null) ? $this->raw['webhooks'] : [];
+        $dir = $webhooks['dir'] ?? null;
+
+        return is_string($dir) && $dir !== '' ? $dir : null;
+    }
+
+    /**
+     * The directory of committed response recordings, from `examples.recordings`, or null when the
+     * document publishes none. May be relative; the adapter confines it against the app base path the
+     * same as {@see contentDir()}.
+     *
+     * Reading files out of it is the whole of what a build does with a test suite's traffic — nothing
+     * is executed and nothing is fetched. Absent is the default, so a document publishes a recorded
+     * example only once someone has said where the recordings live.
+     */
+    public function recordingsDir(): ?string
+    {
+        $examples = is_array($this->raw['examples'] ?? null) ? $this->raw['examples'] : [];
+        $dir = $examples['recordings'] ?? null;
+
+        return is_string($dir) && $dir !== '' ? $dir : null;
+    }
+
+    /**
      * Where `docuccino:export` writes and the viewer's `artifact` source reads, from `export.path`,
      * defaulting to `docs/openapi.json`. May be relative — the adapter resolves it against the app
      * base path.
@@ -329,6 +359,21 @@ final readonly class DocumentConfig
     public function exportPath(): string
     {
         return is_string($this->export()['path'] ?? null) ? $this->export()['path'] : 'docs/openapi.json';
+    }
+
+    /**
+     * The member the OpenAPI emitters project a schema's `x-docuccino.mock.faker` onto, from
+     * `export.mock_faker_key` — conventionally `x-faker`. Null (the default) drops mock hints, so a
+     * bare export stays pure OpenAPI; the UIR carries them either way.
+     *
+     * It sits under `export` because it shapes the projection and never the document, which is also
+     * what keeps it out of {@see hash()}.
+     */
+    public function mockFakerKey(): ?string
+    {
+        $key = $this->export()['mock_faker_key'] ?? null;
+
+        return is_string($key) && $key !== '' ? $key : null;
     }
 
     /**

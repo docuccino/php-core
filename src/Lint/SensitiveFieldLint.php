@@ -9,6 +9,8 @@ use Docuccino\Core\Diagnostics\Severity;
 use Docuccino\Core\Extensions\Context\DocumentContext;
 use Docuccino\Core\Extensions\Contracts\DocumentTransformer;
 use Docuccino\Core\Extensions\Document\UirDocumentDraft;
+use Docuccino\Core\Extensions\Ordering\ExtensionOrder;
+use Docuccino\Core\Extensions\Ordering\Priorities;
 
 /**
  * A whole-document data-leakage lint: scans every emitted schema for property names matching the
@@ -22,8 +24,10 @@ use Docuccino\Core\Extensions\Document\UirDocumentDraft;
  *
  * It reads only the emitted UIR, no framework deps, so the reference CLI and other-language
  * producers run the identical rule; the Laravel adapter just maps `lint.leakage` config onto the
- * options and registers it.
+ * options and registers it. Pinned to run last so the pointers it publishes are the pointers the
+ * emitted document has — a body hoisted into a shared component is reported once, at the component.
  */
+#[ExtensionOrder(priority: Priorities::LAST)]
 final class SensitiveFieldLint implements DocumentTransformer
 {
     /** The members whose contents are published illustrative values rather than structure. */

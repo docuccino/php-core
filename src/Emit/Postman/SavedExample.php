@@ -152,11 +152,19 @@ final class SavedExample
         $schema = is_array($media['schema'] ?? null) ? Arr::stringKeyed($media['schema']) : [];
         $json = $mediaType === 'application/json' || str_ends_with($mediaType, '+json');
 
-        if (! $json || $schema === []) {
-            return ['', $json ? 'json' : 'text'];
+        if (! $json) {
+            return ['', 'text'];
         }
 
-        $value = $examples->value($schema, $components);
+        // What the response says it looks like — its `example`, or the lowest key of its `examples` map
+        // — before anything derived from the schema. Those members sit beside the schema, not in it.
+        $stated = $examples->illustration($media);
+
+        if ($stated === null && $schema === []) {
+            return ['', 'json'];
+        }
+
+        $value = $stated === null ? $examples->value($schema, $components) : $stated[0];
 
         return [rtrim((new CanonicalJsonSerializer)->serialize($value ?? new stdClass), "\n"), 'json'];
     }

@@ -44,6 +44,20 @@ it('rejects non-finite floats', function (): void {
     $this->serializer->serialize(['x' => INF]);
 })->throws(RuntimeException::class);
 
+it('says in advance what it would refuse, so a reader can name where the value came from', function (mixed $value, ?string $reason): void {
+    // Whoever reads a value INTO a document — an example out of a YAML file, an attribute argument —
+    // has the file and the route in hand; this writer has neither, so it can only throw.
+    expect($this->serializer->rejects($value))->toBe($reason);
+})->with([
+    'nan' => [['x' => NAN], 'Non-finite floats cannot be serialised to JSON'],
+    'an infinity' => [INF, 'Non-finite floats cannot be serialised to JSON'],
+    'a nested infinity' => [['a' => ['b' => [-INF]]], 'Non-finite floats cannot be serialised to JSON'],
+    'a value with no JSON form at all' => [[new SplStack], 'Value is not JSON-serialisable: SplStack'],
+    'an ordinary payload' => [['id' => 1, 'name' => 'Sprocket', 'tags' => ['a', 'b']], null],
+    'an empty object' => [new stdClass, null],
+    'null' => [null, null],
+]);
+
 it('encodes floats identically regardless of the serialize_precision ini', function (): void {
     $value = ['a' => 0.1, 'b' => 1.5, 'c' => 1e-7, 'd' => 10.0, 'e' => 1.0 / 3.0];
 

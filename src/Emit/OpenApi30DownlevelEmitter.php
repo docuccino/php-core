@@ -204,12 +204,19 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
             return $array;
         }
 
+        // Named, not counted: each one is a contract a consumer of this artifact no longer sees, and
+        // the reader has to know which of them they are losing.
+        $names = array_map(strval(...), array_keys(Arr::stringKeyed(is_array($array['webhooks']) ? $array['webhooks'] : [])));
+        sort($names, SORT_STRING);
+
         unset($array['webhooks']);
 
         $diagnostics[] = new Diagnostic(
             severity: Severity::Warning,
             code: 'downlevel.webhooks',
-            message: 'Dropped `webhooks` (#/webhooks), which OpenAPI 3.0 does not define.',
+            message: $names === []
+                ? 'Dropped `webhooks` (#/webhooks), which OpenAPI 3.0 does not define.'
+                : sprintf('Dropped `webhooks` (#/webhooks), which OpenAPI 3.0 does not define: %s.', implode(', ', $names)),
             help: 'Keep the 3.1 or 3.2 artifact for consumers that need the webhook contract.',
         );
 

@@ -7,6 +7,7 @@ namespace Docuccino\Core\Extensions\BuiltIn;
 use Docuccino\Core\Extensions\Contracts\SchemaContext;
 use Docuccino\Core\Extensions\Contracts\TypeToSchema;
 use Docuccino\Core\Extensions\Schema\ComponentHoist;
+use Docuccino\Core\Extensions\Schema\MockHints;
 use Docuccino\Core\Extensions\Schema\SchemaIdentity;
 use Docuccino\Core\Extensions\Schema\SchemaResult;
 use Docuccino\Core\Inference\ClassRef;
@@ -82,7 +83,7 @@ final class ClassTypeToSchema implements TypeToSchema
                 $object['required'] = $required;
             }
 
-            return $object;
+            return MockHints::applyTo($context, $object, $fqcn);
         });
     }
 }

@@ -22,6 +22,10 @@ use Docuccino\Core\Support\Fqcn;
  *     descriptor, the CALL is what the docs need — a rule object in a rules array is only
  *     documentable by its class;
  *   - `array`      — an array of the above (per-item recursion);
+ *   - `spread`     — a run of values no position can be pinned to: a spread the fold could not read
+ *     ({@see ArgumentSlots}), or, in a list that has nowhere to put a name, the named arguments after
+ *     one. Zero or more values, none of them readable, so a reader indexing past it is reading a slot
+ *     that may hold anything — which is what separates it from a single `unknown`;
  *   - `unknown`    — folding failed, with a reason.
  */
 final readonly class ConstValue
@@ -33,6 +37,8 @@ final readonly class ConstValue
     public const KIND_INSTANCE = 'instance';
 
     public const KIND_ARRAY = 'array';
+
+    public const KIND_SPREAD = 'spread';
 
     public const KIND_UNKNOWN = 'unknown';
 
@@ -106,6 +112,15 @@ final readonly class ConstValue
         return new self(self::KIND_UNKNOWN, reason: $reason);
     }
 
+    /**
+     * Values written here that no position can be pinned to. Never fold one away: dropping it leaves the
+     * slots after it looking absent, and absent reads as the parameter's default.
+     */
+    public static function spread(string $reason): self
+    {
+        return new self(self::KIND_SPREAD, reason: $reason);
+    }
+
     public function isScalar(): bool
     {
         return $this->kind === self::KIND_SCALAR;
@@ -124,6 +139,11 @@ final readonly class ConstValue
     public function isArray(): bool
     {
         return $this->kind === self::KIND_ARRAY;
+    }
+
+    public function isSpread(): bool
+    {
+        return $this->kind === self::KIND_SPREAD;
     }
 
     /** Canonical, deterministic string form (used in reports and tests). */
@@ -146,6 +166,7 @@ final readonly class ConstValue
                 '[%s]',
                 implode(', ', array_map(static fn (ConstValue $i): string => $i->render(), $this->items)),
             ),
+            self::KIND_SPREAD => sprintf('...<%s>', $this->reason ?? '?'),
             default => sprintf('<unknown: %s>', $this->reason ?? '?'),
         };
     }
@@ -182,6 +203,7 @@ final readonly class ConstValue
                 'kind' => self::KIND_ARRAY,
                 'items' => array_map(static fn (ConstValue $i): array => $i->toArray(), $this->items),
             ],
+            self::KIND_SPREAD => ['kind' => self::KIND_SPREAD, 'reason' => $this->reason],
             default => ['kind' => self::KIND_UNKNOWN, 'reason' => $this->reason],
         };
     }
@@ -227,6 +249,7 @@ final readonly class ConstValue
                 self::listFrom($data['args'] ?? []),
             ),
             self::KIND_ARRAY => self::array(self::listFrom($data['items'] ?? [])),
+            self::KIND_SPREAD => self::spread(is_string($data['reason'] ?? null) ? $data['reason'] : '?'),
             default => self::unknown(is_string($data['reason'] ?? null) ? $data['reason'] : '?'),
         };
     }

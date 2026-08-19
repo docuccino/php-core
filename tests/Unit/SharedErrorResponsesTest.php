@@ -263,12 +263,101 @@ it('keeps an example that illustrates no shape out of the merge', function (): v
         ->and($doc['paths']['/a']['get']['responses']['404'])->toBe($bare(['message' => 'a']));
 });
 
-it('leaves an authored examples map exactly as it found it', function (string $case, array $a, array $b): void {
-    // A plural map's keys were chosen by whoever wrote them, and a document that already published those
-    // names has consumers reading them. Rewriting one is the failure this whole area exists to prevent,
-    // so a media type carrying one keeps it and stays part of the body's identity — including the one
-    // that also states a singular `example`, which is a document OAS already calls wrong and which this
-    // pass has no business tidying by merging half of it away.
+it('keeps a named example on one route out of what an unrelated route publishes', function (): void {
+    // The locality rule, on the path that broke it. `/a` and `/b` answer 403 identically; naming `/b`'s
+    // example is a change to `/b` alone, and it used to split the group in two — `/a`'s body went back
+    // inline and `components.responses.Error403`, a name a generated client is written against, was
+    // deleted. It bit at exactly two arms, which is the common case.
+    $named = examplableBody(null);
+    unset($named['content']['application/problem+json']['example']);
+    $named['content']['application/problem+json']['examples'] = ['denied' => ['value' => ['code' => 'denied']]];
+
+    $plain = errorDoc(['/a' => ['403' => examplableBody(['code' => 'forbidden'])], '/b' => ['403' => examplableBody(['code' => 'denied'])]]);
+    $doc = errorDoc(['/a' => ['403' => examplableBody(['code' => 'forbidden'])], '/b' => ['403' => $named]]);
+
+    expect(array_keys($plain['components']['responses']))->toBe(['Error403'])
+        ->and(array_keys($doc['components']['responses']))->toBe(['Error403'])
+        ->and(responseRefAt($doc, '/a', '403'))->toBe('#/components/responses/Error403')
+        ->and(responseRefAt($doc, '/b', '403'))->toBe('#/components/responses/Error403');
+});
+
+it('publishes an author\'s own example names on the shared response', function (): void {
+    // An author's key is a function of their declaration, so it disturbs nothing and reads far better
+    // than a hash. Minting climbs past the names they used, so the unnamed arm's illustration lands
+    // beside theirs rather than on top of it.
+    $named = examplableBody(null);
+    unset($named['content']['application/problem+json']['example']);
+    $named['content']['application/problem+json']['examples'] = [
+        'denied' => ['value' => ['code' => 'denied'], 'summary' => 'Refused outright'],
+    ];
+
+    $doc = errorDoc(['/a' => ['403' => examplableBody(['code' => 'forbidden'])], '/b' => ['403' => $named]]);
+    $examples = examplesAt($doc, '/a', '403');
+
+    expect($examples['denied'])->toBe(['value' => ['code' => 'denied'], 'summary' => 'Refused outright'])
+        ->and($examples)->toHaveCount(2)
+        ->and(array_diff(array_keys($examples), ['denied']))->toHaveCount(1)
+        ->and(exampleValuesAt($doc, '/a', '403'))->toContain(['code' => 'forbidden']);
+});
+
+it('unions the names two arms chose when they agree on what each one means', function (): void {
+    $authored = static function (string $key, string $code): array {
+        $body = examplableBody(null);
+        unset($body['content']['application/problem+json']['example']);
+        $body['content']['application/problem+json']['examples'] = [$key => ['value' => ['code' => $code]]];
+
+        return $body;
+    };
+
+    $doc = errorDoc(['/a' => ['403' => $authored('expired', 'expired')], '/b' => ['403' => $authored('revoked', 'revoked')]]);
+
+    expect(array_keys($doc['components']['responses']))->toBe(['Error403'])
+        ->and(array_keys(examplesAt($doc, '/a', '403')))->toBe(['expired', 'revoked']);
+});
+
+it('refuses to merge two arms that spell one example name differently, and says so', function (): void {
+    // The one thing an author has to settle themselves: publishing either body under that name would put
+    // one arm's example behind the other's label, and dropping one loses an illustration. So the bodies
+    // stay where they are — and because that is a shared component the document no longer has, the
+    // reader is told rather than left looking at a name that quietly stopped existing.
+    $authored = static function (mixed $value): array {
+        $body = examplableBody(null);
+        unset($body['content']['application/problem+json']['example']);
+        $body['content']['application/problem+json']['examples'] = ['denied' => ['value' => $value]];
+
+        return $body;
+    };
+
+    $responses = ['/a' => ['403' => $authored(['code' => 'forbidden'])], '/b' => ['403' => $authored(['code' => 'denied'])]];
+
+    $doc = errorDoc($responses);
+    $report = errorDocReport(['paths' => [
+        '/a' => ['get' => ['responses' => $responses['/a']]],
+        '/b' => ['get' => ['responses' => $responses['/b']]],
+    ]]);
+
+    expect($doc['components']['responses'] ?? null)->toBeNull()
+        ->and(examplesAt($doc, '/a', '403'))->toBe(['denied' => ['value' => ['code' => 'forbidden']]])
+        ->and(examplesAt($doc, '/b', '403'))->toBe(['denied' => ['value' => ['code' => 'denied']]])
+        // The shape underneath still shares — it is only the response that could not.
+        ->and(schemaRefAt($doc, '/a', '403', 'application/problem+json'))->toBe('#/components/schemas/Error403')
+        ->and(array_map(static fn ($d): string => $d->code, $report))->toBe(['components.example-name-conflict'])
+        ->and($report[0]->message)->toContain('the name "denied"')
+        ->and($report[0]->message)->toContain('Error403');
+});
+
+it('leaves a media type stating both an example and a map exactly as it found it', function (): void {
+    // OAS carries `example` or `examples`, never both, so a media type stating both is a document this
+    // pass has no business tidying by merging half of it away. It stays part of the body's identity.
+    $authored = static function (mixed $example): array {
+        $body = examplableBody($example);
+        $body['content']['application/problem+json']['examples'] = ['expired' => ['value' => ['code' => 'forbidden']]];
+
+        return $body;
+    };
+
+    $a = $authored(['code' => 'a']);
+    $b = $authored(['code' => 'b']);
     $doc = errorDoc(['/a' => ['403' => $a], '/b' => ['403' => $b]]);
 
     $illustrations = static fn (array $body): array => array_intersect_key(
@@ -276,30 +365,9 @@ it('leaves an authored examples map exactly as it found it', function (string $c
         ['example' => true, 'examples' => true],
     );
 
-    // The shape underneath still shares — it is only the response that could not.
     expect($doc['components']['responses'] ?? null)->toBeNull()
         ->and($illustrations($doc['paths']['/a']['get']['responses']['403']))->toBe($illustrations($a))
         ->and($illustrations($doc['paths']['/b']['get']['responses']['403']))->toBe($illustrations($b));
-})->with(function (): array {
-    $authored = static function (?string $key, mixed $example = null): array {
-        $body = examplableBody($example);
-        if ($example === null) {
-            unset($body['content']['application/problem+json']['example']);
-        }
-
-        if ($key !== null) {
-            $body['content']['application/problem+json']['examples'] = [$key => ['value' => ['code' => 'forbidden']]];
-        }
-
-        return $body;
-    };
-
-    return [
-        ['a map of its own', $authored('expired'), $authored('revoked')],
-        // Both members, differing only in the singular one: strip that and the two collapse, and the
-        // component published would carry minted keys where an author had written their own.
-        ['a map beside a singular example', $authored('expired', ['code' => 'a']), $authored('expired', ['code' => 'b'])],
-    ];
 });
 
 it('keeps each operation\'s own id and provenance beside the reference', function (): void {

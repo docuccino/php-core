@@ -75,6 +75,30 @@ final readonly class SchemaExampleFactory
     }
 
     /**
+     * What a Media Type, Parameter or Header Object ILLUSTRATES: its `example`, or the lowest key of its
+     * `examples` map. Wrapped so a stated `null` is distinguishable from having stated nothing.
+     *
+     * Those members sit BESIDE the schema, not in it, so a caller holding one of those objects has to
+     * ask here rather than hand the schema over — an author's example is what they said the payload
+     * looks like, and it outranks anything derived from the shape.
+     *
+     * @param  array<string, mixed>  $node
+     * @return array{mixed}|null
+     */
+    public function illustration(array $node): ?array
+    {
+        if (array_key_exists('example', $node)) {
+            return [$node['example']];
+        }
+
+        if (isset($node['examples']) && is_array($node['examples']) && $node['examples'] !== []) {
+            return [$this->firstExample($node['examples'])];
+        }
+
+        return null;
+    }
+
+    /**
      * A value the schema states outright, wrapped so `null` is distinguishable from "said nothing".
      *
      * @param  array<string, mixed>  $schema
@@ -82,12 +106,9 @@ final readonly class SchemaExampleFactory
      */
     private function stated(array $schema): ?array
     {
-        if (array_key_exists('example', $schema)) {
-            return [$schema['example']];
-        }
-
-        if (isset($schema['examples']) && is_array($schema['examples']) && $schema['examples'] !== []) {
-            return [$this->firstExample($schema['examples'])];
+        $illustration = $this->illustration($schema);
+        if ($illustration !== null) {
+            return $illustration;
         }
 
         if (array_key_exists('default', $schema)) {

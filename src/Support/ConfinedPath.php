@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Docuccino\Core\Support;
 
 /**
- * Confines a user-supplied relative path to a base directory. `#[DescriptionFromFile]` and
+ * Confines a user-supplied relative path to a base directory. `#[Description(file: …)]` and
  * `info.description.file` both read a project file whose path comes from config or an attribute, so
  * `../../etc/passwd` must never escape the app. Resolution is lexical first — collapsing `.` / `..`
  * without touching the filesystem, which catches traversal even for targets that don't exist — then
@@ -37,6 +37,16 @@ final class ConfinedPath
         }
 
         return $candidate;
+    }
+
+    /**
+     * A configured directory resolved for reading: an absolute path is taken verbatim, because naming
+     * one is a deliberate statement about where the machine keeps something, and a relative one is
+     * confined to $base. Null carries the same meaning as {@see resolve()}'s — a rejected escape.
+     */
+    public static function configuredDir(string $base, string $configured): ?string
+    {
+        return str_starts_with($configured, '/') ? $configured : self::resolve($base, $configured);
     }
 
     private static function within(string $base, string $candidate): bool

@@ -6,7 +6,7 @@ namespace Docuccino\Core\Extensions\Context;
 
 /**
  * The mutable bag behind {@see RouteContext::dependencies()}: the files behind facts an extension read
- * out-of-band — a `#[DescriptionFromFile]` markdown file, a separately analysed FormRequest, a traced
+ * out-of-band — a `#[Description(file: …)]` markdown file, a separately analysed FormRequest, a traced
  * helper — each of which joins the fragment cache key's dependency manifest.
  *
  * Scalar (non-file) cache inputs go on {@see RouteDescriptor::$cacheInputs} instead: those have to fold

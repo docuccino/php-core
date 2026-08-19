@@ -59,6 +59,33 @@ final class ResponseDraft
      */
     private array $examples = [];
 
+    /**
+     * The named Example Objects an author declared per media type ({@see declareExamples()}), kept
+     * sorted by name so adding one never moves another.
+     *
+     * @var array<string, array<string, array<string, mixed>>>
+     */
+    private array $declaredExamples = [];
+
+    /**
+     * The named Example Objects a PRODUCER illustrated a media type with ({@see illustrateExamples()}),
+     * kept sorted by name for the same reason. Separate from {@see $declaredExamples} because a
+     * declaration wins a name they both carry, and separate from {@see $examples} because a set of
+     * named illustrations is what OpenAPI spells `examples` rather than `example`.
+     *
+     * @var array<string, array<string, array<string, mixed>>>
+     */
+    private array $illustratedExamples = [];
+
+    /**
+     * The singular example an author declared per media type. Separate from {@see $examples} because
+     * a declaration outranks an illustration: this is someone saying what the body looks like, that is
+     * a producer showing what it worked out.
+     *
+     * @var array<string, mixed>
+     */
+    private array $declaredExample = [];
+
     private ?string $id = null;
 
     /** Tracks the winning {@see claimComponentName()} write, so it turns over with the name it belongs to. */
@@ -160,6 +187,45 @@ final class ResponseDraft
         $this->examples[$mediaType] ??= $example;
     }
 
+    /**
+     * Attach named Example Objects a producer worked out for a media type — a recording of a scenario a
+     * test named, say. First writer of a name wins, the map stays name-sorted, and every one of them
+     * steps aside for a declaration of the same name ({@see freeze()}).
+     *
+     * @param  array<string, array<string, mixed>>  $named
+     */
+    public function illustrateExamples(string $mediaType, array $named): void
+    {
+        if ($named === []) {
+            return;
+        }
+
+        $merged = ($this->illustratedExamples[$mediaType] ?? []) + $named;
+        ksort($merged);
+        $this->illustratedExamples[$mediaType] = $merged;
+    }
+
+    /**
+     * Attach the examples an author declared for a media type: a map of named Example Objects, a
+     * singular value, or both over several calls. Either outranks whatever {@see setExample()}
+     * illustrated the media type with, and OAS makes `example` and `examples` mutually exclusive, so a
+     * non-empty map wins over a singular. First declaration of a name wins; the map stays name-sorted.
+     *
+     * @param  array<string, array<string, mixed>>  $named
+     */
+    public function declareExamples(string $mediaType, array $named, mixed $singular = null): void
+    {
+        if ($named !== []) {
+            $merged = ($this->declaredExamples[$mediaType] ?? []) + $named;
+            ksort($merged);
+            $this->declaredExamples[$mediaType] = $merged;
+        }
+
+        if ($singular !== null) {
+            $this->declaredExample[$mediaType] ??= $singular;
+        }
+    }
+
     /** The first media type registered, or `''` when the response has none. */
     public function primaryMediaType(): string
     {
@@ -201,6 +267,42 @@ final class ResponseDraft
     }
 
     /**
+     * What one media type publishes of the four example bags, as OpenAPI spells it — `example` or
+     * `examples`, never the two together.
+     *
+     * A declaration outranks an illustration wherever they meet, and a named declaration outranks a
+     * singular one: an author who named their examples meant a map. Where the author's map is what
+     * publishes, named illustrations JOIN it — a name a producer was handed at a call site is a name
+     * somebody chose — and lose every key the author also spelled. A singular declaration publishes
+     * alone: there is no map for an illustration to join, and making one would file the author's own
+     * example under a key nobody picked.
+     *
+     * @return array<string, mixed>
+     */
+    private function illustration(string $mediaType): array
+    {
+        $declared = $this->declaredExamples[$mediaType] ?? [];
+        $illustrated = $this->illustratedExamples[$mediaType] ?? [];
+
+        if ($declared !== []) {
+            $merged = $declared + $illustrated;
+            ksort($merged);
+
+            return ['examples' => $merged];
+        }
+
+        if (array_key_exists($mediaType, $this->declaredExample)) {
+            return ['example' => $this->declaredExample[$mediaType]];
+        }
+
+        if ($illustrated !== []) {
+            return ['examples' => $illustrated];
+        }
+
+        return array_key_exists($mediaType, $this->examples) ? ['example' => $this->examples[$mediaType]] : [];
+    }
+
+    /**
      * @internal Not part of the frozen extension-author surface — it hands back the (also
      * `@internal`) {@see ResponseObject} document model. Extensions hand drafts back to the pipeline,
      * which freezes them.
@@ -226,10 +328,7 @@ final class ResponseDraft
         if ($this->content !== []) {
             $content = [];
             foreach ($this->content as $mediaType => $schema) {
-                $content[$mediaType] = ['schema' => $schema->freeze()->toArray()];
-                if (array_key_exists($mediaType, $this->examples)) {
-                    $content[$mediaType]['example'] = $this->examples[$mediaType];
-                }
+                $content[$mediaType] = ['schema' => $schema->freeze()->toArray()] + $this->illustration($mediaType);
             }
         }
 

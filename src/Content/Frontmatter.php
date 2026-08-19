@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Docuccino\Core\Content;
 
 use Docuccino\Core\Support\Arr;
+use Docuccino\Core\Support\LineEndings;
 use Symfony\Component\Yaml\Exception\ParseException;
 use Symfony\Component\Yaml\Yaml;
 
@@ -22,8 +23,8 @@ final class Frontmatter
      */
     public static function parse(string $raw): array
     {
-        // Normalise CRLF so fence detection and the body are line-ending independent.
-        $normalized = str_replace(["\r\n", "\r"], "\n", $raw);
+        // Fence detection and the body are line-ending independent.
+        $normalized = LineEndings::normalize($raw);
 
         // A `---` fence closed by a `---` on its own line; everything after is body.
         if (! str_starts_with($normalized, "---\n")

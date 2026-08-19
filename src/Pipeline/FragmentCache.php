@@ -6,6 +6,7 @@ namespace Docuccino\Core\Pipeline;
 
 use Docuccino\Core\Extensions\Context\RouteDependencies;
 use Docuccino\Core\Extensions\Context\RouteDescriptor;
+use Docuccino\Core\Support\AtomicFile;
 use Docuccino\Core\Support\GeneratedDirectory;
 use JsonException;
 
@@ -20,11 +21,19 @@ use JsonException;
  * out-of-band dependency file)`, so any changed or removed dependency invalidates it. TraceReport
  * and {@see RouteDependencies} files merge into that one list — {@see put()} is the seam.
  *
+ * A dependency that ISN'T THERE is a state the manifest records, not a hash it fails to take: a route
+ * may legitimately depend on a file nobody has written yet — an example file a `#[Example(file:)]`
+ * names, a description a `#[DescriptionFromFile]` points at — and recording those as "no hash" would
+ * mean absent-then never matches absent-now, so the route rebuilds on every single build. Absent is
+ * therefore stamped {@see ABSENT} and compares fresh while it stays absent; a file appearing, changing
+ * or vanishing is stale either way.
+ *
  * Storage is a flat directory of `{key}.json` files written atomically (temp file + rename), each
- * stamped with {@see FORMAT} — the shape of what a fragment carries. Bump it whenever the fragment gains
- * something a warm build now needs, because an entry written before that member existed reads back as
- * "this route had none", which is a warm build quietly saying less than a cold one. A miss costs one
- * rebuild; a wrong warm answer costs the document.
+ * stamped with {@see FORMAT} — the shape of what a fragment carries, and how it is written. Bump it
+ * whenever the fragment gains something a warm build now needs, because an entry written before that
+ * member existed reads back as "this route had none", which is a warm build quietly saying less than a
+ * cold one; bump it for a change to the encoding too, since an entry written by a lossier one restores
+ * different values. A miss costs one rebuild; a wrong warm answer costs the document.
  *
  * Dependency hashing goes through {@see FileDigests}, so one build hashes each file once — one cache
  * instance is one build's worth of memo, and callers get a fresh one per build.
@@ -34,7 +43,15 @@ use JsonException;
 final readonly class FragmentCache
 {
     /** The entry format {@see get()} will read. An entry stamped anything else is a miss. */
-    public const FORMAT = 2;
+    public const FORMAT = 5;
+
+    /**
+     * The manifest's stand-ins for the two things a digest cannot be. Neither can be mistaken for one:
+     * a sha256 is 64 hex characters and these are not.
+     */
+    private const ABSENT = '@absent';
+
+    private const UNREADABLE = '@unreadable';
 
     public function __construct(
         private bool $enabled,
@@ -124,20 +141,46 @@ final readonly class FragmentCache
 
         $dependencies = [];
         foreach (array_values(array_unique($dependencyFiles)) as $file) {
-            $hash = $this->digests->of($file);
-            $dependencies[] = ['file' => $file, 'hash' => $hash === false ? '' : $hash];
+            $dependencies[] = ['file' => $file, 'hash' => $this->recorded($file)];
         }
+
+        // What goes in has to come back out as the same PHP value, and `json_encode`'s defaults do not
+        // manage that for a float: a whole one writes as `1` and restores as an int, and the rest follow
+        // the ambient `serialize_precision`, which is the host deciding what a warm build says.
+        $precision = ini_set('serialize_precision', '-1');
 
         try {
             $payload = json_encode(
                 ['format' => self::FORMAT, 'fragment' => $fragment->toArray(), 'dependencies' => $dependencies],
-                JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
+                JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION,
             );
         } catch (JsonException) {
             return;
+        } finally {
+            if (is_string($precision)) {
+                ini_set('serialize_precision', $precision);
+            }
         }
 
-        $this->writeAtomically($this->file($key), $payload);
+        $file = $this->file($key);
+        GeneratedDirectory::ensure(dirname($file));
+        AtomicFile::write($file, $payload);
+    }
+
+    /**
+     * What a dependency file hashed to when the entry was written: its digest, {@see ABSENT} when
+     * there was no such file, or {@see UNREADABLE} when there was one and it could not be read. The
+     * last is deliberately a value nothing can match, so an entry depending on a file we cannot see
+     * the contents of never reads back as fresh.
+     */
+    private function recorded(string $file): string
+    {
+        $hash = $this->digests->of($file);
+        if ($hash !== false) {
+            return $hash;
+        }
+
+        return $this->digests->exists($file) ? self::UNREADABLE : self::ABSENT;
     }
 
     /**
@@ -156,6 +199,16 @@ final readonly class FragmentCache
                 return false;
             }
 
+            // Absent then is fresh only while it is absent now: a file that has since appeared changes
+            // what the route says, exactly as an edited one does.
+            if ($expected === self::ABSENT) {
+                if ($this->digests->exists($file)) {
+                    return false;
+                }
+
+                continue;
+            }
+
             $current = $this->digests->of($file);
             if ($current === false || $current !== $expected) {
                 return false;
@@ -168,21 +221,5 @@ final readonly class FragmentCache
     private function file(string $key): string
     {
         return rtrim($this->path, '/').'/'.$key.'.json';
-    }
-
-    private function writeAtomically(string $file, string $contents): void
-    {
-        GeneratedDirectory::ensure(dirname($file));
-
-        // random_int over bin2hex(random_bytes(…)): unambiguous int return type for every analyser
-        // version we support, and 63 bits of entropy instead of 32.
-        $temp = $file.'.'.getmypid().'.'.dechex(random_int(0, PHP_INT_MAX)).'.tmp';
-        if (@file_put_contents($temp, $contents) === false) {
-            return;
-        }
-
-        if (! @rename($temp, $file)) {
-            @unlink($temp);
-        }
     }
 }

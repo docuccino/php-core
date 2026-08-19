@@ -450,10 +450,9 @@ final readonly class CollectionEmitter implements ReportingEmitter
 
         $mediaType = Body::preferred(array_map(strval(...), array_keys($content)), self::MEDIA_PREFERENCE);
         $media = Arr::stringKeyed(is_array($content[$mediaType] ?? null) ? $content[$mediaType] : []);
-        $schema = Arr::stringKeyed(is_array($media['schema'] ?? null) ? $media['schema'] : []);
 
         return [
-            'body' => Body::of($mediaType, $schema, $components, $this->examples, $signature, $diagnostics),
+            'body' => Body::of($mediaType, $media, $components, $this->examples, $signature, $diagnostics),
             'contentType' => $mediaType,
         ];
     }
