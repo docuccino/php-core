@@ -7,6 +7,23 @@ User-facing changes to `docuccino/core` — features, fixes, performance work an
 taken from the commit messages scoped `core`. Entries begin after v0.1.2; older history is in
 the [repository](https://github.com/docuccino/docuccino) git log.
 
+## v0.6.0
+
+### Features
+
+- show several named examples, and read one from a file ([#108](https://github.com/docuccino/docuccino/pull/108))
+- lint the document for missing prose, unusable ids and undeclared tags ([#104](https://github.com/docuccino/docuccino/pull/104))
+- promote the schema conversion surface used by integrations to a public contract ([#85](https://github.com/docuccino/docuccino/pull/85))
+- emit a Postman collection ([#81](https://github.com/docuccino/docuccino/pull/81))
+
+### Bug fixes
+
+- report a credential a recording cannot redact ([#126](https://github.com/docuccino/docuccino/pull/126))
+- place a call's arguments where its readers index them ([#123](https://github.com/docuccino/docuccino/pull/123))
+- agree the example report's verb with how many examples lied ([#121](https://github.com/docuccino/docuccino/pull/121))
+- surface engine boot failures and stop caching their degraded fragments ([#84](https://github.com/docuccino/docuccino/pull/84))
+- keep the export destination out of the document config hash ([#79](https://github.com/docuccino/docuccino/pull/79))
+
 ## v0.5.1
 
 ### Features
