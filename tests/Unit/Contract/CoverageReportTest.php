@@ -70,9 +70,19 @@ it('says so when an artifact carries no identities to track coverage by', functi
     $index = ContractIndex::fromArray(['paths' => ['/a' => ['get' => []]]]);
     $rendered = CoverageReport::of($index, [])->render(100.0);
 
+    // Core states the remedy without naming a command: it cannot know how an application exports,
+    // and a framework's vocabulary in a framework-agnostic package would lie to any other adapter.
     expect($rendered)->toContain('GET /a  (no id)')
         ->toContain('1 of those carry no x-docuccino id')
-        ->toContain('--format=uir');
+        ->toContain('Export the artifact as UIR')
+        ->not->toContain('artisan');
+});
+
+it('names the export command when the caller supplies one', function (): void {
+    $index = ContractIndex::fromArray(['paths' => ['/a' => ['get' => []]]]);
+
+    expect(CoverageReport::of($index, [])->render(100.0, 'php artisan docuccino:export --format=uir'))
+        ->toContain('as OpenAPI with identities dropped (php artisan docuccino:export --format=uir).');
 });
 
 it('leaves the identity note off a report whose gaps all have ids', function (): void {

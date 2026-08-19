@@ -349,6 +349,23 @@ final readonly class DocumentConfig
     }
 
     /**
+     * The directory the contract-coverage recorder writes to and `docuccino:coverage` merges, from
+     * `coverage.log`, or null when the document names none — in which case the adapter picks
+     * `storage/docuccino/coverage`.
+     *
+     * Nothing in the build reads it. It is config rather than a call-site argument because the test
+     * suite writing the logs and the command gating on them have to arrive at the same directory, and
+     * a value only the suite knew would leave the command guessing.
+     */
+    public function coverageLogDir(): ?string
+    {
+        $coverage = is_array($this->raw['coverage'] ?? null) ? $this->raw['coverage'] : [];
+        $dir = $coverage['log'] ?? null;
+
+        return is_string($dir) && $dir !== '' ? $dir : null;
+    }
+
+    /**
      * Where `docuccino:export` writes and the viewer's `artifact` source reads, from `export.path`,
      * defaulting to `docs/openapi.json`. May be relative — the adapter resolves it against the app
      * base path.

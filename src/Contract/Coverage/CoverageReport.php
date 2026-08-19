@@ -82,7 +82,11 @@ final readonly class CoverageReport
      * Passing $minimum names the floor that was missed and the honest measured value to move it to.
      * Labels and ids are the artifact's own strings, so both go through {@see PlainText} first.
      */
-    public function render(?float $minimum = null): string
+    /**
+     * @param  string|null  $exportCommand  how this application exports, for the one remediation that needs
+     *                                      naming a command — core cannot know, so the caller says.
+     */
+    public function render(?float $minimum = null, ?string $exportCommand = null): string
     {
         $missing = $this->missing();
 
@@ -125,8 +129,9 @@ final readonly class CoverageReport
             $lines[] = '';
             $lines[] = sprintf(
                 '%d of those carry no x-docuccino id, so nothing can record them as exercised. Export the artifact '.
-                'as UIR (php artisan docuccino:export --format=uir) rather than as OpenAPI with identities dropped.',
+                'as UIR rather than as OpenAPI with identities dropped%s.',
                 $unidentified,
+                $exportCommand === null ? '' : ' ('.$exportCommand.')',
             );
         }
 
