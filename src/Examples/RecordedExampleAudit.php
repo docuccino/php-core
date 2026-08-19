@@ -137,7 +137,7 @@ final readonly class RecordedExampleAudit implements DocumentTransformer
                     $file,
                     implode(', ', $findings),
                 ),
-                help: 'Re-record it — the recorder replaces credentials on the way out. If the value is genuinely public, list the pointer this message names under lint.leakage.allow; a bare property name silences the lint but never the redaction.',
+                help: 'Re-record it — the recorder replaces a credential STRING on the way out. A number it reports and leaves alone, because a placeholder where the schema says integer would make the example contradict its own contract: stop returning it, or — if the value is genuinely public — list the pointer this message names under lint.leakage.allow. A bare property name silences the lint but never the redaction.',
             ));
         }
     }

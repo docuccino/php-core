@@ -9,7 +9,8 @@ use Docuccino\Core\Lint\SensitiveFieldLintOptions;
  * A recorded body is captured from a live request and published in a document, so this is the part of
  * the feature that must not have a hole in it. Dataset coverage over EVERY sensitive-name heuristic
  * and EVERY credential shape, the unknown-entry degradation for both, and the two limits the
- * replacement deliberately keeps (types survive; a name taints what sits under it).
+ * replacement deliberately keeps (types survive; a name taints what sits under it) — plus the numbers
+ * it reports instead of replacing, which is how a secret that is not a string still refuses to publish.
  */
 it('replaces a value under every sensitive member name', function (string $name): void {
     [$body, $pointers] = (new ExampleRedaction)->apply([$name => 'a-real-value']);
@@ -59,6 +60,60 @@ it('keeps the type of everything it does not replace, so the example still fits 
     [$body] = (new ExampleRedaction)->apply(['token_count' => 5, 'token_expires' => true, 'token' => 'abc']);
 
     expect($body)->toBe(['token_count' => 5, 'token_expires' => true, 'token' => ExampleRedaction::PLACEHOLDER]);
+});
+
+it('reports a number under a credential name without replacing it', function (string $token): void {
+    [$body, $pointers] = (new ExampleRedaction)->apply([$token => 123456]);
+
+    expect($body)->toBe([$token => 123456])
+        ->and($pointers)->toBe(['/'.$token]);
+})->with(array_map(
+    static fn (string $token): array => [$token],
+    array_keys(SensitiveFieldLintOptions::DEFAULT_PATTERNS),
+));
+
+it('reads a number only from the name it IS, never from one it merely contains', function (mixed $value): void {
+    [$body, $pointers] = (new ExampleRedaction)->apply(['token_count' => $value]);
+
+    expect($body)->toBe(['token_count' => $value])
+        ->and($pointers)->toBe([]);
+})->with([
+    'a count' => [5],
+    'a timestamp' => [1712345678],
+]);
+
+it('leaves a non-number under a credential name alone, because it carries no secret', function (mixed $value): void {
+    [$body, $pointers] = (new ExampleRedaction)->apply(['token' => $value]);
+
+    expect($body)->toBe(['token' => $value])
+        ->and($pointers)->toBe([]);
+})->with([
+    'true' => [true],
+    'false' => [false],
+    'null' => [null],
+    'an empty string' => [''],
+]);
+
+it('judges a number by its own name and never by an inherited one', function (): void {
+    [$body, $pointers] = (new ExampleRedaction)->apply(['token' => ['expires_in' => 3600, 'value' => 'abc']]);
+
+    expect($body)->toBe(['token' => ['expires_in' => 3600, 'value' => ExampleRedaction::PLACEHOLDER]])
+        ->and($pointers)->toBe(['/token/value']);
+});
+
+it('honours the pointer safelist for a number as it does for a string', function (): void {
+    $options = new SensitiveFieldLintOptions(allow: ['/cvv']);
+
+    [$body, $pointers] = (new ExampleRedaction($options))->apply(['cvv' => 123]);
+
+    expect($body)->toBe(['cvv' => 123])
+        ->and($pointers)->toBe([]);
+});
+
+it('goes on reporting a numeric credential the recorder could not replace', function (): void {
+    [$clean] = (new ExampleRedaction)->apply(['card_number' => 4111111111111111, 'name' => 'Acme']);
+
+    expect((new ExampleRedaction)->findings($clean))->toBe(['/card_number']);
 });
 
 it('takes a sensitive member name to mean everything beneath it', function (): void {

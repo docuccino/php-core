@@ -105,3 +105,21 @@ it('escapes a label and an id out of the artifact, and measures the column on wh
         // Every id starts in the same column, which only holds if the width was measured after escaping.
         ->and(array_unique($columns))->toHaveCount(1);
 });
+
+it('measures the label column in characters, so an accented path still lines up', function (): void {
+    $index = contractIndex(static function (array $document): array {
+        $document['paths']['/api/facturé'] = $document['paths']['/api/exports'];
+
+        return $document;
+    });
+
+    $rendered = CoverageReport::of($index, [])->render();
+    $columns = array_map(
+        static fn (string $row): int|false => mb_strpos($row, 'op:v1:'),
+        array_values(array_filter(explode("\n", $rendered), static fn (string $row): bool => str_contains($row, 'op:v1:'))),
+    );
+
+    expect($rendered)->toContain('GET /api/facturé')
+        // Padding by bytes would leave this row one column short of every other one.
+        ->and(array_unique($columns))->toHaveCount(1);
+});

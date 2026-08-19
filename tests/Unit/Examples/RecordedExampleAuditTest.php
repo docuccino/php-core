@@ -133,6 +133,24 @@ it('reports a committed recording that still holds a credential, and never quote
         ->and($findings[0]->message)->not->toContain('live-secret-value');
 });
 
+it('reports a committed recording whose credential is a number the recorder could not replace', function (): void {
+    $base = auditBase();
+    (new RecordingStore($base.'/docs/recordings'))->put(ExampleRecording::of(
+        'op:v1:abcdefgh12345678',
+        'GET /api/invoices',
+        [RecordedExample::of('200', 'application/json', ['cvv' => 987, 'token_count' => 4])],
+    ));
+
+    $findings = auditFindings($base, auditDocument('op:v1:abcdefgh12345678'));
+
+    expect($findings)->toHaveCount(1)
+        ->and($findings[0]->code)->toBe('examples.recording-unsafe')
+        ->and($findings[0]->message)->toContain('/cvv')
+        ->and($findings[0]->message)->not->toContain('/token_count')
+        ->and($findings[0]->message)->not->toContain('987')
+        ->and($findings[0]->help)->toContain('lint.leakage.allow');
+});
+
 it('says nothing about a clean, claimed recording', function (): void {
     $base = auditBase();
     (new RecordingStore($base.'/docs/recordings'))->put(ExampleRecording::of(

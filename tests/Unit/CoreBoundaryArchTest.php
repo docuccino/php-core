@@ -28,10 +28,10 @@ arch('core never depends on the Laravel adapter')
  * The other half of the `@internal` boundary, which an import scan cannot see: a public method may
  * HAND BACK an internal type, and every caller of `$context->converter()->toSchema(…)` then depends on
  * an internal class's methods while importing nothing. So a public surface — the extension-author
- * contracts plus the two context objects an extension is passed, and the contract-testing surface an
- * adapter's assertions are built on — may only name types that are public themselves. Annotate the
- * method `@internal` if it really is pipeline-only (Draft::guard()), or promote the return type to a
- * contract (TypeSchemaConverter).
+ * contracts plus the two context objects an extension is passed, the DType hierarchy those contracts
+ * take and hand back, and the contract-testing surface an adapter's assertions are built on — may only
+ * name types that are public themselves. Annotate the method `@internal` if it really is pipeline-only
+ * (Draft::guard()), or promote the return type to a contract (TypeSchemaConverter).
  */
 it('never hands a public API consumer a type marked @internal', function (): void {
     $internal = static function (?ReflectionType $type): array {
@@ -59,21 +59,30 @@ it('never hands a public API consumer a type marked @internal', function (): voi
     }
 
     // Everything under Contract/ that is not itself `@internal`: the index, the checker, the values a
-    // caller reads off a result, the coverage and example reports.
-    foreach ((array) glob(__DIR__.'/../../src/Contract/{,*/}*.php', GLOB_BRACE) as $file) {
-        $namespace = str_contains(dirname((string) $file), '/Contract/')
-            ? 'Docuccino\Core\Contract\\'.basename(dirname((string) $file)).'\\'
-            : 'Docuccino\Core\Contract\\';
-        $class = $namespace.basename((string) $file, '.php');
+    // caller reads off a result, the coverage and example reports. And everything under Inference/ on
+    // the same terms — the DType hierarchy is what a TypeToSchema mapper is handed and matches on, and
+    // ArgumentSlots is where a reader finds a call's arguments, so both freeze at v1 as the contracts do.
+    foreach (['Contract', 'Inference'] as $root) {
+        foreach ((array) glob(__DIR__.'/../../src/'.$root.'/{,*/}*.php', GLOB_BRACE) as $file) {
+            $directory = basename(dirname((string) $file));
+            $class = 'Docuccino\Core\\'.$root.'\\'
+                .($directory === $root ? '' : $directory.'\\')
+                .basename((string) $file, '.php');
 
-        if (! str_contains((string) (new ReflectionClass($class))->getDocComment(), '@internal')) {
-            $surface[] = $class;
+            if (! str_contains((string) (new ReflectionClass($class))->getDocComment(), '@internal')) {
+                $surface[] = $class;
+            }
         }
     }
 
-    // A glob that stops matching would turn this into a test of nothing.
-    expect($surface)->toContain('Docuccino\Core\Contract\ContractIndex', 'Docuccino\Core\Contract\Coverage\CoverageReport')
-        ->and($surface)->not->toContain('Docuccino\Core\Contract\SchemaCheck');
+    // A glob that stops matching would turn this into a test of nothing, and one that stopped honouring
+    // `@internal` would turn it into a test of everything.
+    expect($surface)->toContain(
+        'Docuccino\Core\Contract\ContractIndex',
+        'Docuccino\Core\Contract\Coverage\CoverageReport',
+        'Docuccino\Core\Inference\ArgumentSlots',
+        'Docuccino\Core\Inference\DType\DType',
+    )->and($surface)->not->toContain('Docuccino\Core\Contract\SchemaCheck', 'Docuccino\Core\Inference\LocalWrites');
 
     $leaks = [];
     foreach ($surface as $class) {

@@ -176,3 +176,23 @@ it('silences a leaked value by pointer via the safelist', function (): void {
 
     expect(lintFindings(schemaWithExample('AKIAIOSFODNN7EXAMPLE'), $options))->toBe([]);
 });
+
+it('reads a name that IS a heuristic apart from one that merely contains it', function (string $name, ?string $exact, ?string $contains): void {
+    $options = new SensitiveFieldLintOptions;
+
+    expect($options->matchExact($name))->toBe($exact)
+        ->and($options->match($name))->toBe($contains);
+})->with([
+    'the token itself' => ['token', 'a token', 'a token'],
+    'a spelling of it' => ['API-KEY', 'an API key', 'an API key'],
+    'a name containing it' => ['token_count', null, 'a token'],
+    'a name that is neither' => ['name', null, null],
+    'a name that normalises to nothing' => ['--', null, null],
+]);
+
+it('takes an application\'s own heuristic as a name in its own right', function (): void {
+    $options = (new SensitiveFieldLintOptions)->withPatterns(['sortcode' => 'a bank sort code']);
+
+    expect($options->matchExact('sort_code'))->toBe('a bank sort code')
+        ->and($options->matchExact('sort_code_prefix'))->toBeNull();
+});

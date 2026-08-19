@@ -63,7 +63,7 @@ final readonly class SensitiveFieldLintOptions
      */
     public function match(string $name): ?string
     {
-        $normalized = strtolower((string) preg_replace('/[^a-zA-Z0-9]/', '', $name));
+        $normalized = self::normalize($name);
         if ($normalized === '') {
             return null;
         }
@@ -75,5 +75,22 @@ final readonly class SensitiveFieldLintOptions
         }
 
         return null;
+    }
+
+    /**
+     * Label of the heuristic a name IS rather than one it merely contains: `token` matches, `token_count`
+     * does not. The stronger reading, for a caller judging a value whose own content cannot speak for it.
+     */
+    public function matchExact(string $name): ?string
+    {
+        $normalized = self::normalize($name);
+
+        return $normalized === '' ? null : ($this->patterns[$normalized] ?? null);
+    }
+
+    /** Lower-case alphanumerics, so `api_key`, `apiKey` and `API-KEY` are one token. */
+    private static function normalize(string $name): string
+    {
+        return strtolower((string) preg_replace('/[^a-zA-Z0-9]/', '', $name));
     }
 }
