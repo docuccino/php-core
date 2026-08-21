@@ -362,6 +362,11 @@ final class DocumentDiffer
      * id is minted from the bytes it publishes, so an edit re-mints it and identity pairing alone would
      * compare the edited component against nothing at all.
      *
+     * A schema BOTH documents reach only from writer positions ({@see SchemaDirection}) compares with
+     * request semantics — an enum value added there stays non-breaking, a required property added becomes
+     * breaking — while one a response, webhook or callback can reach, in either document, keeps the
+     * conservative reader-side flag.
+     *
      * @param  list<Change>  $changes
      * @param  array<string, true>  $unreferenced
      */
@@ -373,6 +378,8 @@ final class DocumentDiffer
         );
         $oldReach = SchemaReachability::of($old);
         $newReach = SchemaReachability::of($new);
+        $oldDirection = SchemaDirection::of($old);
+        $newDirection = SchemaDirection::of($new);
         $declared = self::schemaNames($new);
 
         foreach (Arr::sortedUnion(array_keys($oldSchemas), array_keys($newSchemas)) as $key) {
@@ -392,8 +399,9 @@ final class DocumentDiffer
             } else {
                 $entry = $newSchemas[$key];
                 $unreachable = ! $oldReach->reaches($oldSchemas[$key]['name']) && ! $newReach->reaches($entry['name']);
+                $requestOnly = $oldDirection->requestOnly($oldSchemas[$key]['name']) && $newDirection->requestOnly($entry['name']);
 
-                foreach ($this->schemas->compare($oldSchemas[$key]['schema'], $entry['schema'], 'components.schemas.'.$entry['name'], $key, request: false) as $change) {
+                foreach ($this->schemas->compare($oldSchemas[$key]['schema'], $entry['schema'], 'components.schemas.'.$entry['name'], $key, request: $requestOnly) as $change) {
                     if ($unreachable && $change->breaking) {
                         $unreferenced['components.schemas.'.$entry['name']] = true;
                         $change = new Change($change->kind, $change->target, $change->id, $change->path, false, $change->code, $change->fields);

@@ -16,6 +16,9 @@ use Docuccino\Core\Document\UirDocument;
  * as unused would downgrade a real breaking change, while naming one that a `discriminator` mapping or a
  * description merely mentions costs nothing but a report line.
  *
+ * The scan and the transitive closure are shared with {@see SchemaDirection}, which runs them from
+ * direction-partitioned roots instead of all of them.
+ *
  * @internal
  */
 final readonly class SchemaReachability
@@ -29,12 +32,37 @@ final readonly class SchemaReachability
 
     public static function of(UirDocument $document): self
     {
+        return new self(self::close(self::rootsOf($document), self::schemaArrays($document)));
+    }
+
+    public function reaches(string $name): bool
+    {
+        return isset($this->names[$name]);
+    }
+
+    /**
+     * @return array<string, array<array-key, mixed>>
+     */
+    public static function schemaArrays(UirDocument $document): array
+    {
         $schemas = [];
         foreach ($document->components->schemas ?? [] as $name => $schema) {
             $schemas[(string) $name] = $schema->toArray();
         }
 
-        $reached = self::rootsOf($document);
+        return $schemas;
+    }
+
+    /**
+     * The roots, closed transitively over the schemas they reach.
+     *
+     * @param  array<string, true>  $roots
+     * @param  array<string, array<array-key, mixed>>  $schemas
+     * @return array<string, true>
+     */
+    public static function close(array $roots, array $schemas): array
+    {
+        $reached = $roots;
         $pending = array_keys($reached);
 
         while ($pending !== []) {
@@ -51,12 +79,7 @@ final readonly class SchemaReachability
             }
         }
 
-        return new self($reached);
-    }
-
-    public function reaches(string $name): bool
-    {
-        return isset($this->names[$name]);
+        return $reached;
     }
 
     /**
@@ -79,7 +102,7 @@ final readonly class SchemaReachability
      * @param  array<array-key, mixed>  $node
      * @return array<string, true>
      */
-    private static function namesIn(array $node): array
+    public static function namesIn(array $node): array
     {
         $out = [];
         self::collect($node, $out);

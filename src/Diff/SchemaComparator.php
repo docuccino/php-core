@@ -14,12 +14,18 @@ use Docuccino\Core\Support\Hydrate;
  * needed.
  *
  * Breaking: a type narrowed/changed or a constraint added; an enum value removed or an enum
- * introduced; a required property added to a *request* schema; a property removed from a
+ * introduced; an enum value added to, or the enum constraint dropped from, a *response* schema —
+ * a reader (a generated client above all) meets a value it has no case for, or loses a closed set
+ * it typed against; a required property added to a *request* schema; a property removed from a
  * *response* schema; a `format` added or changed on a *request* schema (stricter input).
- * Non-breaking: type widened, enum value added, required removed, description edits, property
- * added, a property removed from a request schema (the client just stops sending it), a format
- * removed or any format change on a response. `required` on a response/component schema — usage
- * context unknown — is reported but classed non-breaking; that's a judgment call, not an oversight.
+ * Non-breaking: type widened, an enum value added to a request schema (old writers stay valid),
+ * required removed, description edits, property added, a property removed from a request schema
+ * (the client just stops sending it), a format removed or any format change on a response.
+ * `required` on a response/component schema — usage context unknown — is reported but classed
+ * non-breaking; that's a judgment call, not an oversight. An enum value removed, and an enum
+ * introduced, stay breaking on BOTH sides: each is safe for a pure reader, but a schema's
+ * `request` flag can under-state its audience (a shared component serves both directions), and a
+ * downgrade there green-lights a change that rejects a writer's previously valid value.
  */
 final class SchemaComparator
 {
@@ -35,7 +41,7 @@ final class SchemaComparator
         $this->compareRef($old, $new, $path, $id, $changes);
         $this->compareType($old, $new, $path, $id, $changes);
         $this->compareFormat($old, $new, $path, $id, $request, $changes);
-        $this->compareEnum($old, $new, $path, $id, $changes);
+        $this->compareEnum($old, $new, $path, $id, $request, $changes);
         $this->compareRequired($old, $new, $path, $id, $request, $changes);
         $this->compareProperties($old, $new, $path, $id, $request, $changes);
         $this->compareItems($old, $new, $path, $id, $request, $changes);
@@ -123,7 +129,7 @@ final class SchemaComparator
      * @param  array<string, mixed>  $new
      * @param  list<Change>  $changes
      */
-    private function compareEnum(array $old, array $new, string $path, string $id, array &$changes): void
+    private function compareEnum(array $old, array $new, string $path, string $id, bool $request, array &$changes): void
     {
         $hasOld = array_key_exists('enum', $old) && is_array($old['enum']);
         $hasNew = array_key_exists('enum', $new) && is_array($new['enum']);
@@ -142,7 +148,9 @@ final class SchemaComparator
         }
 
         if (! $hasNew) {
-            $changes[] = $this->change(ChangeKind::Changed, $id, $path.'.enum', false, 'schema.enum-removed', 'enum', $oldEnum, null);
+            // Dropping the constraint widens what a request accepts; on a response it turns a
+            // closed set a reader typed against into anything at all.
+            $changes[] = $this->change(ChangeKind::Changed, $id, $path.'.enum', ! $request, 'schema.enum-removed', 'enum', $oldEnum, null);
 
             return;
         }
@@ -157,7 +165,9 @@ final class SchemaComparator
         }
 
         if ($added !== []) {
-            $changes[] = $this->change(ChangeKind::Changed, $id, $path.'.enum', false, 'schema.enum-value-added', 'enum', $oldEnum, $newEnum);
+            // A new value widens what a request accepts; a response can now return something no
+            // existing reader has a case for, and a strongly-typed generated client fails outright.
+            $changes[] = $this->change(ChangeKind::Changed, $id, $path.'.enum', ! $request, 'schema.enum-value-added', 'enum', $oldEnum, $newEnum);
         }
     }
 

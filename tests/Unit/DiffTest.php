@@ -37,6 +37,26 @@ function changesByCode(Changeset $changeset): array
     return $out;
 }
 
+/**
+ * {@see diffBase()} with `FormData` made request-only: a PUT request body `$ref`s it and nothing
+ * else reaches it, so the direction walk classes it as writer-side.
+ *
+ * @return array<string, mixed>
+ */
+function diffBaseWithRequestOnlyComponent(): array
+{
+    $doc = diffBase();
+    $doc['paths']['/api/v1/forms/{id}']['put'] = [
+        'x-docuccino' => ['id' => 'op:v1:1111111111111111'],
+        'operationId' => 'forms.update',
+        'requestBody' => ['content' => ['application/json' => ['schema' => ['$ref' => '#/components/schemas/FormData']]]],
+        'responses' => ['200' => ['description' => 'ok']],
+    ];
+    $doc['components']['schemas']['FormData']['properties']['status'] = ['type' => 'string', 'enum' => ['draft', 'published']];
+
+    return $doc;
+}
+
 it('reports no changes for an identical document', function (): void {
     expect(diffOf(diffBase(), diffBase())->isEmpty())->toBeTrue();
 });
@@ -327,6 +347,132 @@ it('classifies a removed enum value as breaking', function (): void {
     $changes = changesByCode(diffOf(diffBase(), $new));
     expect($changes)->toHaveKey('schema.enum-value-removed');
     expect($changes['schema.enum-value-removed']->breaking)->toBeTrue();
+});
+
+it('classifies a response enum value added as breaking', function (): void {
+    $old = diffBase();
+    $old['paths']['/api/v1/forms/{id}']['get']['responses']['200']['content']['application/json']['schema']['properties']['status'] = ['type' => 'string', 'enum' => ['draft', 'published']];
+    $new = $old;
+    $new['paths']['/api/v1/forms/{id}']['get']['responses']['200']['content']['application/json']['schema']['properties']['status']['enum'] = ['draft', 'published', 'archived'];
+
+    $changes = changesByCode(diffOf($old, $new));
+    expect($changes)->toHaveKey('schema.enum-value-added');
+    expect($changes['schema.enum-value-added']->breaking)->toBeTrue();
+});
+
+it('classifies a response enum constraint dropped as breaking', function (): void {
+    $old = diffBase();
+    $old['paths']['/api/v1/forms/{id}']['get']['responses']['200']['content']['application/json']['schema']['properties']['status'] = ['type' => 'string', 'enum' => ['draft', 'published']];
+    $new = $old;
+    unset($new['paths']['/api/v1/forms/{id}']['get']['responses']['200']['content']['application/json']['schema']['properties']['status']['enum']);
+
+    $changes = changesByCode(diffOf($old, $new));
+    expect($changes)->toHaveKey('schema.enum-removed');
+    expect($changes['schema.enum-removed']->breaking)->toBeTrue();
+});
+
+it('classifies a request enum constraint dropped as non-breaking', function (): void {
+    $new = diffBase();
+    unset($new['paths']['/api/v1/forms/{id}']['get']['parameters'][1]['schema']['enum']);
+
+    $changes = changesByCode(diffOf(diffBase(), $new));
+    expect($changes)->toHaveKey('schema.enum-removed');
+    expect($changes['schema.enum-removed']->breaking)->toBeFalse();
+});
+
+it('classifies an enum value added to a referenced component schema as breaking', function (): void {
+    // Reached from a response, the component compares as one — the side where an enum addition
+    // can break a reader.
+    $old = diffBase();
+    $old['paths']['/api/v1/forms/{id}']['get']['responses']['200']['content']['application/json']['schema']['properties']['form'] = ['$ref' => '#/components/schemas/FormData'];
+    $old['components']['schemas']['FormData']['properties']['status'] = ['type' => 'string', 'enum' => ['draft', 'published']];
+    $new = $old;
+    $new['components']['schemas']['FormData']['properties']['status']['enum'] = ['draft', 'published', 'archived'];
+
+    $changes = changesByCode(diffOf($old, $new));
+    expect($changes)->toHaveKey('schema.enum-value-added');
+    expect($changes['schema.enum-value-added']->breaking)->toBeTrue();
+});
+
+it('classifies an enum value added to a request-only component schema as non-breaking', function (): void {
+    $old = diffBaseWithRequestOnlyComponent();
+    $new = $old;
+    $new['components']['schemas']['FormData']['properties']['status']['enum'] = ['draft', 'published', 'archived'];
+
+    $changeset = diffOf($old, $new);
+
+    expect($changeset->isBreaking())->toBeFalse();
+    $changes = changesByCode($changeset);
+    expect($changes)->toHaveKey('schema.enum-value-added');
+    expect($changes['schema.enum-value-added']->breaking)->toBeFalse();
+});
+
+it('classifies a required property added to a request-only component schema as breaking', function (): void {
+    // Request semantics cut both ways: writer-side, a new required property rejects every
+    // existing client's body.
+    $old = diffBaseWithRequestOnlyComponent();
+    $new = $old;
+    $new['components']['schemas']['FormData']['required'] = ['status'];
+
+    $changes = changesByCode(diffOf($old, $new));
+    expect($changes)->toHaveKey('schema.required-added');
+    expect($changes['schema.required-added']->breaking)->toBeTrue();
+});
+
+it('classifies an enum value added to a component both sides reach as breaking', function (): void {
+    $old = diffBaseWithRequestOnlyComponent();
+    $old['paths']['/api/v1/forms/{id}']['get']['responses']['200']['content']['application/json']['schema']['properties']['form'] = ['$ref' => '#/components/schemas/FormData'];
+    $new = $old;
+    $new['components']['schemas']['FormData']['properties']['status']['enum'] = ['draft', 'published', 'archived'];
+
+    $changes = changesByCode(diffOf($old, $new));
+    expect($changes['schema.enum-value-added']->breaking)->toBeTrue();
+});
+
+it('classifies an enum value added to a webhook-referenced component schema as breaking', function (): void {
+    // A webhook's payload sits in a requestBody, but the API consumer RECEIVES it — reader side.
+    $old = diffBaseWithRequestOnlyComponent();
+    unset($old['paths']['/api/v1/forms/{id}']['put']);
+    $old['webhooks'] = [
+        'form.created' => [
+            'post' => [
+                'x-docuccino' => ['id' => 'op:v1:1212121212121212'],
+                'requestBody' => ['content' => ['application/json' => ['schema' => ['$ref' => '#/components/schemas/FormData']]]],
+                'responses' => ['200' => ['description' => 'ok']],
+            ],
+        ],
+    ];
+    $new = $old;
+    $new['components']['schemas']['FormData']['properties']['status']['enum'] = ['draft', 'published', 'archived'];
+
+    $changes = changesByCode(diffOf($old, $new));
+    expect($changes['schema.enum-value-added']->breaking)->toBeTrue();
+});
+
+it('keeps the reader-side flag when the documents disagree on a component direction', function (): void {
+    $old = diffBaseWithRequestOnlyComponent();
+    $new = $old;
+    $new['paths']['/api/v1/forms/{id}']['get']['responses']['200']['content']['application/json']['schema']['properties']['form'] = ['$ref' => '#/components/schemas/FormData'];
+    $new['components']['schemas']['FormData']['properties']['status']['enum'] = ['draft', 'published', 'archived'];
+
+    $changes = changesByCode(diffOf($old, $new));
+    expect($changes['schema.enum-value-added']->breaking)->toBeTrue();
+});
+
+it('propagates request-only direction through nested component refs', function (): void {
+    $old = diffBaseWithRequestOnlyComponent();
+    $old['components']['schemas']['FormData']['properties']['meta'] = ['$ref' => '#/components/schemas/FormMeta'];
+    $old['components']['schemas']['FormMeta'] = [
+        'x-docuccino' => ['id' => 'sch:v1:3434343434343434'],
+        'type' => 'object',
+        'properties' => ['kind' => ['type' => 'string', 'enum' => ['a', 'b']]],
+    ];
+    $new = $old;
+    $new['components']['schemas']['FormMeta']['properties']['kind']['enum'] = ['a', 'b', 'c'];
+
+    $changes = changesByCode(diffOf($old, $new));
+    expect($changes)->toHaveKey('schema.enum-value-added');
+    expect($changes['schema.enum-value-added']->breaking)->toBeFalse();
 });
 
 it('classifies a required request property added as breaking', function (): void {
