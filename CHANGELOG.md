@@ -7,6 +7,17 @@ User-facing changes to `docuccino/core` — features, fixes, performance work an
 taken from the commit messages scoped `core`. Entries begin after v0.1.2; older history is in
 the [repository](https://github.com/docuccino/docuccino) git log.
 
+## v0.7.0
+
+### Breaking changes
+
+- classify response-side enum changes as breaking ([#131](https://github.com/docuccino/docuccino/pull/131))
+  - docuccino:diff --enforce now fails changesets that add an enum value to, or drop an enum constraint from, a response schema or a referenced component schema; these previously passed as non-breaking.
+
+### Features
+
+- track component schema direction to refine enum classification ([#132](https://github.com/docuccino/docuccino/pull/132))
+
 ## v0.6.0
 
 ### Features
