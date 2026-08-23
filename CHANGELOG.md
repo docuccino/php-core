@@ -7,6 +7,17 @@ User-facing changes to `docuccino/core` — features, fixes, performance work an
 taken from the commit messages scoped `core`. Entries begin after v0.1.2; older history is in
 the [repository](https://github.com/docuccino/docuccino) git log.
 
+## v0.8.4
+
+### Features
+
+- project tag groups and pass viewer configuration through ([#158](https://github.com/docuccino/docuccino/pull/158))
+
+### Bug fixes
+
+- flag unions whose empty branch erases the typed contract ([#162](https://github.com/docuccino/docuccino/pull/162))
+- emit an explicit empty schema for untyped parameters ([#147](https://github.com/docuccino/docuccino/pull/147))
+
 ## v0.7.0
 
 ### Breaking changes
