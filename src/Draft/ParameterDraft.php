@@ -156,8 +156,12 @@ final class ParameterDraft
             $resolved['examples'] = $this->declaredExamples;
         }
 
+        // OAS 3.x: a parameter states `schema` or `content`. An untouched schema draft still freezes to
+        // the explicit unconstrained {} — dropping the member would make the document invalid, not vague.
+        // Only a parameter stating its shape elsewhere ($ref/content) legitimately carries no schema.
         $schema = $this->schema->freeze();
-        $schemaOrNull = $schema->toArray() === [] ? null : $schema;
+        $statesShapeElsewhere = isset($resolved['content']) || isset($resolved['$ref']);
+        $schemaOrNull = $schema->toArray() === [] && $statesShapeElsewhere ? null : $schema;
 
         $docuccino = new NodeExtension(
             id: $this->id,

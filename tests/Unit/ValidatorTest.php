@@ -15,6 +15,16 @@ it('validates the worked example from the design doc', function (): void {
         ->and($result->errors)->toBe([]);
 });
 
+it('rejects a parameter that states neither schema nor content', function (): void {
+    $doc = workedExample();
+    unset($doc['paths']['/api/v1/forms']['get']['parameters'][0]['schema']);
+
+    $result = $this->validator->validate($doc);
+
+    expect($result->isValid())->toBeFalse()
+        ->and($result->errors)->not->toBe([]);
+});
+
 it('rejects a document with an invalid provenance layer and reports where', function (): void {
     $doc = workedExample();
     $doc['paths']['/api/v1/forms']['get']['x-docuccino']['provenance'][0]['layer'] = 'bogus';

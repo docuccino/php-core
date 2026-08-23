@@ -21,8 +21,9 @@ namespace Docuccino\Core\Extensions\Context;
  *   `anyof` (a `{type: null}` branch).
  * - `filterStyle` (Query Builder): `bracketed` (flat `filter[status]` params, `fields[articles]` for
  *   sparse fieldsets) | `deepObject` (one `filter`/`fields` object parameter, `explode: true`).
- * - `listStyle` (Query Builder): how `sort`/`include` lists go out — `comma` (one comma-separated
- *   string) | `array` (`style: form, explode: false` with an `items` enum).
+ * - `listStyle` (Query Builder): accepted for compatibility — both keywords now express `sort`/
+ *   `include` the same way, a comma-serialised (`form`, `explode: false`) array whose items enum
+ *   the allow-list.
  * - `resourceWrap` (API Resources): document-level override of Laravel's top-level resource `data`
  *   wrapping (`integrations.api_resources.wrap`). `''` defers to each resource's static `$wrap`;
  *   `'disabled'` unwraps everything — the escape hatch for a global
@@ -89,12 +90,6 @@ final readonly class RepresentationPolicy
     public function filtersDeepObject(): bool
     {
         return $this->filterStyle === 'deepObject';
-    }
-
-    /** Whether `sort`/`include` lists are expressed as an exploded array parameter. */
-    public function listsAsArray(): bool
-    {
-        return $this->listStyle === 'array';
     }
 
     private static function keyword(mixed $value, string $default): string

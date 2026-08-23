@@ -142,6 +142,11 @@
     "parameter": {
       "type": "object",
       "x-canonicalOrder": ["x-docuccino", "name", "in", "description", "required", "deprecated", "allowEmptyValue", "style", "explode", "allowReserved", "schema", "example", "examples", "content"],
+      "anyOf": [
+        { "required": ["$ref"] },
+        { "required": ["schema"] },
+        { "required": ["content"] }
+      ],
       "properties": {
         "x-docuccino": { "$ref": "#/$defs/docuccinoNode" },
         "$ref": { "type": "string" },

@@ -148,6 +148,35 @@ it('carries a parameter x-docuccino semantic fact through freeze alongside id/pr
         ->and($frozen['x-docuccino']['facts']['routeBinding'])->toBe(['withTrashed' => true]);
 });
 
+it('freezes a parameter that got no schema contributions with an explicit empty schema', function (): void {
+    $draft = new OperationDraft;
+    $parameter = $draft->parameter('query', 'filter[opaque]');
+    $parameter->setDescription('Custom filter', Contribution::integration('query-builder'));
+
+    $frozen = $parameter->freeze()->toArray();
+
+    // OAS 3.x requires a parameter to state `schema` or `content` — an untyped one publishes the
+    // unconstrained {} rather than dropping the member and invalidating the document.
+    expect($frozen)->toHaveKey('schema')
+        ->and($frozen['schema'])->toBe([]);
+});
+
+it('omits the schema when a parameter states its shape through content instead', function (): void {
+    $draft = new OperationDraft;
+    $parameter = $draft->parameter('query', 'complex');
+    $parameter->set('content', ['application/json' => ['schema' => ['type' => 'string']]], Contribution::attribute());
+
+    expect($parameter->freeze()->toArray())->not->toHaveKey('schema');
+});
+
+it('omits the schema when a parameter states its shape through a $ref instead', function (): void {
+    $draft = new OperationDraft;
+    $parameter = $draft->parameter('query', 'shared');
+    $parameter->set('$ref', '#/components/parameters/Shared', Contribution::attribute());
+
+    expect($parameter->freeze()->toArray())->not->toHaveKey('schema');
+});
+
 it('carries schema mock hints through freeze into x-docuccino.mock', function (): void {
     $schema = (new SchemaDraft)->assignMock(['faker' => 'numberBetween:1,100']);
     $schema->set('type', 'integer', Contribution::inference());
