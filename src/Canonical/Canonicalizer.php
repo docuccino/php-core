@@ -15,13 +15,22 @@ use stdClass;
  *
  * Handlers take `mixed` and pass malformed values through untouched, so canonicalisation is
  * total. Empty object-typed members become {@see stdClass} so the serializer writes `{}` not
- * `[]`; `x-*` members other than `x-docuccino` pass through verbatim.
+ * `[]`; `x-*` members other than `x-docuccino` pass through verbatim, bar the object-valued ones
+ * in {@see OBJECT_EXTENSIONS}.
  *
  * @internal
  */
 final class Canonicalizer
 {
     private const array PARAMETER_IN_RANK = ['path' => 0, 'query' => 1, 'header' => 2, 'cookie' => 3];
+
+    /**
+     * Extension members whose value is a JSON object. They are keyed by enum value, so PHP hands them
+     * over as a LIST whenever those values are `0,1,2…` — which happens on the way back from a JSON
+     * round trip, i.e. on a warm fragment. Restoring the object here is what makes a warm build's bytes
+     * (and identities) equal a cold build's.
+     */
+    private const array OBJECT_EXTENSIONS = ['x-enumDescriptions'];
 
     /**
      * @param  array<string, mixed>  $document
@@ -87,10 +96,20 @@ final class Canonicalizer
 
         foreach ($unknown as $key => $value) {
             $key = (string) $key;
-            $out[$key] = str_starts_with($key, 'x-') ? $value : $this->canonicalizeGeneric($value);
+            $out[$key] = str_starts_with($key, 'x-') ? $this->extension($key, $value) : $this->canonicalizeGeneric($value);
         }
 
         return $out;
+    }
+
+    /** An `x-*` member verbatim, save for the object shape {@see OBJECT_EXTENSIONS} names. */
+    private function extension(string $key, mixed $value): mixed
+    {
+        if (! in_array($key, self::OBJECT_EXTENSIONS, true) || ! is_array($value) || ! array_is_list($value)) {
+            return $value;
+        }
+
+        return (object) $value;
     }
 
     /**
@@ -708,7 +727,7 @@ final class Canonicalizer
         $out = [];
         foreach ($node as $key => $value) {
             $key = (string) $key;
-            $out[$key] = str_starts_with($key, 'x-') ? $value : $this->canonicalizeGeneric($value);
+            $out[$key] = str_starts_with($key, 'x-') ? $this->extension($key, $value) : $this->canonicalizeGeneric($value);
         }
 
         return $out;

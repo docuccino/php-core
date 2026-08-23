@@ -9,6 +9,7 @@ use Docuccino\Core\Extensions\Contracts\TypeToSchema;
 use Docuccino\Core\Extensions\Ordering\ExtensionOrder;
 use Docuccino\Core\Extensions\Ordering\Priorities;
 use Docuccino\Core\Extensions\Schema\ComponentRegistry;
+use Docuccino\Core\Extensions\Schema\EnumDecoration;
 use Docuccino\Core\Extensions\Schema\EnumReflection;
 use Docuccino\Core\Extensions\Schema\SchemaIdentity;
 use Docuccino\Core\Extensions\Schema\SchemaResult;
@@ -67,17 +68,14 @@ final class EnumSchema implements TypeToSchema
             'enum' => $allInt ? $values : array_map(strval(...), $values),
         ];
 
-        $descriptions = EnumReflection::descriptions($type->fqcn);
-        if ($descriptions !== []) {
-            $schema['x-enumDescriptions'] = $descriptions;
-        }
-
-        // Codegen name hints: case names emitted alongside — never replacing — the value-bearing
-        // `enum` member. Default `none` emits nothing.
-        $naming = $context->representation()->enumNaming;
-        if (($naming === 'x-enumNames' || $naming === 'x-enum-varnames') && $type->cases !== []) {
-            $schema[$naming] = $type->cases;
-        }
+        // Case names ride as codegen name hints alongside — never replacing — the value-bearing
+        // `enum` member; descriptions in the shapes tools consume. One rulebook: EnumDecoration.
+        $schema = EnumDecoration::apply(
+            $schema,
+            $context->representation()->enumNaming,
+            $type->cases,
+            EnumReflection::descriptions($type->fqcn),
+        );
 
         // Only a reflectable enum hoists — an un-autoloadable one has no honest name or identity to
         // pin, so it stays inline, as does everything when the policy is off.

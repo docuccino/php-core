@@ -231,3 +231,35 @@ it('keeps an object-valued member a JSON object even when its keys are a 0..n se
         ->and(json_decode($json, true)['components']['schemas']['Tuple']['properties'])
         ->toBe(['0' => ['type' => 'string'], '1' => ['type' => 'integer']]);
 });
+
+/**
+ * `x-enumDescriptions` is keyed by enum value, so a `0,1,2` backing run makes it a PHP list — which is
+ * exactly the shape it comes back as once a fragment has been through JSON. A warm build has to say
+ * what a cold one says, bytes and identities both, so the object is restored here.
+ */
+it('restores the object shape of an object-valued x-* member a JSON round trip flattened', function (): void {
+    $doc = [
+        'openapi' => '3.2.0',
+        'uir' => '1.0.0',
+        'info' => ['version' => '1.0.0', 'title' => 'T'],
+        'paths' => [],
+        'components' => [
+            'schemas' => [
+                'Tier' => [
+                    'type' => 'integer',
+                    'enum' => [0, 1],
+                    'x-enumDescriptions' => ['Free.', 'Paid.'],
+                    'x-enum-descriptions' => ['Free.', 'Paid.'],
+                ],
+            ],
+        ],
+    ];
+
+    $json = (new CanonicalJsonSerializer)->serialize($this->canonicalizer->canonicalize($doc));
+
+    expect($json)->toContain('"x-enumDescriptions": {')
+        // The index-parallel array is an array by contract and stays one.
+        ->and($json)->toContain('"x-enum-descriptions": [')
+        ->and(json_decode($json, true)['components']['schemas']['Tier']['x-enumDescriptions'])
+        ->toBe(['0' => 'Free.', '1' => 'Paid.']);
+});

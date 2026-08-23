@@ -209,3 +209,39 @@ it('applies the same tag precedence to @property, read forms last within each an
 it('still leaves a write-only @property out', function (): void {
     expect((new DocBlockReader)->properties("/**\n * @property-write int \$secret\n */"))->toBe([]);
 });
+
+/**
+ * Inline tags name code the reader of an emitted document cannot see, so they never travel with the
+ * prose. They are dropped rather than unwrapped — an unwrapped `{@see Foo}` would leave a bare FQCN in
+ * consumer-facing text — and the bracket an author wrapped one in goes with it.
+ */
+it('drops inline tags out of the prose it publishes', function (string $prose, ?string $summary): void {
+    expect((new DocBlockReader)->summary("/**\n * ".$prose."\n */"))->toBe($summary);
+})->with([
+    'a see tag mid-sentence' => ['The body {@see \\App\\Internal\\Thing} names.', 'The body names.'],
+    'a bracketed see tag takes its brackets' => ['A subclass ({@see ListQueryBuilder}) filtered here.', 'A subclass filtered here.'],
+    'a member reference' => ['Answers exactly what {@see Model::getTable()} answers.', 'Answers exactly what answers.'],
+    'a link tag' => ['Rated by {@link https://example.test/spec} alone.', 'Rated by alone.'],
+    'inheritdoc alone leaves no prose' => ['{@inheritdoc}', null],
+    'inheritDoc in its other spelling' => ['{@inheritDoc}', null],
+    'a trailing tag keeps the sentence intact' => ['The yearly entries {@see Entry}.', 'The yearly entries.'],
+    'a bracketed tag alone' => ['Sorted ({@see Sorter}).', 'Sorted.'],
+    'two tags in a row' => ['Built by {@see A} and {@see B} together.', 'Built by and together.'],
+    'a paren that is not a tag survives' => ['Whatever `toArray()` returns.', 'Whatever `toArray()` returns.'],
+    'a brace that is not a tag survives' => ['Shaped like array{id: int}.', 'Shaped like array{id: int}.'],
+]);
+
+it('drops inline tags out of @property and @param descriptions too', function (): void {
+    $reader = new DocBlockReader;
+
+    expect($reader->properties("/**\n * @property string \$title The title, per {@see Almanac}.\n */"))
+        ->toBe(['title' => ['type' => 'string', 'description' => 'The title, per.']])
+        ->and($reader->params("/**\n * @param  int  \$id  {@inheritdoc}\n */"))
+        ->toBe(['id' => ['type' => 'int', 'description' => null]]);
+});
+
+it('drops inline tags out of an explicit @summary or @description', function (): void {
+    $read = (new DocBlockReader)->read("/**\n * @summary Listed by {@see Lister}.\n * @description Detail from {@see Detail}.\n */");
+
+    expect($read)->toBe(['summary' => 'Listed by.', 'description' => 'Detail from.']);
+});

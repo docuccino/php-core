@@ -63,10 +63,9 @@ final class DocBlockReader
                     continue;
                 }
 
-                $description = trim($tag->description);
                 $out[$name] = [
                     'type' => (string) $tag->type,
-                    'description' => $description === '' ? null : $description,
+                    'description' => self::readable($tag->description),
                 ];
             }
         }
@@ -96,10 +95,9 @@ final class DocBlockReader
                     continue;
                 }
 
-                $description = trim($tag->description);
                 $out[$name] = [
                     'type' => (string) $tag->type,
-                    'description' => $description === '' ? null : $description,
+                    'description' => self::readable($tag->description),
                 ];
             }
         }
@@ -152,8 +150,8 @@ final class DocBlockReader
             return ['summary' => null, 'description' => null];
         }
 
-        $summary = $this->tag($node, '@summary');
-        $description = $this->tag($node, '@description');
+        $summary = self::readable($this->tag($node, '@summary'));
+        $description = self::readable($this->tag($node, '@description'));
         if ($summary !== null || $description !== null) {
             return ['summary' => $summary, 'description' => $description];
         }
@@ -195,13 +193,46 @@ final class DocBlockReader
     {
         foreach ($node->children as $child) {
             if ($child instanceof PhpDocTextNode) {
-                $text = trim($child->text);
-                if ($text !== '') {
+                $text = self::readable($child->text);
+                if ($text !== null) {
                     return $text;
                 }
             }
         }
 
         return null;
+    }
+
+    /**
+     * Docblock prose as a document may publish it, or null when nothing is left of it.
+     *
+     * A brace-wrapped inline tag — see, link, inherit-doc — is an author-to-author note naming code the
+     * reader of an emitted document cannot see, so every description this reader hands out has them
+     * removed rather than unwrapped: an unwrapped see tag would leave a bare FQCN in consumer-facing
+     * prose. A tag the author wrapped in brackets takes the brackets with it. Newlines survive — the OAS
+     * summary/description split reads them.
+     */
+    private static function readable(?string $text): ?string
+    {
+        if ($text === null) {
+            return null;
+        }
+
+        $inline = '\{@[a-zA-Z][\w-]*[^{}]*\}';
+        $replacements = [
+            '/\h*[(\[]\h*(?:'.$inline.'\h*)+[)\]]/' => '',
+            '/'.$inline.'/' => '',
+            // Tidy the hole the tag left: doubled spaces, and a space it pushed in front of punctuation.
+            '/\h{2,}/' => ' ',
+            '/\h+([.,;:!?])/' => '$1',
+        ];
+
+        foreach ($replacements as $pattern => $replacement) {
+            $text = preg_replace($pattern, $replacement, $text) ?? $text;
+        }
+
+        $text = trim($text);
+
+        return $text === '' ? null : $text;
     }
 }

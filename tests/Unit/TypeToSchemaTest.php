@@ -54,9 +54,14 @@ it('maps each scalar/literal/collection type to its schema', function (DType $ty
     'status marker → bare integer' => [new StatusMarkerT, ['type' => 'integer']],
 ]);
 
-it('maps an enum to a string enum of case names', function (): void {
+it('maps an enum to a string enum of case names, hint-decorated by default', function (): void {
     expect(convertType(new EnumT('App\\Status', ['draft', 'published'])))
-        ->toBe(['type' => 'string', 'enum' => ['draft', 'published']]);
+        ->toBe([
+            'type' => 'string',
+            'enum' => ['draft', 'published'],
+            'x-enum-varnames' => ['draft', 'published'],
+            'x-enumNames' => ['draft', 'published'],
+        ]);
 });
 
 it('maps a keyed array shape to an object with required non-optional keys', function (): void {

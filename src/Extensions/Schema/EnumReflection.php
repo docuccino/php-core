@@ -76,39 +76,7 @@ final class EnumReflection
             }
         }
 
-        return self::docSummary($case->getDocComment());
-    }
-
-    /**
-     * The first prose paragraph of a docblock, or null when there is none: strip the markers and
-     * per-line `*`, stop at the first blank or `@tag` line, collapse to one trimmed string. Hand-rolled
-     * so core stays free of the phpdoc-parser dependency — marker stripping, not tag parsing.
-     */
-    private static function docSummary(string|false $doc): ?string
-    {
-        if ($doc === false) {
-            return null;
-        }
-
-        $body = preg_replace('#^\s*/\*\*+|\*+/\s*$#', '', $doc) ?? '';
-        $paragraph = [];
-        foreach (preg_split('/\r?\n/', $body) ?: [] as $line) {
-            $line = trim(ltrim(trim($line), '*'));
-
-            if ($line === '' || str_starts_with($line, '@')) {
-                if ($paragraph !== []) {
-                    break;
-                }
-
-                continue;
-            }
-
-            $paragraph[] = $line;
-        }
-
-        $summary = trim(implode(' ', $paragraph));
-
-        return $summary === '' ? null : $summary;
+        return DocSummary::of($case->getDocComment());
     }
 
     /**

@@ -6,6 +6,7 @@ namespace Docuccino\Core\Extensions\BuiltIn;
 
 use Docuccino\Core\Extensions\Contracts\SchemaContext;
 use Docuccino\Core\Extensions\Contracts\TypeToSchema;
+use Docuccino\Core\Extensions\Schema\EnumDecoration;
 use Docuccino\Core\Extensions\Schema\SchemaResult;
 use Docuccino\Core\Inference\DType\DType;
 use Docuccino\Core\Inference\DType\EnumT;
@@ -32,13 +33,14 @@ final class EnumTypeToSchema implements TypeToSchema
             return new SchemaResult(['type' => 'string'], 0.5);
         }
 
-        $schema = ['type' => 'string', 'enum' => $type->cases];
-
-        // Codegen name hints: additive x-* members that never touch `enum` itself. Default emits nothing.
-        $naming = $context->representation()->enumNaming;
-        if ($naming === 'x-enumNames' || $naming === 'x-enum-varnames') {
-            $schema[$naming] = $type->cases;
-        }
+        // Codegen name hints: additive x-* members that never touch `enum` itself — one rulebook,
+        // EnumDecoration. No prose is known here (nothing reflectable), so no description shapes.
+        $schema = EnumDecoration::apply(
+            ['type' => 'string', 'enum' => $type->cases],
+            $context->representation()->enumNaming,
+            $type->cases,
+            [],
+        );
 
         return new SchemaResult($schema, 0.9);
     }

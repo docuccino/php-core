@@ -23,11 +23,11 @@ function convertWithPolicy(DType $type, RepresentationPolicy $policy): array
     return $converter->toSchema($type)->schema;
 }
 
-it('defaults every policy to behaviour-preserving keywords', function (): void {
+it('defaults every policy to the shape most consumers handle best', function (): void {
     $policy = RepresentationPolicy::fromConfig([]);
 
     expect($policy->operationId)->toBe('route-name')
-        ->and($policy->enumNaming)->toBe('none')
+        ->and($policy->enumNaming)->toBe('names')
         ->and($policy->nullable)->toBe('type-array');
 });
 
@@ -43,10 +43,16 @@ it('reads the nested enums.naming keyword', function (): void {
         ->and($policy->enumNaming)->toBe('x-enum-varnames');
 });
 
-it('emits no enum name hints by default', function (): void {
-    $schema = convertWithPolicy(new EnumT('App\\Status', ['draft', 'live']), RepresentationPolicy::fromConfig([]));
+it('emits both enum name-hint spellings by default and none when opted out', function (): void {
+    $default = convertWithPolicy(new EnumT('App\\Status', ['draft', 'live']), RepresentationPolicy::fromConfig([]));
+    $none = convertWithPolicy(new EnumT('App\\Status', ['draft', 'live']), RepresentationPolicy::fromConfig(['enums' => ['naming' => 'none']]));
 
-    expect($schema)->toBe(['type' => 'string', 'enum' => ['draft', 'live']]);
+    expect($default)->toBe([
+        'type' => 'string',
+        'enum' => ['draft', 'live'],
+        'x-enum-varnames' => ['draft', 'live'],
+        'x-enumNames' => ['draft', 'live'],
+    ])->and($none)->toBe(['type' => 'string', 'enum' => ['draft', 'live']]);
 });
 
 it('emits x-enumNames when the policy asks for it', function (): void {
