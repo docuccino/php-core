@@ -91,6 +91,14 @@ final class Assembler
             $doc['tags'] = $tags;
         }
 
+        // The 3.2 `parent` members above are the spec's own statement of the hierarchy; `x-tagGroups`
+        // is the same forest in the convention most renderers group a sidebar by. Flat tags emit
+        // nothing.
+        $tagGroups = $document->tagGroups();
+        if ($tagGroups !== []) {
+            $doc['x-tagGroups'] = $tagGroups;
+        }
+
         $doc['paths'] = $paths;
 
         if ($webhooks !== []) {

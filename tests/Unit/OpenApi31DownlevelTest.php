@@ -79,6 +79,28 @@ it('drops each 3.2-only tag member with its own warning', function (string $memb
     'kind' => ['kind', 'downlevel.tag-kind'],
 ]);
 
+// What a dropped `parent` actually costs depends on the document in hand, so the help is read off it
+// rather than assumed: an artifact written before anything projected the groups carries `parent`
+// alone, and a help claiming the hierarchy survived would be false for it.
+it('tells the truth about the dropped parent for the document in hand', function (bool $withGroups, string $expected): void {
+    $document = documentWith32OnlyConstructs();
+    if ($withGroups) {
+        $document['x-tagGroups'] = [['name' => 'Billing', 'tags' => ['Billing', 'Invoices']]];
+    }
+
+    $result = $this->emitter->emitWithReport(UirDocument::fromArray($document));
+    $parent = array_values(array_filter(
+        $result->report->warnings(),
+        static fn ($d) => $d->code === 'downlevel.tag-parent',
+    ));
+
+    expect($parent)->toHaveCount(1)
+        ->and($parent[0]->help)->toContain($expected);
+})->with([
+    'the groups carry the forest, so only the member is lost' => [true, 'Only the 3.2 `parent` member is dropped'],
+    'nothing else carries it, so the hierarchy really flattens' => [false, 'The tag hierarchy flattens'],
+]);
+
 it('warns once per tag per dropped member and names the tag', function (): void {
     $result = $this->emitter->emitWithReport(UirDocument::fromArray(documentWith32OnlyConstructs()));
 

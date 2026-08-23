@@ -38,6 +38,14 @@ final readonly class OpenApi31DownlevelEmitter implements ReportingEmitter
         'kind' => ['downlevel.tag-kind', 'Tag categorisation is lost; 3.1 consumers treat every tag the same.'],
     ];
 
+    /**
+     * What a dropped `parent` costs when the document ALSO states the forest as `x-tagGroups`, which
+     * 3.1 keeps. Read off the document rather than assumed: an artifact written before anything
+     * projected the groups carries `parent` alone, and telling its author nothing was lost would be
+     * false.
+     */
+    private const string PARENT_HELP_WITH_GROUPS = 'Only the 3.2 `parent` member is dropped; this document also states the hierarchy as `x-tagGroups`, which the renderers reading that convention still group by.';
+
     public function __construct(
         private OpenApi32Emitter $oas32 = new OpenApi32Emitter,
         private Canonicalizer $canonicalizer = new Canonicalizer,
@@ -95,7 +103,7 @@ final readonly class OpenApi31DownlevelEmitter implements ReportingEmitter
         }
 
         if (isset($array['tags']) && is_array($array['tags'])) {
-            $array['tags'] = $this->downlevelTags($array['tags'], $diagnostics);
+            $array['tags'] = $this->downlevelTags($array['tags'], $diagnostics, isset($array['x-tagGroups']));
         }
 
         if (isset($array['paths']) && is_array($array['paths'])) {
@@ -124,7 +132,7 @@ final readonly class OpenApi31DownlevelEmitter implements ReportingEmitter
      * @param  list<Diagnostic>  $diagnostics
      * @return list<mixed>
      */
-    private function downlevelTags(array $tags, array &$diagnostics): array
+    private function downlevelTags(array $tags, array &$diagnostics, bool $hasTagGroups): array
     {
         $out = [];
 
@@ -151,7 +159,7 @@ final readonly class OpenApi31DownlevelEmitter implements ReportingEmitter
                         $member,
                         $name,
                     ),
-                    help: $help,
+                    help: $member === 'parent' && $hasTagGroups ? self::PARENT_HELP_WITH_GROUPS : $help,
                 );
             }
 

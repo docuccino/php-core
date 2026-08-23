@@ -183,6 +183,56 @@ final readonly class DocumentConfig
     }
 
     /**
+     * The tag forest as `x-tagGroups`: one group per parentless tag — itself first, then every
+     * descendant — in {@see tagDefinitions()} order. Empty when no tag declares a parent, so a flat
+     * document changes not a byte. The projection is total or absent: a viewer rendering groups hides
+     * any tag outside them, so a childless root still gets its singleton group rather than vanishing.
+     *
+     * @return list<array{name: string, tags: list<string>}>
+     */
+    public function tagGroups(): array
+    {
+        $tags = $this->tagDefinitions();
+
+        $children = [];
+        $parented = [];
+        foreach ($tags as $tag) {
+            $parent = $tag['parent'] ?? null;
+            if ($parent !== null) {
+                $children[$parent][] = $tag['name'];
+                $parented[$tag['name']] = true;
+            }
+        }
+
+        if ($children === []) {
+            return [];
+        }
+
+        $groups = [];
+        foreach ($tags as $tag) {
+            if (! isset($parented[$tag['name']])) {
+                $groups[] = ['name' => $tag['name'], 'tags' => self::descendantTags($tag['name'], $children)];
+            }
+        }
+
+        return $groups;
+    }
+
+    /**
+     * @param  array<string, list<string>>  $children
+     * @return list<string>
+     */
+    private static function descendantTags(string $name, array $children): array
+    {
+        $out = [$name];
+        foreach ($children[$name] ?? [] as $child) {
+            $out = [...$out, ...self::descendantTags($child, $children)];
+        }
+
+        return $out;
+    }
+
+    /**
      * @return array{tags: list<array{name: string, summary?: string, description?: string, parent?: string, kind?: string}>, issues: list<array{tag: string, parent: string, cycle: bool}>}
      */
     private function resolveTags(): array

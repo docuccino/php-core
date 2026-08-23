@@ -44,9 +44,13 @@ final class AttributeOverridesExtension implements OperationExtension
 
     public function handle(OperationDraft $operation, RouteContext $context): void
     {
-        // Docblock layer.
+        // Docblock layer. `@deprecated` sets only the flag — mirroring #[DeprecatedOperation], so the
+        // two spellings can't diverge.
         $operation->setSummary($context->summary, Contribution::docblock());
         $operation->setDescription($context->description, Contribution::docblock());
+        if ($context->deprecated) {
+            $operation->setDeprecated(true, Contribution::docblock());
+        }
 
         // Default operationId from the representation policy, at fallback precedence so
         // #[OperationId] still wins.

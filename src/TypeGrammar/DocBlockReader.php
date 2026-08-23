@@ -141,24 +141,28 @@ final class DocBlockReader
      * note about who may call this never reaches the document, and a field the author didn't state
      * comes out empty rather than half-quoting a note meant for somebody else.
      *
-     * @return array{summary: ?string, description: ?string}
+     * @return array{summary: ?string, description: ?string, deprecated: bool}
      */
     public function read(?string $docComment): array
     {
         $node = $this->stack->parseDocBlock($docComment);
         if ($node === null) {
-            return ['summary' => null, 'description' => null];
+            return ['summary' => null, 'description' => null, 'deprecated' => false];
         }
+
+        // `@deprecated` is a fact about the operation, not prose — it rides along whichever branch
+        // answers the text.
+        $deprecated = $node->getTagsByName('@deprecated') !== [];
 
         $summary = self::readable($this->tag($node, '@summary'));
         $description = self::readable($this->tag($node, '@description'));
         if ($summary !== null || $description !== null) {
-            return ['summary' => $summary, 'description' => $description];
+            return ['summary' => $summary, 'description' => $description, 'deprecated' => $deprecated];
         }
 
         $prose = $this->prose($node);
         if ($prose === null) {
-            return ['summary' => null, 'description' => null];
+            return ['summary' => null, 'description' => null, 'deprecated' => $deprecated];
         }
 
         $parts = preg_split('/\R{2,}/', $prose, 2);
@@ -168,6 +172,7 @@ final class DocBlockReader
         return [
             'summary' => $summary === '' ? null : $summary,
             'description' => ($description === null || $description === '') ? null : $description,
+            'deprecated' => $deprecated,
         ];
     }
 

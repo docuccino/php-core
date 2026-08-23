@@ -150,3 +150,36 @@ it('emits no tags and no issues when definitions are absent or malformed', funct
     'string' => ['Billing'],
     'empty' => [[]],
 ]);
+
+// The same forest projected as `x-tagGroups` (DocumentConfig::tagGroups()) — the convention most
+// renderers group a sidebar by, none of them reading the 3.2 `parent` member.
+it('projects the tag forest as groups, roots first members of their own group', function (): void {
+    $groups = tagConfig([
+        ['name' => 'Billing'],
+        ['name' => 'Invoices', 'parent' => 'Billing'],
+        ['name' => 'Credit Notes', 'parent' => 'Invoices'],
+        ['name' => 'Webhooks'],
+    ])->tagGroups();
+
+    // A deeper hierarchy flattens into its root's group; a childless root keeps a singleton group
+    // rather than vanishing from a viewer that hides ungrouped tags.
+    expect($groups)->toBe([
+        ['name' => 'Billing', 'tags' => ['Billing', 'Invoices', 'Credit Notes']],
+        ['name' => 'Webhooks', 'tags' => ['Webhooks']],
+    ]);
+});
+
+it('projects no groups when no tag declares a parent', function (): void {
+    expect(tagConfig([['name' => 'Billing'], ['name' => 'Webhooks']])->tagGroups())->toBe([]);
+});
+
+it('treats a tag whose parent link was dropped as a root of its own group', function (): void {
+    $groups = tagConfig([
+        ['name' => 'Billing', 'parent' => 'Billing'], // self-cycle: the link drops, the tag stays
+        ['name' => 'Invoices', 'parent' => 'Billing'],
+    ])->tagGroups();
+
+    expect($groups)->toBe([
+        ['name' => 'Billing', 'tags' => ['Billing', 'Invoices']],
+    ]);
+});
