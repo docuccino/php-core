@@ -7,6 +7,21 @@ User-facing changes to `docuccino/core` — features, fixes, performance work an
 taken from the commit messages scoped `core`. Entries begin after v0.1.2; older history is in
 the [repository](https://github.com/docuccino/docuccino) git log.
 
+## v0.9.0
+
+### Breaking changes
+
+- retract the keywords a declared schema shape supersedes ([#185](https://github.com/docuccino/docuccino/pull/185))
+  - a schema whose shape is declared by an attribute, docblock or overlay no longer publishes the inference keywords that declaration supersedes. Documents gain a closed shape where they previously advertised extra keys, and lose `type`/`items` beside a declared `$ref`.
+- name a shared error component for what it is, not for what surrounded it ([#183](https://github.com/docuccino/docuccino/pull/183))
+  - shared error components are named and grouped differently. Two operations whose error bodies differ only in wording now share one `components.responses` entry — most often gaining a named type where each previously kept an inline schema, since the wording had been keeping them below the sharing threshold — and a hoisted shape under a multi-representation response is named `Error<status>` rather than inheriting the response's claimed name. Non-plurality arms gain `summary`/`description` beside their `$ref` in 3.1/3.2 output; a 3.0 export drops that wording with a `downlevel.ref-siblings` note. Examples now merge across wordings, so an operation may advertise an example another operation recorded. A generated client written against the previous names will need regenerating.
+- let a declared response retract the placeholders it supersedes ([#181](https://github.com/docuccino/docuccino/pull/181))
+  - the `inferred-response.unpinned-redirect` diagnostic is now `lint.unpinned-redirect`. Anything filtering on the old code, or safelisting it under `diagnostics.accept`, needs the new name.
+
+### Bug fixes
+
+- honour a document's configured format samples in the Postman collection ([#179](https://github.com/docuccino/docuccino/pull/179))
+
 ## v0.8.5
 
 ### Features
