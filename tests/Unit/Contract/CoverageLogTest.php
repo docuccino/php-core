@@ -251,10 +251,17 @@ it('reports how far apart the logs it read were written', function (): void {
     CoverageLog::for($this->root, '1')->append(['op:v1:aaaaaaaaaaaaaaaa']);
     $old = $this->root.'/1.0.deadbeef.ids';
     file_put_contents($old, "op:v1:bbbbbbbbbbbbbbbb\n");
-    touch($old, time() - 9000);
+
+    // Both mtimes come off one base, so the span is exactly the offset — offset one of them from a
+    // second time() and a second spent between the two reads comes off the span.
+    $base = time();
+    foreach (CoverageLog::scan($this->root)->files as $log) {
+        touch($log, $base);
+    }
+    touch($old, $base - 9000);
     clearstatcache();
 
-    expect(CoverageMerge::of([$this->root])->span)->toBeGreaterThanOrEqual(9000)
+    expect(CoverageMerge::of([$this->root])->span)->toBe(9000)
         ->and(CoverageMerge::of([$this->root.'/nothing-here'])->span)->toBe(0);
 });
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Emit\Postman;
 
+use Docuccino\Core\Draft\DeprecationNote;
 use Docuccino\Core\Support\Arr;
 
 /**
@@ -152,14 +153,15 @@ final class Description
     public static function request(array $operation): string
     {
         $sections = [];
+        $description = self::text($operation['description'] ?? null);
 
         // Postman has no deprecated flag, so prose is the only truthful carrier — which is also why
-        // there is no diagnostic for it: nothing was lost.
-        if (($operation['deprecated'] ?? false) === true) {
+        // there is no diagnostic for it: nothing was lost. Where the description already carries the
+        // reason, that paragraph says it and says why, so the generic line would only say it twice.
+        if (($operation['deprecated'] ?? false) === true && ! DeprecationNote::marks($description)) {
             $sections[] = '> **Deprecated.** This endpoint may be removed in a future version of the API.';
         }
 
-        $description = self::text($operation['description'] ?? null);
         if ($description !== '') {
             $sections[] = $description;
         }

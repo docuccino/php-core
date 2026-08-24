@@ -90,6 +90,7 @@ final class RouteContext
         public readonly array $routeBindingFields = [],
         public readonly ?string $operationId = null,
         public readonly bool $deprecated = false,
+        public readonly ?string $deprecationReason = null,
     ) {
         $this->dependencies = new RouteDependencies;
         $this->notes = new RouteNotes;

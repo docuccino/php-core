@@ -30,7 +30,7 @@ it('leaves the description null for a single-paragraph docblock', function (): v
 });
 
 it('returns both null for an empty or absent docblock', function (?string $doc): void {
-    expect((new DocBlockReader)->read($doc))->toBe(['summary' => null, 'description' => null, 'deprecated' => false]);
+    expect((new DocBlockReader)->read($doc))->toBe(['summary' => null, 'description' => null, 'deprecated' => false, 'deprecationReason' => null]);
 })->with([
     'empty docblock' => ['/** */'],
     'null' => [null],
@@ -49,7 +49,7 @@ it('takes summary and description from @summary and @description over the prose'
 });
 
 it('drops the free prose from both fields once either tag is declared', function (string $doc, ?string $summary, ?string $description): void {
-    expect((new DocBlockReader)->read($doc))->toBe(['summary' => $summary, 'description' => $description, 'deprecated' => false]);
+    expect((new DocBlockReader)->read($doc))->toBe(['summary' => $summary, 'description' => $description, 'deprecated' => false, 'deprecationReason' => null]);
 })->with([
     '@summary alone' => ["/**\n * Internal note.\n *\n * More of it.\n *\n * @summary Send an invoice\n */", 'Send an invoice', null],
     '@description alone' => ["/**\n * Internal note.\n *\n * More of it.\n *\n * @description The long version.\n */", null, 'The long version.'],
@@ -243,18 +243,25 @@ it('drops inline tags out of @property and @param descriptions too', function ()
 it('drops inline tags out of an explicit @summary or @description', function (): void {
     $read = (new DocBlockReader)->read("/**\n * @summary Listed by {@see Lister}.\n * @description Detail from {@see Detail}.\n */");
 
-    expect($read)->toBe(['summary' => 'Listed by.', 'description' => 'Detail from.', 'deprecated' => false]);
+    expect($read)->toBe(['summary' => 'Listed by.', 'description' => 'Detail from.', 'deprecated' => false, 'deprecationReason' => null]);
 });
 
-it('reads the @deprecated tag as a fact, on every prose branch', function (string $doc, bool $deprecated, ?string $summary): void {
+// The fact and the reason both travel, on every prose branch: the flag says the operation is going
+// away, and the text after the tag says why — the only thing an author can write there, and the same
+// thing #[DeprecatedOperation(reason:)] carries.
+it('reads the @deprecated tag as a fact and its trailing text as the reason, on every prose branch', function (string $doc, bool $deprecated, ?string $summary, ?string $reason): void {
     $read = (new DocBlockReader)->read($doc);
 
     expect($read['deprecated'])->toBe($deprecated)
-        ->and($read['summary'])->toBe($summary);
+        ->and($read['summary'])->toBe($summary)
+        ->and($read['deprecationReason'])->toBe($reason);
 })->with([
-    'bare tag under prose' => ["/**\n * Lists widgets.\n *\n * @deprecated\n */", true, 'Lists widgets.'],
-    'tag with a reason' => ["/**\n * Lists widgets.\n *\n * @deprecated Superseded by v2.\n */", true, 'Lists widgets.'],
-    'tag beside @summary' => ["/**\n * Internal note.\n *\n * @summary Send an invoice\n * @deprecated\n */", true, 'Send an invoice'],
-    'tag with no prose at all' => ["/**\n * @deprecated\n */", true, null],
-    'no tag' => ["/**\n * Lists widgets.\n */", false, 'Lists widgets.'],
+    'bare tag under prose' => ["/**\n * Lists widgets.\n *\n * @deprecated\n */", true, 'Lists widgets.', null],
+    'tag with a reason' => ["/**\n * Lists widgets.\n *\n * @deprecated Superseded by v2.\n */", true, 'Lists widgets.', 'Superseded by v2.'],
+    'tag beside @summary' => ["/**\n * Internal note.\n *\n * @summary Send an invoice\n * @deprecated Use the batch endpoint.\n */", true, 'Send an invoice', 'Use the batch endpoint.'],
+    'tag with no prose at all' => ["/**\n * @deprecated\n */", true, null, null],
+    // An author-to-author inline tag names code the consumer cannot see, so it leaves as it does
+    // everywhere else prose reaches the document.
+    'reason carrying an inline tag' => ["/**\n * @deprecated Use {@see V2Controller::index()} instead.\n */", true, null, 'Use instead.'],
+    'no tag' => ["/**\n * Lists widgets.\n */", false, 'Lists widgets.', null],
 ]);

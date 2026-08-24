@@ -73,6 +73,26 @@ it('expresses null as an anyOf branch under the anyof policy', function (): void
     expect($schema)->toBe(['anyOf' => [['type' => 'string'], ['type' => 'null']]]);
 });
 
+it('hoists to components unless a section says false', function (string $section, string $keyword): void {
+    // One row per family that hoists. Only the literal `false` turns one off: a key nobody wrote and a
+    // key holding something that is not a boolean both mean "the default", and the default is hoisting.
+    expect(RepresentationPolicy::fromConfig([])->{$keyword})->toBeTrue()
+        ->and(RepresentationPolicy::fromConfig([$section => []])->{$keyword})->toBeTrue()
+        ->and(RepresentationPolicy::fromConfig([$section => ['components' => true]])->{$keyword})->toBeTrue()
+        ->and(RepresentationPolicy::fromConfig([$section => ['components' => 'no']])->{$keyword})->toBeTrue()
+        ->and(RepresentationPolicy::fromConfig([$section => ['components' => false]])->{$keyword})->toBeFalse();
+
+    // A section is its own switch: turning one off leaves the others hoisting.
+    $off = RepresentationPolicy::fromConfig([$section => ['components' => false]]);
+    foreach (['enumComponents', 'errorComponents', 'paginationComponents'] as $other) {
+        expect($off->{$other})->toBe($other === $keyword ? false : true);
+    }
+})->with([
+    'enums' => ['enums', 'enumComponents'],
+    'errors' => ['errors', 'errorComponents'],
+    'pagination' => ['pagination', 'paginationComponents'],
+]);
+
 it('normalises the api_resources wrap config to the resourceWrap keyword', function (mixed $wrap, string $expected): void {
     expect(RepresentationPolicy::fromConfig([], $wrap)->resourceWrap)->toBe($expected);
 })->with([

@@ -48,6 +48,32 @@ final readonly class ValidationField
         return array_key_exists($keyword, $this->node->keywords);
     }
 
+    /**
+     * A value this rule alone knows is legal, for the synthesized `example` — or null to say no value
+     * would be, which is final and outranks any other rule's proposal.
+     *
+     * For a rule that constrains the VALUE without leaving a schema keyword behind: a `date_format`
+     * wire format, a timezone identifier, a file upload. Whatever is proposed is still validated
+     * against the field's finished schema before it is published, so a later rule that narrows the
+     * field drops the proposal rather than contradicting it. A rule whose constraint IS a keyword
+     * needs nothing here — the keyword is what the synthesis reads. See {@see FieldExample}.
+     */
+    public function proposeExample(mixed $value): void
+    {
+        if ($this->node->exampleSuppressed) {
+            return;
+        }
+
+        if ($value === null) {
+            $this->node->exampleSuppressed = true;
+            $this->node->exampleProposal = null;
+
+            return;
+        }
+
+        $this->node->exampleProposal ??= [$value];
+    }
+
     public function markRequired(): void
     {
         $this->node->required = true;

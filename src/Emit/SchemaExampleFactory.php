@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Docuccino\Core\Emit;
 
 use Docuccino\Core\Support\Arr;
+use Docuccino\Core\Support\FormatSamples;
 use stdClass;
 
 /**
@@ -25,26 +26,6 @@ final readonly class SchemaExampleFactory
 {
     /** Deep enough for any real payload; past it a self-referential schema is the likelier reading. */
     private const int MAX_DEPTH = 8;
-
-    /** Sample values by `format`, so a consumer gets something that will actually validate. */
-    private const array FORMATS = [
-        'date-time' => '2024-01-01T00:00:00Z',
-        'date' => '2024-01-01',
-        'time' => '00:00:00',
-        'duration' => 'P1D',
-        'email' => 'user@example.com',
-        'idn-email' => 'user@example.com',
-        'uuid' => '3fa85f64-5717-4562-b3fc-2c963f66afa6',
-        'uri' => 'https://example.com',
-        'uri-reference' => '/example',
-        'url' => 'https://example.com',
-        'hostname' => 'example.com',
-        'ipv4' => '192.0.2.1',
-        'ipv6' => '2001:db8::1',
-        'byte' => 'ZXhhbXBsZQ==',
-        'binary' => '',
-        'password' => 'secret',
-    ];
 
     /**
      * @param  array<string, mixed>  $schema
@@ -323,7 +304,7 @@ final readonly class SchemaExampleFactory
     {
         $format = $schema['format'] ?? null;
 
-        return is_string($format) ? (self::FORMATS[$format] ?? 'string') : 'string';
+        return is_string($format) ? (FormatSamples::for($format) ?? 'string') : 'string';
     }
 
     /**

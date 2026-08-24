@@ -141,28 +141,30 @@ final class DocBlockReader
      * note about who may call this never reaches the document, and a field the author didn't state
      * comes out empty rather than half-quoting a note meant for somebody else.
      *
-     * @return array{summary: ?string, description: ?string, deprecated: bool}
+     * @return array{summary: ?string, description: ?string, deprecated: bool, deprecationReason: ?string}
      */
     public function read(?string $docComment): array
     {
         $node = $this->stack->parseDocBlock($docComment);
         if ($node === null) {
-            return ['summary' => null, 'description' => null, 'deprecated' => false];
+            return ['summary' => null, 'description' => null, 'deprecated' => false, 'deprecationReason' => null];
         }
 
-        // `@deprecated` is a fact about the operation, not prose — it rides along whichever branch
-        // answers the text.
+        // `@deprecated` is a fact about the operation rather than prose, so it rides along whichever
+        // branch answers the text — and the text the author wrote after the tag is the reason, which
+        // the overrides layer publishes exactly as it publishes #[DeprecatedOperation]'s.
         $deprecated = $node->getTagsByName('@deprecated') !== [];
+        $reason = self::readable($this->tag($node, '@deprecated'));
 
         $summary = self::readable($this->tag($node, '@summary'));
         $description = self::readable($this->tag($node, '@description'));
         if ($summary !== null || $description !== null) {
-            return ['summary' => $summary, 'description' => $description, 'deprecated' => $deprecated];
+            return ['summary' => $summary, 'description' => $description, 'deprecated' => $deprecated, 'deprecationReason' => $reason];
         }
 
         $prose = $this->prose($node);
         if ($prose === null) {
-            return ['summary' => null, 'description' => null, 'deprecated' => $deprecated];
+            return ['summary' => null, 'description' => null, 'deprecated' => $deprecated, 'deprecationReason' => $reason];
         }
 
         $parts = preg_split('/\R{2,}/', $prose, 2);
@@ -173,6 +175,7 @@ final class DocBlockReader
             'summary' => $summary === '' ? null : $summary,
             'description' => ($description === null || $description === '') ? null : $description,
             'deprecated' => $deprecated,
+            'deprecationReason' => $reason,
         ];
     }
 

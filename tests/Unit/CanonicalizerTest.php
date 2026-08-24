@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Docuccino\Core\Canonical\Canonicalizer;
 use Docuccino\Core\Canonical\CanonicalJsonSerializer;
 use Docuccino\Core\Emit\UirEmitter;
+use Docuccino\Core\Extensions\Schema\EnumDecoration;
 
 /**
  * Reverses the key order of every map (associative array) at every depth while leaving
@@ -262,4 +263,35 @@ it('restores the object shape of an object-valued x-* member a JSON round trip f
         ->and($json)->toContain('"x-enum-descriptions": [')
         ->and(json_decode($json, true)['components']['schemas']['Tier']['x-enumDescriptions'])
         ->toBe(['0' => 'Free.', '1' => 'Paid.']);
+});
+
+/**
+ * The property the restore exists for, stated as bytes: a document built by the producer, and the same
+ * document after the trip through JSON a warm fragment takes, emit identically. Nothing here reaches for
+ * the extension by name — it starts at {@see EnumDecoration}, whose map for a contiguous zero-based
+ * int-backed enum is the shape that motivated the exception in the first place.
+ */
+it('emits a producer-built object-valued extension and its JSON round trip as the same bytes', function (): void {
+    $decorated = EnumDecoration::apply(
+        ['type' => 'integer', 'enum' => [0, 1, 2]],
+        'x-enum-varnames',
+        ['Free', 'Paid', 'Enterprise'],
+        ['0' => 'Free.', '1' => 'Paid.', '2' => 'Enterprise.'],
+    );
+
+    // The cold build's own shape: the producer hands over an object, because the map's keys are a 0..n run.
+    expect($decorated['x-enumDescriptions'])->toBeInstanceOf(stdClass::class);
+
+    $cold = [
+        'openapi' => '3.2.0',
+        'uir' => '1.0.0',
+        'info' => ['version' => '1.0.0', 'title' => 'T'],
+        'paths' => [],
+        'components' => ['schemas' => ['Tier' => $decorated]],
+    ];
+    // What a warm fragment hands back: assoc arrays, the object flattened to a list on the way.
+    $warm = json_decode((string) json_encode($cold), true, flags: JSON_THROW_ON_ERROR);
+
+    expect($warm['components']['schemas']['Tier']['x-enumDescriptions'])->toBeList()
+        ->and($this->emitter->emitArray($warm))->toBe($this->emitter->emitArray($cold));
 });

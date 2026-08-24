@@ -34,6 +34,17 @@ final class FieldNode
     public bool $nullable = false;
 
     /**
+     * A value a rule pinned that the schema cannot carry, wrapped so a falsy one is distinguishable
+     * from no proposal. First proposal wins — rule order is fixed, so the winner is too.
+     *
+     * @var array{mixed}|null
+     */
+    public ?array $exampleProposal = null;
+
+    /** A rule ruled every value out (a file upload, a decimal-places constraint). Final once set. */
+    public bool $exampleSuppressed = false;
+
+    /**
      * @var array<string, FieldNode>
      */
     public array $properties = [];

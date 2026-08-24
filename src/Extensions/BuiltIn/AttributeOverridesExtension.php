@@ -12,6 +12,8 @@ use Docuccino\Attributes\OperationId;
 use Docuccino\Attributes\Summary;
 use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
+use Docuccino\Core\Draft\DeprecationNote;
+use Docuccino\Core\Draft\DescriptionAppender;
 use Docuccino\Core\Draft\OperationDraft;
 use Docuccino\Core\Extensions\Context\RouteContext;
 use Docuccino\Core\Extensions\Contracts\OperationExtension;
@@ -24,8 +26,8 @@ use Docuccino\Core\Support\LineEndings;
 /**
  * The overrides layer: docblock summary/description (docblock precedence), then the operation
  * attributes (attribute precedence) — `#[OperationId]` over the default route-name strategy,
- * `#[Group]` → tags, `#[DeprecatedOperation]`, `#[Internal]` → `x-internal`, and
- * `#[Summary]` / `#[Description]` over whatever the docblock said.
+ * `#[Group]` → tags, `#[DeprecatedOperation]` (flag, plus its reason as a description paragraph),
+ * `#[Internal]` → `x-internal`, and `#[Summary]` / `#[Description]` over whatever the docblock said.
  *
  * The last pair exist because one docblock serves two readers. Prose written for whoever maintains
  * the action is not prose an API consumer can use, and until these there was no way to say the second
@@ -44,10 +46,21 @@ final class AttributeOverridesExtension implements OperationExtension
 
     public function handle(OperationDraft $operation, RouteContext $context): void
     {
-        // Docblock layer. `@deprecated` sets only the flag — mirroring #[DeprecatedOperation], so the
-        // two spellings can't diverge.
+        // Either spelling can carry a reason, and the attribute outranks the docblock exactly as it does
+        // for the flag. A reason is prose for the consumer, so it joins the description rather than
+        // being written on its own — see applyDeprecationReason() for why it travels with each write.
+        $attributeDeprecation = $context->attributes->first(DeprecatedOperation::class);
+        $attributeReason = DeprecationNote::paragraph($attributeDeprecation?->reason);
+        $docblockReason = DeprecationNote::paragraph($context->deprecationReason);
+
+        // Docblock layer.
         $operation->setSummary($context->summary, Contribution::docblock());
-        $operation->setDescription($context->description, Contribution::docblock());
+        $operation->setDescription(
+            $attributeReason === null && $docblockReason !== null
+                ? DescriptionAppender::joined($context->description, $docblockReason)
+                : $context->description,
+            Contribution::docblock(),
+        );
         if ($context->deprecated) {
             $operation->setDeprecated(true, Contribution::docblock());
         }
@@ -68,7 +81,7 @@ final class AttributeOverridesExtension implements OperationExtension
             $operation->setTags($tags, $attribute);
         }
 
-        if ($context->attributes->has(DeprecatedOperation::class)) {
+        if ($attributeDeprecation !== null) {
             $operation->setDeprecated(true, $attribute);
         }
 
@@ -81,18 +94,39 @@ final class AttributeOverridesExtension implements OperationExtension
             $operation->setSummary($summary->text, $attribute);
         }
 
-        $description = $context->attributes->first(Description::class);
+        $described = $context->attributes->first(Description::class);
+        $description = $described === null ? null : $this->describedText($context, $described);
+
+        $this->applyDescriptionAndReason($operation, $description, $attributeReason ?? $docblockReason, $attributeReason, $attribute);
+    }
+
+    /**
+     * The attribute-layer description write, with the deprecation reason folded in.
+     *
+     * A patch is shadowed by an earlier one at its own layer, so a reason cannot be appended after
+     * `#[Description]` has written — it travels WITH that write. Where there is no `#[Description]`, an
+     * attribute-borne reason still writes here, over the docblock layer's description; a docblock-borne
+     * one already joined that write and needs nothing more.
+     */
+    private function applyDescriptionAndReason(OperationDraft $operation, ?string $description, ?string $reason, ?string $attributeReason, Contribution $attribute): void
+    {
         if ($description !== null) {
-            $this->applyDescription($operation, $context, $description, $attribute);
+            $operation->setDescription($reason === null ? $description : DescriptionAppender::joined($description, $reason), $attribute);
+
+            return;
+        }
+
+        if ($attributeReason !== null) {
+            DescriptionAppender::append($operation, $attributeReason, $attribute);
         }
     }
 
     /**
-     * Apply `#[Description]`: inline `text:`, or the markdown file `file:` names. Exactly one of them
-     * says something, so a declaration carrying both or neither is diagnosed and writes nothing —
-     * picking one would document prose the author never chose.
+     * The prose `#[Description]` states: inline `text:`, or the markdown file `file:` names. Exactly one
+     * of them says something, so a declaration carrying both or neither is diagnosed and states nothing
+     * — picking one would document prose the author never chose.
      */
-    private function applyDescription(OperationDraft $operation, RouteContext $context, Description $description, Contribution $attribute): void
+    private function describedText(RouteContext $context, Description $description): ?string
     {
         if (($description->text === null) === ($description->file === null)) {
             $this->report($context, Severity::Warning, 'attribute.description-unusable', sprintf(
@@ -100,16 +134,12 @@ final class AttributeOverridesExtension implements OperationExtension
                 $description->text === null ? 'neither `text:` nor `file:`' : 'both `text:` and `file:`',
             ), 'One of `text:` (inline prose) or `file:` (a markdown file under the application root) per declaration.');
 
-            return;
+            return null;
         }
 
-        if ($description->file !== null) {
-            $this->applyDescriptionFile($operation, $context, $description->file, $attribute);
-
-            return;
-        }
-
-        $operation->setDescription($description->text, $attribute);
+        return $description->file !== null
+            ? $this->describedFile($context, $description->file)
+            : $description->text;
     }
 
     /**
@@ -119,7 +149,7 @@ final class AttributeOverridesExtension implements OperationExtension
      * rebuilds this route when it appears — an absent file hashes to nothing, and gaining contents is
      * a change like any other.
      */
-    private function applyDescriptionFile(OperationDraft $operation, RouteContext $context, string $path, Contribution $attribute): void
+    private function describedFile(RouteContext $context, string $path): ?string
     {
         $resolved = ConfinedPath::resolve($this->basePath, $path);
         if ($resolved === null) {
@@ -128,7 +158,7 @@ final class AttributeOverridesExtension implements OperationExtension
                 $path,
             ), 'Point `file:` at a path inside the application, written relative to its root.');
 
-            return;
+            return null;
         }
 
         $context->dependencies()->addFile($resolved);
@@ -140,10 +170,10 @@ final class AttributeOverridesExtension implements OperationExtension
                 $path,
             ), 'Create the file, or correct the path — it is read relative to the application root.');
 
-            return;
+            return null;
         }
 
-        $operation->setDescription(rtrim(LineEndings::normalize($contents), "\n"), $attribute);
+        return rtrim(LineEndings::normalize($contents), "\n");
     }
 
     private function report(RouteContext $context, Severity $severity, string $code, string $message, string $help): void

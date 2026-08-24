@@ -6,6 +6,7 @@ use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Document\UirDocument;
 use Docuccino\Core\Emit\EmitOptions;
 use Docuccino\Core\Emit\Postman\CollectionEmitter;
+use Docuccino\Core\Emit\Postman\Description;
 use Opis\JsonSchema\Validator;
 
 /**
@@ -632,6 +633,16 @@ it('carries a deprecation in prose, which is the only place the format has for i
     // Nothing is lost, so this earns no diagnostic.
     expect($description)->toContain('**Deprecated.**')
         ->and(postmanCodes(loadFixture('kitchen-sink.uir.json')))->not->toContain('postman.deprecated');
+});
+
+it('says a deprecation once, leaving a published reason to speak for the generic line', function (): void {
+    // A reason travels as a paragraph of the description, and it says both that the endpoint is
+    // deprecated and why — so the generic sentence beside it would be the same fact again, vaguer.
+    $reasoned = ['deprecated' => true, 'description' => "Lists widgets.\n\n**Deprecated:** Use `GET /v2/widgets`."];
+
+    expect(Description::request($reasoned))->toBe($reasoned['description'])
+        ->and(Description::request(['deprecated' => true, 'description' => 'Lists widgets.']))
+        ->toStartWith('> **Deprecated.**');
 });
 
 it('keeps the 3.2 query method intact rather than downlevelling it', function (): void {

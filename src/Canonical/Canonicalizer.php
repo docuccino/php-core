@@ -25,10 +25,16 @@ final class Canonicalizer
     private const array PARAMETER_IN_RANK = ['path' => 0, 'query' => 1, 'header' => 2, 'cookie' => 3];
 
     /**
-     * Extension members whose value is a JSON object. They are keyed by enum value, so PHP hands them
-     * over as a LIST whenever those values are `0,1,2…` — which happens on the way back from a JSON
-     * round trip, i.e. on a warm fragment. Restoring the object here is what makes a warm build's bytes
-     * (and identities) equal a cold build's.
+     * The `x-*` members whose value is a JSON OBJECT. A fragment comes back from JSON as assoc arrays,
+     * where PHP re-coerces a numeric-string key to an int — so a map keyed `0,1,2…` (`x-enumDescriptions`
+     * is keyed by enum value) arrives as a LIST, and an empty one is indistinguishable from an empty
+     * list. Restoring the object here is what makes a warm build's bytes, and the identities hashed off
+     * them, equal a cold build's.
+     *
+     * Named rather than inferred, and that is the long-term shape: after the round trip the VALUE cannot
+     * answer the question — `x-enum-descriptions` beside it is genuinely a list and must stay one — so
+     * only the keyword's own contract knows which it is. A new map-valued extension therefore owes a
+     * line here; one whose keys can never be a `0..n` run loses nothing by having it.
      */
     private const array OBJECT_EXTENSIONS = ['x-enumDescriptions'];
 
