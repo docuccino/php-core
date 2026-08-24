@@ -136,6 +136,89 @@ it('keeps a message readable when one example breaks many rules at once', functi
         ->and($findings[0]->message)->toEndWith('(and 2 more).');
 });
 
+/*
+ * A transformer sees the draft, and the draft is PHP arrays — where the empty schema a free-form map
+ * puts under `additionalProperties` is indistinguishable from an empty LIST. The canonicalizer settles
+ * that on the way out, and it runs after the transformers, so a lint reading the draft directly holds
+ * the document to a shape nobody ships. It cost an export: `array<string, mixed>` plus an `@example`
+ * handed JSON Schema a list where a schema belongs.
+ */
+it('audits the empty schema a free-form map publishes, not the empty array the draft holds', function () use ($on): void {
+    $document = exampleLintDocument(
+        ['type' => 'object', 'additionalProperties' => [], 'example' => ['first_name' => 'Ada']],
+        ['first_name' => 'Ada'],
+    );
+
+    // Nothing to say: `{}` accepts every member, so both examples satisfy it.
+    expect(lintDiagnostics(new ExampleSchemaLint($on), $document))->toBe([]);
+});
+
+it('still audits the schema beside a free-form map, so widening it costs nothing', function () use ($on): void {
+    // The empty schema accepts anything under the map; the `count` next to it accepts an integer only.
+    $document = exampleLintDocument([
+        'type' => 'object',
+        'properties' => [
+            'suggestions' => ['type' => 'object', 'additionalProperties' => []],
+            'count' => ['type' => 'integer'],
+        ],
+    ], ['suggestions' => ['first_name' => 'Ada'], 'count' => 'two']);
+
+    $findings = lintDiagnostics(new ExampleSchemaLint($on), $document);
+
+    expect($findings)->toHaveCount(1)
+        ->and($findings[0]->code)->toBe('lint.example-mismatch')
+        ->and($findings[0]->message)->toContain('must match the type: integer at /count');
+});
+
+it('names a parameter finding by the pointer the artifact publishes it under', function () use ($on): void {
+    // The canonicalizer sorts parameters by (location, name), so a pointer read off the draft's own
+    // order names a different parameter in the emitted document than the one that was checked.
+    $document = lintDocument(['GET /api/widgets' => ['parameters' => [
+        ['name' => 'sort', 'in' => 'query', 'schema' => ['type' => 'string']],
+        ['name' => 'page', 'in' => 'query', 'schema' => ['type' => 'integer'], 'example' => 'first'],
+    ]]]);
+
+    $findings = lintDiagnostics(new ExampleSchemaLint($on), $document);
+
+    expect($findings)->toHaveCount(1)
+        // `page` sorts before `sort`, so the published index is 0 — not the 1 it was written at.
+        ->and($findings[0]->message)->toContain('/paths/~1api~1widgets/get/parameters/0/example');
+});
+
+/*
+ * The rule this lint broke and now keeps. A lint contributes nothing to the document, so it can only
+ * ever cost a build: an exception from the validator used to end `docuccino:export` with a stack trace
+ * and no file at all, on an ordinary free-form map that happened to carry an example.
+ */
+it('reports a schema the validator will not read, rather than ending the build', function () use ($on): void {
+    $document = exampleLintDocument(
+        ['type' => 'object', 'additionalProperties' => ['first_name', 'last_name']],
+        ['first_name' => 'Ada'],
+    );
+
+    $findings = lintDiagnostics(new ExampleSchemaLint($on), $document);
+
+    expect($findings)->toHaveCount(1)
+        ->and($findings[0]->severity)->toBe(Severity::Warning)
+        ->and($findings[0]->code)->toBe('lint.example-uncheckable')
+        ->and($findings[0]->message)->toContain('/paths/~1api~1widgets/get/responses/200/content/application~1json/example')
+        ->and($findings[0]->message)->toContain('additionalProperties must be a json schema')
+        ->and($findings[0]->help)->toContain('lint.examples.allow');
+});
+
+it('accepts an uncheckable site safelisted the same two ways a mismatch is', function (string $accept): void {
+    $options = new LintRuleOptions(enabled: true, allow: [$accept]);
+    $document = exampleLintDocument(
+        ['type' => 'object', 'additionalProperties' => ['first_name']],
+        ['first_name' => 'Ada'],
+    );
+
+    expect(lintDiagnostics(new ExampleSchemaLint($options), $document))->toBe([]);
+})->with([
+    'by pointer' => ['/paths/~1api~1widgets/get/responses/200/content/application~1json/example'],
+    'by label' => ['GET /api/widgets → 200 application/json'],
+]);
+
 it('says nothing that would make one build differ from another', function () use ($on): void {
     // Provenance rides along with every finding and it names files; a diagnostic carrying one would make
     // the output a function of the machine that produced it.

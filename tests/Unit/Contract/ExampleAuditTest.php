@@ -165,3 +165,42 @@ it('finds nothing in a document with no examples at all', function (): void {
     expect($report->checked)->toBe(0)
         ->and($report->ok())->toBeTrue();
 });
+
+/*
+ * The audit walks every example in the document, and the validator parses each subject as it reaches
+ * it — so a schema it will not parse throws rather than failing. Before this it took the rest of the
+ * walk, and the build that asked, with it: one free-form map carrying an example was a dead export.
+ *
+ * The malformed shape here is a `additionalProperties` holding a real list, which nothing repairs and
+ * nothing should: an empty array IS the empty schema and is coerced (see SchemaCheckTest), a populated
+ * one is not a schema at all.
+ */
+it('records a schema the validator will not read instead of throwing, and audits the rest anyway', function (): void {
+    $report = (new ExampleAudit(ContractIndex::fromArray([
+        'paths' => [],
+        'components' => ['schemas' => [
+            // Sorts first, so the walk reaches the unreadable schema BEFORE the one that lies: a guard
+            // that merely wrapped the whole run would report neither.
+            'Prefill' => [
+                'type' => 'object',
+                'properties' => ['suggestions' => [
+                    'type' => 'object',
+                    'additionalProperties' => ['first_name', 'last_name'],
+                    'example' => ['first_name' => 'Ada'],
+                ]],
+            ],
+            'Widget' => ['type' => 'object', 'properties' => ['active' => ['type' => 'boolean', 'example' => 'no']]],
+        ]],
+    ])))->run();
+
+    expect($report->checked)->toBe(2)
+        ->and($report->uncheckable)->toHaveCount(1)
+        ->and($report->uncheckable[0]->pointer)->toBe('/components/schemas/Prefill/properties/suggestions/example')
+        ->and($report->uncheckable[0]->schemaPointer)->toBe('/components/schemas/Prefill/properties/suggestions')
+        ->and($report->uncheckable[0]->label)->toBe('components/schemas/Prefill')
+        ->and($report->uncheckable[0]->reason)->toBe('additionalProperties must be a json schema (object or boolean)')
+        // An unreadable schema is not a finding: the audit knows nothing about that example either way,
+        // so `ok()` still answers only for the examples it managed to check.
+        ->and($report->findings)->toHaveCount(1)
+        ->and($report->findings[0]->pointer)->toBe('/components/schemas/Widget/properties/active/example');
+});

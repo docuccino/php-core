@@ -18,6 +18,10 @@ use stdClass;
  * schemas stay recursive. Opis reports the schema path it failed on, so the mapping back is exact even
  * inside a `oneOf` branch, which a hand walk of the instance pointer could only guess at.
  *
+ * Subjects arrive from wherever the caller had them — an artifact somebody hand-edited, a draft nothing
+ * canonicalised — so an object-valued keyword holding an empty array is repaired on the way in
+ * ({@see OBJECT_KEYWORDS}) rather than handed to a validator that would throw over it.
+ *
  * @internal
  */
 final class SchemaCheck
@@ -28,6 +32,46 @@ final class SchemaCheck
     private const string DIALECT = 'https://json-schema.org/draft/2020-12/schema';
 
     private const string COMPONENT_PREFIX = '#/components/schemas/';
+
+    /**
+     * The schema keywords whose value is a JSON OBJECT — one subschema, or a map of them. An empty PHP
+     * array at one of these IS the empty schema (or the empty map): a document assembled as arrays
+     * cannot tell `{}` from `[]`, and a caller may hand us one that was never canonicalised. Coercing
+     * is not a guess — a list is not a legal value for any of them — and the alternative is a validator
+     * exception where a free-form map would have validated.
+     *
+     * Only where a schema keyword MEANS this, never blanket: the same name inside a `const` or an
+     * `example` is instance data, where a list is exactly what it says ({@see INSTANCE_KEYWORDS}).
+     *
+     * @var list<string>
+     */
+    private const array OBJECT_KEYWORDS = [
+        'additionalItems',
+        'additionalProperties',
+        'contains',
+        'dependentRequired',
+        'dependentSchemas',
+        '$defs',
+        'else',
+        'if',
+        'items',
+        'not',
+        'patternProperties',
+        'properties',
+        'propertyNames',
+        'then',
+        'unevaluatedItems',
+        'unevaluatedProperties',
+    ];
+
+    /**
+     * The keywords whose value is an INSTANCE rather than a schema. Below one of these every name is
+     * data, so nothing is coerced — a `const` of `{"properties": []}` must keep the list it states, or
+     * the schema stops matching the very value it was written for.
+     *
+     * @var list<string>
+     */
+    private const array INSTANCE_KEYWORDS = ['const', 'default', 'enum', 'example', 'examples'];
 
     public function __construct(private readonly ContractIndex $index) {}
 
@@ -58,7 +102,9 @@ final class SchemaCheck
     }
 
     /**
-     * The schema at those pointer segments, from the object graph. Booleans are schemas too.
+     * The schema at those pointer segments, from the object graph. Booleans are schemas too. Anything
+     * else — no node there, or an empty array standing for `{}` — means every value passes, which is
+     * the answer `null` already produces.
      *
      * @param  list<string>  $segments
      */
@@ -127,11 +173,16 @@ final class SchemaCheck
         return $defs;
     }
 
-    /** A deep copy with every `#/components/schemas/X` reference re-pointed at `#/$defs/X`. */
-    private function rewrite(mixed $node): mixed
+    /**
+     * A deep copy with every `#/components/schemas/X` reference re-pointed at `#/$defs/X`, and every
+     * empty array standing where an object belongs restored to one.
+     *
+     * @param  bool  $inData  whether this node sits under a keyword whose value is instance data
+     */
+    private function rewrite(mixed $node, bool $inData = false): mixed
     {
         if (is_array($node)) {
-            return array_map($this->rewrite(...), $node);
+            return array_map(fn (mixed $item): mixed => $this->rewrite($item, $inData), $node);
         }
 
         if (! is_object($node)) {
@@ -141,9 +192,15 @@ final class SchemaCheck
         $copy = new stdClass;
 
         foreach (get_object_vars($node) as $member => $value) {
+            if (! $inData && $value === [] && in_array($member, self::OBJECT_KEYWORDS, true)) {
+                $copy->{$member} = new stdClass;
+
+                continue;
+            }
+
             $copy->{$member} = $member === '$ref' && is_string($value) && str_starts_with($value, self::COMPONENT_PREFIX)
                 ? '#/$defs/'.substr($value, strlen(self::COMPONENT_PREFIX))
-                : $this->rewrite($value);
+                : $this->rewrite($value, $inData || in_array($member, self::INSTANCE_KEYWORDS, true));
         }
 
         return $copy;
