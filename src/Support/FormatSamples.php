@@ -13,12 +13,10 @@ namespace Docuccino\Core\Support;
  * Every value is a constant. Nothing here is derived from the clock, the locale or the environment —
  * a sample that moved with the date would move the document with it.
  *
- * A document can replace individual samples (`representation.examples.formats`, arriving as
- * `RepresentationPolicy::$formatSamples`). The merge happens HERE, at the one lookup, so the table stays
- * the single answer to "what does an email look like" whether or not a caller was handed the map. The
- * synthesized property example is handed it, because a representation policy reaches it; the collection
- * exporter is not — an emitter is given `EmitOptions`, never a policy — so a collection's fabricated
- * request body still illustrates with the constants below.
+ * A document can replace individual samples (`representation.examples.formats`). The merge happens HERE,
+ * at the one lookup, so the table stays the single answer to "what does an email look like" for both
+ * callers: the synthesized property example is handed the map by the representation policy that reaches
+ * it, and the collection exporter by `EmitOptions::$formatSamples`.
  *
  * @internal
  */

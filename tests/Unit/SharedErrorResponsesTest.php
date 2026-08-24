@@ -106,6 +106,25 @@ function examplableBody(mixed $example, string $description = 'Forbidden'): arra
     ];
 }
 
+/**
+ * One status answered with TWO representations: the problem body a renderer already publishes as a
+ * component, and an anonymous union of challenge shapes beside it. Neither is "the" body of the
+ * response, which is what makes the response's own name no name for either of them.
+ */
+function twoRepresentationBody(string $description = 'Unprocessable Entity'): array
+{
+    return [
+        'description' => $description,
+        'content' => [
+            'application/problem+json' => ['schema' => ['$ref' => '#/components/schemas/ProblemDetails']],
+            'application/json' => ['schema' => ['anyOf' => [
+                ['type' => 'object', 'properties' => ['otp' => ['type' => 'string']]],
+                ['type' => 'object', 'properties' => ['sso' => ['type' => 'string']]],
+            ]]],
+        ],
+    ];
+}
+
 /** A path's error response as documented, read through `components.responses` when it was hoisted. */
 function responseAt(array $doc, string $path, string $status): array
 {
@@ -237,18 +256,22 @@ it('mints an example key from that example alone, so an arriving arm renames not
         ->toBe(examplesAt($before, '/a', '403'));
 });
 
-it('keeps a difference in description out of the merge', function (): void {
-    // A description is what a response SAYS, not how it illustrates it, so two arms describing their
-    // error differently are two contracts and must never collapse into one component.
+it('merges two arms that word one body differently, and keeps each arm\'s words with it', function (): void {
+    // A description is prose about a body, not the body, so two arms wording one contract differently are
+    // one component — and the words the shared one does not publish travel to the `$ref` that overrides
+    // them, where OAS 3.1 and 3.2 define exactly that.
     $described = examplableBody(['code' => 'forbidden']);
     $described['description'] = 'You may not do that';
 
     $doc = errorDoc(['/a' => ['403' => examplableBody(['code' => 'denied'])], '/b' => ['403' => $described]]);
 
-    expect($doc['components']['responses'] ?? null)->toBeNull()
-        ->and(responseRefAt($doc, '/a', '403'))->toBeNull()
-        ->and(exampleAt($doc, '/a', '403'))->toBe(['code' => 'denied'])
-        ->and(exampleAt($doc, '/b', '403'))->toBe(['code' => 'forbidden']);
+    expect(array_keys($doc['components']['responses']))->toBe(['Error403'])
+        ->and($doc['components']['responses']['Error403']['description'])->toBe('Forbidden')
+        ->and($doc['paths']['/a']['get']['responses']['403'])->toBe(['$ref' => '#/components/responses/Error403'])
+        ->and($doc['paths']['/b']['get']['responses']['403'])
+        ->toBe(['$ref' => '#/components/responses/Error403', 'description' => 'You may not do that'])
+        // Both illustrations still travel, and both still sit beside the schema they were written for.
+        ->and(exampleValuesAt($doc, '/a', '403'))->toBe([['code' => 'denied'], ['code' => 'forbidden']]);
 });
 
 it('keeps an example that illustrates no shape out of the merge', function (): void {
@@ -315,11 +338,11 @@ it('unions the names two arms chose when they agree on what each one means', fun
         ->and(array_keys(examplesAt($doc, '/a', '403')))->toBe(['expired', 'revoked']);
 });
 
-it('refuses to merge two arms that spell one example name differently, and says so', function (): void {
+it('hands a name two arms gave to two examples to neither of them, and says so', function (): void {
     // The one thing an author has to settle themselves: publishing either body under that name would put
-    // one arm's example behind the other's label, and dropping one loses an illustration. So the bodies
-    // stay where they are — and because that is a shared component the document no longer has, the
-    // reader is told rather than left looking at a name that quietly stopped existing.
+    // one arm's example behind the other's label, and dropping one loses an illustration. So both are
+    // published under that name plus their own content — the ladder every contested name in this document
+    // climbs — and the reader is told, because the key they wrote is the one thing that is not there.
     $authored = static function (mixed $value): array {
         $body = examplableBody(null);
         unset($body['content']['application/problem+json']['example']);
@@ -336,14 +359,56 @@ it('refuses to merge two arms that spell one example name differently, and says 
         '/b' => ['get' => ['responses' => $responses['/b']]],
     ]]);
 
-    expect($doc['components']['responses'] ?? null)->toBeNull()
-        ->and(examplesAt($doc, '/a', '403'))->toBe(['denied' => ['value' => ['code' => 'forbidden']]])
-        ->and(examplesAt($doc, '/b', '403'))->toBe(['denied' => ['value' => ['code' => 'denied']]])
-        // The shape underneath still shares — it is only the response that could not.
+    $examples = examplesAt($doc, '/a', '403');
+
+    // The component they share is not what pays for the disagreement…
+    expect(array_keys($doc['components']['responses']))->toBe(['Error403'])
+        ->and(responseRefAt($doc, '/a', '403'))->toBe('#/components/responses/Error403')
+        ->and(responseRefAt($doc, '/b', '403'))->toBe('#/components/responses/Error403')
+        // …neither illustration is lost, and neither sits under the name the other's author wrote…
+        ->and($examples)->toHaveCount(2)
+        ->and(array_keys($examples))->each->toMatch('/^denied_[a-z2-7]{8}$/')
+        ->and(exampleValuesAt($doc, '/a', '403'))->toContain(['code' => 'forbidden'])
+        ->and(exampleValuesAt($doc, '/a', '403'))->toContain(['code' => 'denied'])
         ->and(schemaRefAt($doc, '/a', '403', 'application/problem+json'))->toBe('#/components/schemas/Error403')
+        // …and the name that went nowhere is reported rather than quietly missing.
         ->and(array_map(static fn ($d): string => $d->code, $report))->toBe(['components.example-name-conflict'])
         ->and($report[0]->message)->toContain('the name "denied"')
         ->and($report[0]->message)->toContain('Error403');
+});
+
+it('lets no difference in wording turn one example name into a contest', function (): void {
+    // The locality failure this pass exists to prevent, one field over. `/a` and `/b` word their 404 one
+    // way and `/c` and `/d` another, and each pair names its own example `default`. With the wording in
+    // the key those were two buckets of two, each agreeing with itself; one bucket of four makes the two
+    // names meet, and retiring the bucket over that would delete a component all four operations point
+    // at — an unrelated route's wording deciding whether a name a client is written against exists.
+    $named = static function (string $description, mixed $value): array {
+        $body = messageBody($description);
+        $body['content']['application/json']['examples'] = ['default' => ['value' => $value]];
+
+        return $body;
+    };
+
+    $responses = [
+        '/a' => ['404' => $named('Not Found', ['message' => 'gone'])],
+        '/b' => ['404' => $named('Not Found', ['message' => 'gone'])],
+        '/c' => ['404' => $named('No taxonomy term matches the given slug', ['message' => 'no such term'])],
+        '/d' => ['404' => $named('No taxonomy term matches the given slug', ['message' => 'no such term'])],
+    ];
+
+    $doc = errorDoc($responses);
+    $report = errorDocReport([
+        'paths' => array_map(static fn (array $r): array => ['get' => ['responses' => $r]], $responses),
+    ]);
+
+    expect(array_keys($doc['components']['responses']))->toBe(['Error404'])
+        ->and(array_map(static fn (string $path): ?string => responseRefAt($doc, $path, '404'), ['/a', '/b', '/c', '/d']))
+        ->toBe(array_fill(0, 4, '#/components/responses/Error404'))
+        // Both wordings' illustrations publish on it, under the contested name and their own content.
+        ->and(examplesAt($doc, '/a', '404', 'application/json'))->toHaveCount(2)
+        ->and(array_keys(examplesAt($doc, '/a', '404', 'application/json')))->each->toMatch('/^default_[a-z2-7]{8}$/')
+        ->and(array_map(static fn ($d): string => $d->code, $report))->toBe(['components.example-name-conflict']);
 });
 
 it('leaves a media type stating both an example and a map exactly as it found it', function (): void {
@@ -392,11 +457,12 @@ it('keeps each operation\'s own id and provenance beside the reference', functio
 });
 
 it('keeps a schema\'s own provenance beside its reference when the response stays inline', function (): void {
-    // Where only the shape is shared, the operation keeps its whole response — so the per-route
-    // provenance the schema carries has somewhere to live and is not thrown away.
+    // Where only the shape is shared — here two arms stating one body under different headers, which are
+    // part of what a response IS — the operation keeps its whole response, so the per-route provenance
+    // the schema carries has somewhere to live and is not thrown away.
     $a = examplableBody(['code' => 'forbidden']);
     $b = examplableBody(['code' => 'forbidden']);
-    $b['description'] = 'You may not do that';
+    $b['headers'] = ['Retry-After' => ['schema' => ['type' => 'integer']]];
     $a['content']['application/problem+json']['schema']['x-docuccino'] = ['provenance' => [['producer' => 'integration:framework-errors']]];
     $b['content']['application/problem+json']['schema']['x-docuccino'] = ['provenance' => [['producer' => 'integration:inferred-handler']]];
 
@@ -751,6 +817,158 @@ it('emits the shared shape and every illustration unchanged in 3.2, 3.1 and 3.0 
     '3.0' => ['3.0', new OpenApi30DownlevelEmitter],
 ]);
 
+it('keeps the plain name for a contract two operations word differently', function (): void {
+    // The reported defect, at the scale it was found: 145 operations answered 404 through one renderer and
+    // one taxonomy endpoint worded its own, so `Error404` and `Error404_dl33vd2k` both existed — same
+    // `$ref`, same headers, different words — and the taxonomy endpoint's private phrasing renamed the
+    // type every other operation handed a generated client. Prose does not change what a response is.
+    $shared = messageBody('Resource not found');
+    $own = messageBody('No taxonomy term matches the given slug');
+
+    $doc = errorDoc([
+        '/a' => ['404' => $shared], '/b' => ['404' => $shared], '/c' => ['404' => $shared],
+        '/d' => ['404' => $own], '/e' => ['404' => $own],
+    ]);
+    $codes = array_map(static fn (object $diagnostic): string => $diagnostic->code, errorDocReport([
+        'paths' => array_map(static fn (array $responses): array => ['get' => ['responses' => $responses]], [
+            '/a' => ['404' => $shared], '/b' => ['404' => $shared], '/c' => ['404' => $shared],
+            '/d' => ['404' => $own], '/e' => ['404' => $own],
+        ]),
+    ]));
+
+    expect(array_keys($doc['components']['responses']))->toBe(['Error404'])
+        ->and($doc['components']['responses']['Error404']['description'])->toBe('Resource not found')
+        ->and(responseRefAt($doc, '/d', '404'))->toBe('#/components/responses/Error404')
+        // The words the component does not publish sit on the reference that overrides them…
+        ->and($doc['paths']['/d']['get']['responses']['404']['description'])
+        ->toBe('No taxonomy term matches the given slug')
+        ->and($doc['paths']['/a']['get']['responses']['404'])->not->toHaveKey('description')
+        // …and nothing was renamed, so nothing is reported.
+        ->and($codes)->toBe([]);
+});
+
+it('leaves a shared response alone when an operation describes the same error in its own words', function (): void {
+    // Locality, on the case that broke it: the arriving pair states the same status and the same body in
+    // words of its own, and every byte the three that agree already published — their `$ref`s, the
+    // component's name, its prose and the shape under it — has to survive that arrival untouched.
+    $shared = ['404' => messageBody('Resource not found')];
+    $own = ['404' => messageBody('No taxonomy term matches the given slug')];
+
+    $before = errorDoc(['/a' => $shared, '/b' => $shared, '/c' => $shared]);
+    $after = errorDoc(['/a' => $shared, '/b' => $shared, '/c' => $shared, '/d' => $own, '/e' => $own]);
+
+    expect($after['paths']['/a'])->toBe($before['paths']['/a'])
+        ->and($after['components']['responses'])->toBe($before['components']['responses'])
+        ->and($after['components']['schemas'])->toBe($before['components']['schemas'])
+        // …and the arrival really did arrive, with the words it wrote.
+        ->and($after['paths']['/d']['get']['responses']['404']['description'])
+        ->toBe('No taxonomy term matches the given slug');
+});
+
+it('publishes the words the most arms wrote, and hands the rest a reference that overrides them', function (array $responsesByPath, ?string $published, array $overriding): void {
+    $doc = errorDoc($responsesByPath);
+
+    $overrides = array_keys(array_filter(
+        $responsesByPath,
+        static fn (string $path): bool => isset($doc['paths'][$path]['get']['responses']['404']['description']),
+        ARRAY_FILTER_USE_KEY,
+    ));
+
+    expect($doc['components']['responses']['Error404']['description'] ?? null)->toBe($published)
+        ->and($overrides)->toBe($overriding);
+})->with(function (): array {
+    $silent = messageBody();
+    unset($silent['description']);
+
+    return [
+        'every arm agrees' => [
+            ['/a' => ['404' => messageBody('Not Found')], '/b' => ['404' => messageBody('Not Found')]],
+            'Not Found',
+            [],
+        ],
+        'an arm that says nothing takes the shared words' => [
+            ['/a' => ['404' => messageBody('Not Found')], '/b' => ['404' => $silent]],
+            'Not Found',
+            [],
+        ],
+        'a plurality' => [
+            ['/a' => ['404' => messageBody('Not Found')], '/b' => ['404' => messageBody('Not Found')], '/c' => ['404' => messageBody('Gone missing')]],
+            'Not Found',
+            ['/c'],
+        ],
+        'no plurality, settled by the wording itself' => [
+            ['/a' => ['404' => messageBody('Not Found')], '/b' => ['404' => messageBody('Gone missing')]],
+            'Gone missing',
+            ['/a'],
+        ],
+        'a tie between two wordings two arms each state' => [
+            [
+                '/a' => ['404' => messageBody('Not Found')], '/b' => ['404' => messageBody('Not Found')],
+                '/c' => ['404' => messageBody('Gone missing')], '/d' => ['404' => messageBody('Gone missing')],
+            ],
+            'Gone missing',
+            ['/a', '/b'],
+        ],
+    ];
+});
+
+it('reads a response summary as prose about the body, like the description beside it', function (): void {
+    // Both members a Reference Object may restate, so both come off the key and both travel with the arm
+    // that wrote them.
+    $summarised = static function (string $summary): array {
+        $body = messageBody();
+        $body = ['summary' => $summary] + $body;
+
+        return $body;
+    };
+
+    $doc = errorDoc([
+        '/a' => ['404' => $summarised('No such record')],
+        '/b' => ['404' => $summarised('No such record')],
+        '/c' => ['404' => $summarised('Nothing there')],
+    ]);
+
+    expect(array_keys($doc['components']['responses']))->toBe(['Error404'])
+        ->and($doc['components']['responses']['Error404']['summary'])->toBe('No such record')
+        ->and($doc['paths']['/c']['get']['responses']['404'])
+        ->toBe(['$ref' => '#/components/responses/Error404', 'summary' => 'Nothing there', 'description' => 'Not Found']);
+});
+
+it('is still a no-op the second time it runs over a response that reworded one', function (): void {
+    // The property that makes a rebuild over an emitted document byte-identical, on the shape this
+    // rewrite introduces: an overriding reference is a reference, so the second run has nothing to hoist.
+    $shared = ['404' => messageBody('Resource not found')];
+    $own = ['404' => messageBody('No taxonomy term matches the given slug')];
+
+    $once = errorDoc(['/a' => $shared, '/b' => $shared, '/c' => $own, '/d' => $own]);
+
+    expect(transformedErrorDoc($once))->toBe($once);
+});
+
+it('emits an arm\'s own wording where the version defines it, and says so where it does not', function (string $version, Emitter $emitter, bool $carries): void {
+    // A Reference Object states `summary` and `description` of its own in 3.1 and 3.2, and that is the
+    // one place an arm's wording can live beside a shared body. 3.0 ignores anything beside a `$ref`, so
+    // the export drops what it would ignore rather than shipping prose that reads as though it applied.
+    $shared = ['404' => messageBody('Resource not found')];
+    $own = ['404' => messageBody('No taxonomy term matches the given slug')];
+
+    $doc = errorDoc(['/a' => $shared, '/b' => $shared, '/c' => $shared, '/d' => $own, '/e' => $own]);
+    $document = UirDocument::fromArray(['openapi' => '3.2.0', 'info' => ['title' => 'API', 'version' => '1.0.0']] + $doc);
+    $result = $emitter->emitWithReport($document);
+    $emitted = json_decode($result->output, true, flags: JSON_THROW_ON_ERROR);
+
+    expect($emitted['paths']['/d']['get']['responses']['404']['description'] ?? null)
+        ->toBe($carries ? 'No taxonomy term matches the given slug' : null)
+        ->and($emitted['paths']['/d']['get']['responses']['404']['$ref'])->toBe('#/components/responses/Error404')
+        ->and($emitted['components']['responses']['Error404']['description'])->toBe('Resource not found')
+        ->and(array_map(static fn ($d): string => $d->code, $result->report->diagnostics))
+        ->toBe($carries ? [] : ['downlevel.ref-siblings', 'downlevel.ref-siblings']);
+})->with([
+    '3.2' => ['3.2', new OpenApi32Emitter, true],
+    '3.1' => ['3.1', new OpenApi31DownlevelEmitter, true],
+    '3.0' => ['3.0', new OpenApi30DownlevelEmitter, false],
+]);
+
 it('emits one illustration as the singular example every version defines', function (string $version, Emitter $emitter): void {
     // A one-entry map would cost a key nobody asked for, and `example` is what an unmerged document
     // already published — so the common case pays nothing for the rare one.
@@ -930,9 +1148,17 @@ it('names a response the same wherever the document meets it', function (): void
     $first = errorDoc(['/a' => $one, '/b' => $one, '/c' => $two, '/d' => $two]);
     $second = errorDoc(['/a' => $two, '/b' => $two, '/c' => $one, '/d' => $one]);
 
-    expect(responseRefAt($first, '/a', '403'))->toBe(responseRefAt($second, '/c', '403'))
-        ->and(responseRefAt($first, '/c', '403'))->toBe(responseRefAt($second, '/a', '403'))
-        ->and(array_keys($first['components']['responses']))->toBe(array_keys($second['components']['responses']));
+    // One component either way, and reversing the walk moves neither the name nor which words it
+    // publishes — so the arms that reword it are the same arms, wherever the walk met them.
+    expect(array_keys($first['components']['responses']))->toBe(['Error403'])
+        ->and(array_keys($second['components']['responses']))->toBe(['Error403'])
+        ->and($first['components']['responses'])->toBe($second['components']['responses'])
+        ->and($first['paths']['/a']['get']['responses']['403'])->toBe($second['paths']['/c']['get']['responses']['403'])
+        ->and($first['paths']['/c']['get']['responses']['403'])->toBe($second['paths']['/a']['get']['responses']['403'])
+        // …and one of the two really is rewording it, so the rows above are not equality between two
+        // bare references.
+        ->and($first['paths']['/c']['get']['responses']['403']['description'])->toBe('You may not do that')
+        ->and($first['paths']['/a']['get']['responses']['403'])->not->toHaveKey('description');
 });
 
 it('promotes a body from inline to a reference once a second operation states it', function (): void {
@@ -963,6 +1189,103 @@ it('publishes a declared name in both buckets, in place of the status', function
         ->and(responseRefAt($doc, '/a', '404'))->toBe('#/components/responses/NotFound')
         ->and($doc['components']['responses']['NotFound']['content']['application/json']['schema'])
         ->toBe(['$ref' => '#/components/schemas/NotFound']);
+});
+
+it('names a hoisted shape after the response only where the response is that shape', function (string $case, array $body, array $schemas, array $responses): void {
+    // The two buckets hold different kinds of thing, so a claim that names a response only names the
+    // shape underneath it where that shape is the whole of the response. Where the response offers
+    // several representations it says nothing about which one it named, and each takes its status.
+    $doc = errorDoc(['/a' => ['422' => $body], '/b' => ['422' => $body]]);
+
+    expect(array_keys($doc['components']['schemas']))->toBe($schemas)
+        ->and(array_keys($doc['components']['responses']))->toBe($responses);
+})->with([
+    ['a claim, one representation', claimedBody('ValidationError', messageBody('Unprocessable Entity')), ['ValidationError'], ['ValidationError']],
+    ['a claim, two representations', claimedBody('ValidationError', twoRepresentationBody()), ['Error422'], ['ValidationError']],
+    ['no claim, one representation', messageBody('Unprocessable Entity'), ['Error422'], ['Error422']],
+    ['no claim, two representations', twoRepresentationBody(), ['Error422'], ['Error422']],
+]);
+
+it('keeps a response\'s claimed name off the representation beside the one it named', function (): void {
+    // The reported defect, as a consumer met it: a renderer answering 422 with an RFC 9457 problem body
+    // AND a challenge union had the union published as `components.schemas.ValidationError`, beside the
+    // `components.responses.ValidationError` that correctly held the problem body. Two entries, one
+    // name, different things — and the schema one was simply wrong about what it was.
+    $body = claimedBody('ValidationError', twoRepresentationBody());
+
+    $doc = errorDoc(['/a' => ['422' => $body], '/b' => ['422' => $body]]);
+
+    expect(array_keys($doc['components']['responses']))->toBe(['ValidationError'])
+        ->and(array_keys($doc['components']['schemas']))->toBe(['Error422'])
+        ->and(schemaRefAt($doc, '/a', '422'))->toBe('#/components/schemas/Error422')
+        // The named error's own body was already a reference, so this pass had nothing to hoist for it.
+        ->and(responseAt($doc, '/a', '422')['content']['application/problem+json']['schema'])
+        ->toBe(['$ref' => '#/components/schemas/ProblemDetails']);
+});
+
+it('hoists one shape once when a claimed response and an unclaimed one state it', function (): void {
+    // Also reported: the same union hoisted twice, once as `ValidationError` and once as `Error422`,
+    // with identical members and two different ids. A claim that cannot name a shape must not scope it
+    // either, or one anonymous body becomes two types a client has to tell apart.
+    $claimed = claimedBody('ValidationError', twoRepresentationBody());
+    $bare = twoRepresentationBody();
+
+    $doc = errorDoc([
+        '/a' => ['422' => $claimed], '/b' => ['422' => $claimed], '/c' => ['422' => $claimed],
+        '/d' => ['422' => $bare],
+    ]);
+
+    expect(array_keys($doc['components']['schemas']))->toBe(['Error422'])
+        ->and(schemaRefAt($doc, '/a', '422'))->toBe('#/components/schemas/Error422')
+        ->and(schemaRefAt($doc, '/d', '422'))->toBe('#/components/schemas/Error422')
+        // The claim still names the response it was made about, which is the half of it that is true.
+        ->and(responseRefAt($doc, '/a', '422'))->toBe('#/components/responses/ValidationError')
+        ->and(responseRefAt($doc, '/d', '422'))->toBe('#/components/responses/Error422');
+});
+
+it('gives two anonymous representations of one status a name each, derived from their own content', function (): void {
+    // The ladder's answer, unchanged: two shapes asking one name and neither keeping it. What the claim
+    // no longer does is hand one of them the name and leave the other on the status.
+    $body = claimedBody('ValidationError', [
+        'description' => 'Unprocessable Entity',
+        'content' => [
+            'application/json' => ['schema' => ['type' => 'object', 'properties' => ['errors' => ['type' => 'object']]]],
+            'application/vnd.api+json' => ['schema' => ['type' => 'object', 'properties' => ['detail' => ['type' => 'string']]]],
+        ],
+    ]);
+
+    $doc = errorDoc(['/a' => ['422' => $body], '/b' => ['422' => $body]]);
+    $report = errorDocReport(['paths' => ['/a' => ['get' => ['responses' => ['422' => $body]]], '/b' => ['get' => ['responses' => ['422' => $body]]]]]);
+
+    $help = array_values(array_filter(array_map(
+        static fn (object $diagnostic): ?string => $diagnostic->code === 'components.name-collision' ? $diagnostic->help : null,
+        $report,
+    )));
+
+    expect(array_keys($doc['components']['schemas']))->toHaveCount(2)
+        ->and(array_keys($doc['components']['schemas']))->each->toMatch('/^Error422_[a-z2-7]{8}$/')
+        // …and the reader is told why the name they declared did not reach either of them.
+        ->and($help)->toHaveCount(1)
+        ->and($help[0])->toContain('states one representation');
+});
+
+it('leaves a claimed shape alone when a response stating several representations arrives', function (): void {
+    // Locality across the narrowing: a route whose response offers two representations publishes shapes
+    // named after its status, and every byte the claimed single-representation pair already published —
+    // its `$ref`s and both its components — survives that arrival untouched.
+    $single = ['404' => claimedBody('NotFound', messageBody())];
+    $arriving = ['404' => claimedBody('Missing', twoRepresentationBody('Not Found'))];
+
+    $before = errorDoc(['/a' => $single, '/b' => $single]);
+    $after = errorDoc(['/a' => $single, '/b' => $single, '/c' => $arriving, '/d' => $arriving]);
+
+    expect(schemaRefAt($after, '/a', '404'))->toBe(schemaRefAt($before, '/a', '404'))
+        ->and(responseRefAt($after, '/a', '404'))->toBe(responseRefAt($before, '/a', '404'))
+        ->and($after['components']['schemas']['NotFound'])->toBe($before['components']['schemas']['NotFound'])
+        ->and($after['components']['responses']['NotFound'])->toBe($before['components']['responses']['NotFound'])
+        // …and the arrival really did arrive, under its status rather than under the name it declared.
+        ->and(array_keys($after['components']['schemas']))->toBe(['NotFound', 'Error404'])
+        ->and(array_keys($after['components']['responses']))->toBe(['Missing', 'NotFound']);
 });
 
 it('leaves the declaration on the operation and out of the component it names', function (): void {

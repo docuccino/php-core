@@ -25,6 +25,12 @@ final readonly class ValidationField
         $this->node->keywords['type'] = $type;
     }
 
+    /** The dotted path naming this field, as a diagnostic about it would spell it (`address.city`). */
+    public function path(): string
+    {
+        return $this->path;
+    }
+
     /** The field's scalar `type`, when a single string type has been set. */
     public function type(): ?string
     {

@@ -10,6 +10,10 @@ namespace Docuccino\Core\Diagnostics;
  *
  * `info` is the recovery channel: "the document is vaguer than your code, and here is where". It is
  * quieter than `warning` because widening is a correct outcome, not a defect.
+ *
+ * `hint` is quieter still: a note about the analysis rather than about the document. Nothing built-in
+ * emits one today — it is the rung an extension picks for that kind of note, and it is enumerated in
+ * the published UIR schema, so it stays whether or not we use it.
  */
 enum Severity: string
 {

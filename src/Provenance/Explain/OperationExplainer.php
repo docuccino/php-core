@@ -16,10 +16,11 @@ use Docuccino\Core\Provenance\ProvenanceRecord;
  * stack that produced it: for every field a layer wrote, who won it and which values it displaced.
  *
  * The trail records only winners — a losing value survives solely inside the winner's `overrode`
- * list — so a stack is only ever as complete as the emit level the document was built at. Nothing
- * here re-derives anything: it reads what the build already wrote down, which is also why a losing
- * contribution never carries a source: `overrode` keeps a field, a value and a producer, and has
- * nowhere to record where that value came from.
+ * list, whether it was displaced by a higher layer or shadowed by one it could not outrank — so a
+ * stack is only ever as complete as the emit level the document was built at. Nothing here re-derives
+ * anything: it reads what the build already wrote down, which is also why a losing contribution never
+ * carries a source: `overrode` keeps a field, a value and a producer, and has nowhere to record where
+ * that value came from.
  *
  * `$ref`s into `components` are followed, so a body the operation only points at still gets read.
  * Each component is read at most once however many times the operation reaches it.

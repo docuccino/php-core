@@ -28,20 +28,33 @@ use Docuccino\Core\Support\Json;
  *
  * What REPEATS decides whether a body is hoisted; what its producer DECLARED
  * ({@see ResponseDraft::claimComponentName()}) decides only what the component is called — so a
- * declaration can add a component and never take one away. Design §"Shared error components".
+ * declaration can add a component and never take one away. It names the RESPONSE, and reaches the shape
+ * inside it only where that shape is the whole of it ({@see schemaSites()}). Design §"Shared error
+ * components".
  *
  * A media type's `example` and its `examples` map are how an operation ILLUSTRATES the body, not what the
  * body IS, so the second pass keeps both out of the key and republishes every arm's illustration on the
  * one shared response — design §"Shared error components". An author's own example NAMES survive that
- * merge and outrank the minted ones; two arms spelling one name differently is the only thing that stops
- * the merge, and it is reported rather than resolved.
+ * merge and outrank the minted ones. A name two arms give to two DIFFERENT examples is held by neither:
+ * each is published under a key minted from that name and its own content, so no illustration is lost, no
+ * arm's example ends up behind another's label, and nothing about how a body is illustrated can cost the
+ * document a component.
+ *
+ * A response's `summary` and `description` are prose about the same body for the same reason, so they are
+ * out of the key too ({@see spoken()}): what they never do is retire the name of a contract they do not
+ * change. The component publishes the wording the most arms state, and an arm that says something else
+ * states its own on the reference that overrides it — `summary` and `description` are fixed fields of a
+ * Reference Object from OAS 3.1 on.
  *
  * Deliberately narrow: 4xx/5xx only, only bodies that actually repeat, and only responses carrying
  * `content`. Anything already a `$ref` is left alone, which is what makes a second run a no-op.
  *
  * @phpstan-type Illustrations array<string, array<string, mixed>>
  * @phpstan-type Authored array<string, array<string, mixed>>
- * @phpstan-type Occurrence array{scope: string, group: string, base: string, body: array<array-key, mixed>, illustrations: Illustrations, authored: Authored, contested: array<string, bool>, count: int, rejected: array<string, array{string, string|null}>}
+ * @phpstan-type Claimed array<string, array<string, array<string, mixed>>>
+ * @phpstan-type Prose array<string, string>
+ * @phpstan-type ProseVotes array<string, array{prose: Prose, count: int}>
+ * @phpstan-type Occurrence array{scope: string, group: string, base: string, body: array<array-key, mixed>, illustrations: Illustrations, claimed: Claimed, prose: ProseVotes, count: int, rejected: array<string, array{string, string|null}>}
  */
 final class SharedErrorResponses implements DocumentTransformer
 {
@@ -55,6 +68,12 @@ final class SharedErrorResponses implements DocumentTransformer
     private const EXAMPLE = 'example';
 
     private const EXAMPLES = 'examples';
+
+    /**
+     * The Response Object members that are prose about a body rather than the body, in the order a
+     * response states them — so one arm's wording is comparable with another's however each was built.
+     */
+    private const PROSE = ['summary', 'description'];
 
     /** The buckets this transformer publishes into, as the `$ref`s pointing at them spell them. */
     private const SCHEMAS = '#/components/schemas/';
@@ -155,7 +174,8 @@ final class SharedErrorResponses implements DocumentTransformer
 
     /**
      * Pass two: hoist every response the rewritten document now states identically two or more times,
-     * carrying the illustrations the arms did not agree on into the one component they now share.
+     * carrying the illustrations the arms did not agree on into the one component they now share, under
+     * the prose the most of them state ({@see spoken()}).
      *
      * @param  array<array-key, mixed>  $paths
      * @param  array<string, Occurrence>  $bodies
@@ -168,55 +188,94 @@ final class SharedErrorResponses implements DocumentTransformer
             return [$paths, null, []];
         }
 
-        $contested = array_filter($bodies, static fn (array $body): bool => $body['contested'] !== []);
-        $bodies = array_diff_key($bodies, $contested);
-        $disagreements = self::disagreements($contested);
+        $disagreements = self::disagreements($bodies);
 
-        if ($bodies === []) {
-            return [$paths, null, $disagreements];
+        $spoken = [];
+        foreach ($bodies as $key => $occurrence) {
+            $spoken[$key] = self::spoken($occurrence);
+            $bodies[$key]['body'] = $spoken[$key] + $occurrence['body'];
         }
 
         [$names, $bucket, $contests] = self::mint(
             $bodies,
             $existing,
-            static fn (array $occurrence): array => self::illustrate($occurrence['body'], $occurrence['illustrations'], $occurrence['authored']),
+            static fn (array $occurrence): array => self::illustrate(
+                $occurrence['body'],
+                $occurrence['illustrations'],
+                $occurrence['claimed'],
+            ),
         );
 
         return [
-            self::rewrite($paths, $names, self::responseSites(...), self::illustrated(...), self::RESPONSES),
+            self::rewrite($paths, $names, self::responseSites(...), self::illustrated(...), self::RESPONSES, $spoken),
             $bucket,
             [...self::collisions($contests, $names, 'responses'), ...$disagreements],
         ];
     }
 
     /**
-     * One warning per body the arms could not agree on. An example name is the author's own, so two arms
-     * spelling one name with two different examples is a question only they can settle: publishing either
-     * would put one arm's body under the other's label, and dropping one loses an illustration. The body
-     * stays inline on each operation instead — which is a shared component the document no longer has, so
-     * saying nothing would leave an author looking at a name that quietly stopped existing.
+     * The prose a shared response publishes: the wording the most of its arms state.
      *
-     * @param  array<string, Occurrence>  $contested
+     * Two arms answering one status with one body in two wordings are one contract described twice, and
+     * keying on the words made them two components neither of which could keep the plain name — so one
+     * endpoint's private phrasing renamed the type every other endpoint's 404 published under. The
+     * argument, and where the wordings this does not publish go, is design §"Shared error components".
+     *
+     * How many arms state a wording is all that decides it, ties settled by the wording itself: a
+     * function of the set, never of the walk. The empty wording never wins, since a Response Object's
+     * `description` is required and a body most of whose arms say nothing still has to publish one.
+     *
+     * @param  Occurrence  $occurrence
+     * @return Prose
+     */
+    private static function spoken(array $occurrence): array
+    {
+        $votes = $occurrence['prose'];
+        ksort($votes);
+
+        $spoken = [];
+        $stated = 0;
+        foreach ($votes as $vote) {
+            if ($vote['count'] > $stated) {
+                $spoken = $vote['prose'];
+                $stated = $vote['count'];
+            }
+        }
+
+        return $spoken;
+    }
+
+    /**
+     * One warning per body whose arms gave one name to two examples. An example name is the author's own,
+     * so that is a question only they can settle: publishing either example under it would put one arm's
+     * body behind the other's label, and dropping one loses an illustration. Both are published instead,
+     * under keys minted from the contested name and their own content — so the name the author chose is
+     * the one thing the document does not state, which is why saying nothing would leave them looking for
+     * a key that is not there.
+     *
+     * @param  array<string, Occurrence>  $bodies
      * @return list<Diagnostic>
      */
-    private static function disagreements(array $contested): array
+    private static function disagreements(array $bodies): array
     {
-        ksort($contested);
+        ksort($bodies);
 
         $out = [];
-        foreach ($contested as $occurrence) {
-            $names = array_keys($occurrence['contested']);
-            sort($names, SORT_STRING);
+        foreach ($bodies as $occurrence) {
+            $names = self::contested($occurrence['claimed']);
+            if ($names === []) {
+                continue;
+            }
 
             $out[] = new Diagnostic(
                 severity: Severity::Warning,
                 code: 'components.example-name-conflict',
                 message: sprintf(
-                    'Operations answering with the same error body give %s to more than one example, so the body was published on each of them rather than as one shared %s in components.responses.',
+                    'Operations answering with the same error body give %s to more than one example, so each of those examples was published on the shared %s in components.responses under a key derived from its own content instead.',
                     implode(' and ', array_map(static fn (string $name): string => sprintf('the name "%s"', $name), $names)),
                     $occurrence['base'],
                 ),
-                help: 'Two examples under one name have to be the same example. Give each its own `name:`, or make the ones sharing a name agree, and the operations share a component again.',
+                help: 'Two examples under one name have to be the same example. Give each its own `name:`, or make the ones sharing a name agree, and the name is published as it was written.',
             );
         }
 
@@ -224,22 +283,31 @@ final class SharedErrorResponses implements DocumentTransformer
     }
 
     /**
-     * Every hoistable node of one response, as `[pointer into the response, body]`. A schema pass reads
-     * one per media type; a response pass reads the response itself.
+     * Every hoistable node of one response, as `[pointer into the response, body, the name claimed for
+     * it]`. A schema pass reads one per media type; a response pass reads the response itself.
+     *
+     * A producer's claim names the RESPONSE, and it reaches the shape underneath only where the response
+     * states exactly ONE representation — there the shape IS the named error's body, and the two buckets
+     * publish one concept under one name. A response offering several says nothing about which of them
+     * the name belongs to, so each shape asks for its status instead: `components.schemas` and
+     * `components.responses` hold different kinds of thing, and a shape named after the response
+     * enclosing it asserts it is that error when it may be the alternative representation beside it.
      *
      * @param  array<array-key, mixed>  $response
-     * @return list<array{list<array-key>, array<array-key, mixed>}>
+     * @return list<array{list<array-key>, array<array-key, mixed>, string|null}>
      */
     private static function schemaSites(array $response): array
     {
         /** @var array<array-key, mixed> $content */
         $content = $response['content'];
 
+        $claim = count($content) === 1 ? self::claimed($response) : null;
+
         $out = [];
         foreach ($content as $mediaType => $media) {
             $schema = is_array($media) ? ($media['schema'] ?? null) : null;
             if (is_array($schema) && self::isHoistable($schema)) {
-                $out[] = [['content', $mediaType, 'schema'], $schema];
+                $out[] = [['content', $mediaType, 'schema'], $schema, $claim];
             }
         }
 
@@ -248,24 +316,24 @@ final class SharedErrorResponses implements DocumentTransformer
 
     /**
      * @param  array<array-key, mixed>  $response
-     * @return list<array{list<array-key>, array<array-key, mixed>}>
+     * @return list<array{list<array-key>, array<array-key, mixed>, string|null}>
      */
     private static function responseSites(array $response): array
     {
-        return [[[], $response]];
+        return [[[], $response, self::claimed($response)]];
     }
 
     /**
-     * What a hoistable node STATES, and how it ILLUSTRATES it — the split that decides which half is
-     * dedupe key and which half travels into the shared component. A schema illustrates nothing, so the
-     * shape pass states all of it.
+     * What a hoistable node STATES, and how it ILLUSTRATES and DESCRIBES it — the split that decides
+     * which half is dedupe key and which half travels into the shared component. A schema illustrates
+     * nothing and describes nothing but itself, so the shape pass states all of it.
      *
      * @param  array<array-key, mixed>  $body
-     * @return array{array<array-key, mixed>, Illustrations, Authored}
+     * @return array{array<array-key, mixed>, Illustrations, Authored, Prose}
      */
     private static function stated(array $body): array
     {
-        return [$body, [], []];
+        return [$body, [], [], []];
     }
 
     /**
@@ -284,14 +352,26 @@ final class SharedErrorResponses implements DocumentTransformer
      * BOTH members is left whole too: OpenAPI already calls that document wrong, and this pass has no
      * business tidying it by merging half of it away.
      *
+     * The response's own `summary` and `description` come off the key with them ({@see spoken()}): they
+     * are the words an operation puts to a body, and a body is what a component is.
+     *
      * @param  array<array-key, mixed>  $response
-     * @return array{array<array-key, mixed>, Illustrations, Authored}
+     * @return array{array<array-key, mixed>, Illustrations, Authored, Prose}
      */
     private static function illustrated(array $response): array
     {
+        $prose = [];
+        foreach (self::PROSE as $member) {
+            $value = $response[$member] ?? null;
+            if (is_string($value)) {
+                $prose[$member] = $value;
+                unset($response[$member]);
+            }
+        }
+
         $content = $response['content'] ?? null;
         if (! is_array($content)) {
-            return [$response, [], []];
+            return [$response, [], [], $prose];
         }
 
         $illustrations = [];
@@ -326,7 +406,7 @@ final class SharedErrorResponses implements DocumentTransformer
 
         $response['content'] = $content;
 
-        return [$response, $illustrations, $authored];
+        return [$response, $illustrations, $authored, $prose];
     }
 
     /**
@@ -338,7 +418,8 @@ final class SharedErrorResponses implements DocumentTransformer
      * A content-derived key is opaque, which for a COMPONENT name would be a real cost — a generated
      * client is written against it. An example key is not: no code generator turns one into a type, so
      * this is the one place the invariant can be paid for in readability rather than in meaning. Every
-     * key is a function of its own example alone, so an arm arriving or leaving never renames another's.
+     * MINTED key is a function of its own example alone, so an arm arriving or leaving never renames
+     * another's.
      *
      * Nothing here can make an illustration false. The arms were merged on a key that keeps every media
      * type and every `schema` in it, so each example sits beside exactly the schema it sat beside before
@@ -349,20 +430,26 @@ final class SharedErrorResponses implements DocumentTransformer
      * hash. Minting climbs past the names they used, so neither kind of key can take the other's place
      * and no illustration is lost to a collision.
      *
+     * A name two arms gave to two different examples is the one an author has to settle, and the ladder
+     * every contested name in this document climbs is what settles it here too: each example takes that
+     * name plus a hash of its own content ({@see disagreements()}).
+     *
      * @param  array<array-key, mixed>  $body
      * @param  Illustrations  $illustrations
-     * @param  Authored  $authored
+     * @param  Claimed  $claimed
      * @return array<array-key, mixed>
      */
-    private static function illustrate(array $body, array $illustrations, array $authored): array
+    private static function illustrate(array $body, array $illustrations, array $claimed): array
     {
-        if (($illustrations === [] && $authored === []) || ! is_array($body['content'] ?? null)) {
+        if (($illustrations === [] && $claimed === []) || ! is_array($body['content'] ?? null)) {
             return $body;
         }
 
+        [$authored, $disputed] = self::settle($claimed);
+
         $content = $body['content'];
 
-        $mediaTypes = array_keys($illustrations + $authored);
+        $mediaTypes = array_keys($illustrations + $claimed);
         sort($mediaTypes, SORT_STRING);
 
         foreach ($mediaTypes as $mediaType) {
@@ -373,17 +460,19 @@ final class SharedErrorResponses implements DocumentTransformer
             $media = $content[$mediaType];
             $values = $illustrations[$mediaType] ?? [];
             $names = $authored[$mediaType] ?? [];
+            $contested = $disputed[$mediaType] ?? [];
             ksort($values);
             ksort($names);
+            ksort($contested);
 
-            if ($names === [] && count($values) === 1) {
+            if ($names === [] && $contested === [] && count($values) === 1) {
                 $media[self::EXAMPLE] = reset($values);
                 $content[$mediaType] = $media;
 
                 continue;
             }
 
-            $merged = $names + self::named($values, array_keys($names));
+            $merged = $names + self::named($values, $contested, array_keys($names));
             ksort($merged);
 
             $media[self::EXAMPLES] = $merged;
@@ -396,29 +485,47 @@ final class SharedErrorResponses implements DocumentTransformer
     }
 
     /**
-     * Each illustration as an Example Object under a minted key, filed in key order so even the bucket's
-     * insertion order is a function of the bodies rather than of the walk that met them.
+     * Every illustration nobody may publish under a name of their own, as an Example Object under a
+     * minted key: one nobody named asks for `example`, and one whose name two arms gave to two examples
+     * asks for that name. Filed in key order so even the bucket's insertion order is a function of the
+     * bodies rather than of the walk that met them.
      *
      * @param  array<string, mixed>  $values  canonical bytes → the example they encode
+     * @param  array<string, array<string, mixed>>  $contested  contested name → canonical bytes → the Example Object under it
      * @param  list<string>  $taken  names an author already gave an example on this media type
-     * @return array<string, array{value: mixed}>
+     * @return array<string, mixed>
      */
-    private static function named(array $values, array $taken = []): array
+    private static function named(array $values, array $contested, array $taken): array
     {
-        if ($values === []) {
-            return [];
+        $claims = [];
+        $bodies = [];
+
+        // Filed under the name asked for and the bytes published — the pair that identifies one
+        // illustration, and a key an author's own example name cannot collide with.
+        foreach ($values as $content => $value) {
+            $claim = Json::stable([null, $content]);
+            $claims[$claim] = ['base' => self::EXAMPLE, 'identity' => null, 'content' => (string) $content];
+            $bodies[$claim] = ['value' => $value];
         }
 
-        $claims = [];
-        foreach ($values as $content => $value) {
-            $claims[$content] = ['base' => self::EXAMPLE, 'identity' => null, 'content' => $content];
+        foreach ($contested as $name => $examples) {
+            ksort($examples);
+            foreach ($examples as $content => $example) {
+                $claim = Json::stable([(string) $name, $content]);
+                $claims[$claim] = ['base' => (string) $name, 'identity' => null, 'content' => (string) $content];
+                $bodies[$claim] = $example;
+            }
+        }
+
+        if ($claims === []) {
+            return [];
         }
 
         [$names] = ComponentNames::mint($claims, $taken);
 
         $examples = [];
-        foreach ($names as $content => $name) {
-            $examples[$name] = ['value' => $values[$content]];
+        foreach ($names as $claim => $name) {
+            $examples[$name] = $bodies[$claim];
         }
 
         ksort($examples);
@@ -427,13 +534,74 @@ final class SharedErrorResponses implements DocumentTransformer
     }
 
     /**
+     * What the arms named their examples, split into the names they agree on and the ones they do not: a
+     * name is one arm's word for one example, so a name every arm that used it used for the SAME example
+     * is published as written, and one used for two is published for neither ({@see named()}).
+     *
+     * The whole rule reads off the set of distinct examples per name, so it is a function of the arms and
+     * not of the order they were walked — and a third arm restating a body already there changes nothing.
+     *
+     * @param  Claimed  $claimed
+     * @return array{Authored, Claimed}
+     */
+    private static function settle(array $claimed): array
+    {
+        $authored = [];
+        $disputed = [];
+
+        foreach ($claimed as $mediaType => $names) {
+            foreach ($names as $name => $examples) {
+                if (count($examples) === 1) {
+                    $authored[$mediaType][$name] = reset($examples);
+
+                    continue;
+                }
+
+                $disputed[$mediaType][$name] = $examples;
+            }
+        }
+
+        return [$authored, $disputed];
+    }
+
+    /**
+     * The example names the arms of one body gave to more than one example, in name order.
+     *
+     * @param  Claimed  $claimed
+     * @return list<string>
+     */
+    private static function contested(array $claimed): array
+    {
+        [, $disputed] = self::settle($claimed);
+
+        $names = [];
+        foreach ($disputed as $byName) {
+            foreach (array_keys($byName) as $name) {
+                $names[$name] = true;
+            }
+        }
+
+        $contested = array_map(strval(...), array_keys($names));
+        sort($contested, SORT_STRING);
+
+        return $contested;
+    }
+
+    /**
      * Count what every hoistable node states, keyed by the scope it will PUBLISH under ({@see scope()})
      * and its canonical content, and filed under the GROUP that decides whether it publishes at all:
      * the status and the body, which no declaration has a say in ({@see shareable()}).
      *
+     * How an arm words the body and how it illustrates it are both outside that key, so one bucket holds
+     * every wording and every illustration of one contract, and nothing either kind of annotation says
+     * can decide whether the contract publishes. What the arms name their examples is settled inside the
+     * bucket instead: a name they agree on is kept, and one they do not is handed to neither of them
+     * ({@see named()}). Deciding it here rather than while publishing keeps it a function of the SET of
+     * arms — a third arm restating what a second contested changes nothing.
+     *
      * @param  array<array-key, mixed>  $paths
-     * @param  callable(array<array-key, mixed>): list<array{list<array-key>, array<array-key, mixed>}>  $sites
-     * @param  callable(array<array-key, mixed>): array{array<array-key, mixed>, Illustrations, Authored}  $split
+     * @param  callable(array<array-key, mixed>): list<array{list<array-key>, array<array-key, mixed>, string|null}>  $sites
+     * @param  callable(array<array-key, mixed>): array{array<array-key, mixed>, Illustrations, Authored, Prose}  $split
      * @param  array<string, string>  $aliases  the shapes pass one published, resolved away before grouping
      * @return array<string, Occurrence>
      */
@@ -446,12 +614,11 @@ final class SharedErrorResponses implements DocumentTransformer
                 continue;
             }
 
-            $name = self::claimed($response);
-            $scope = self::scope((string) $status, $name);
             $rejected = self::rejected($response);
 
-            foreach ($sites($response) as [, $body]) {
-                [$stripped, $illustrations, $authored] = $split(self::stripProvenance($body));
+            foreach ($sites($response) as [, $body, $name]) {
+                $scope = self::scope((string) $status, $name);
+                [$stripped, $illustrations, $authored, $prose] = $split(self::stripProvenance($body));
                 $key = self::key($scope, $stripped);
 
                 $out[$key] ??= [
@@ -460,31 +627,29 @@ final class SharedErrorResponses implements DocumentTransformer
                     'base' => $name ?? 'Error'.$status,
                     'body' => $stripped,
                     'illustrations' => [],
-                    'authored' => [],
-                    'contested' => [],
+                    'claimed' => [],
+                    'prose' => [],
                     'count' => 0,
                     'rejected' => [],
                 ];
                 $out[$key]['count']++;
                 $out[$key]['rejected'] += $rejected;
 
+                if ($prose !== []) {
+                    $vote = Json::stable($prose);
+                    $out[$key]['prose'][$vote] ??= ['prose' => $prose, 'count' => 0];
+                    $out[$key]['prose'][$vote]['count']++;
+                }
+
                 foreach ($illustrations as $mediaType => $values) {
                     $out[$key]['illustrations'][$mediaType] = ($out[$key]['illustrations'][$mediaType] ?? []) + $values;
                 }
 
+                // Every name an arm gave an example, with the DISTINCT examples the arms put under it —
+                // one of them and the name is theirs, two and it is nobody's ({@see settle()}).
                 foreach ($authored as $mediaType => $map) {
                     foreach ($map as $exampleName => $example) {
-                        $held = $out[$key]['authored'][$mediaType] ?? [];
-
-                        // One name, two examples: the arms disagree about what that name means, and
-                        // picking a winner would publish one arm's example under the other's label.
-                        if (array_key_exists($exampleName, $held) && Json::stable($held[$exampleName]) !== Json::stable($example)) {
-                            $out[$key]['contested'][$exampleName] = true;
-
-                            continue;
-                        }
-
-                        $out[$key]['authored'][$mediaType][$exampleName] = $example;
+                        $out[$key]['claimed'][$mediaType][(string) $exampleName][Json::stable($example)] = $example;
                     }
                 }
             }
@@ -665,9 +830,10 @@ final class SharedErrorResponses implements DocumentTransformer
                         implode(', ', $published),
                         $bucket,
                     ),
-                help: $incumbent
+                help: ($incumbent
                     ? 'The component already holding the name was published before this pass ran and cannot move. Give the error body a name of its own with #[ErrorComponent], or rename the component holding this one, and it publishes under a plain name again.'
-                    : 'A shared error body is named after its status unless something names it, and a name belongs to one body only while it holds it alone. Nothing to do if these really are different errors and the derived names read well enough; otherwise have the operations state one body, or name each body with #[ErrorComponent] — one name per body, since a name spread over an exception family, or over a method answering at several statuses, is contested the same way.',
+                    : 'A shared error body is named after its status unless something names it, and a name belongs to one body only while it holds it alone. Nothing to do if these really are different errors and the derived names read well enough; otherwise have the operations state one body, or name each body with #[ErrorComponent] — one name per body, since a name spread over an exception family, or over a method answering at several statuses, is contested the same way.'
+                ).($bucket === 'schemas' ? ' A declared name names the response, so it names the shape under it only where the response states one representation; a response offering several says nothing about which of them is the one it named.' : ''),
             );
         }
 
@@ -678,13 +844,17 @@ final class SharedErrorResponses implements DocumentTransformer
      * Points every shared body at its component, keeping the body's own provenance beside the `$ref` —
      * a per-route fact the hoisted component cannot state.
      *
+     * An arm whose prose is not the prose the component publishes keeps its own beside the `$ref`, where
+     * a Reference Object's `summary` and `description` override the ones it points at ({@see spoken()}).
+     *
      * @param  array<array-key, mixed>  $paths
      * @param  array<string, string>  $names
-     * @param  callable(array<array-key, mixed>): list<array{list<array-key>, array<array-key, mixed>}>  $sites
-     * @param  callable(array<array-key, mixed>): array{array<array-key, mixed>, Illustrations}  $split
+     * @param  callable(array<array-key, mixed>): list<array{list<array-key>, array<array-key, mixed>, string|null}>  $sites
+     * @param  callable(array<array-key, mixed>): array{array<array-key, mixed>, Illustrations, Authored, Prose}  $split
+     * @param  array<string, Prose>  $spoken  body → the prose its component publishes
      * @return array<array-key, mixed>
      */
-    private static function rewrite(array $paths, array $names, callable $sites, callable $split, string $prefix): array
+    private static function rewrite(array $paths, array $names, callable $sites, callable $split, string $prefix, array $spoken = []): array
     {
         foreach ($paths as $path => $operations) {
             if (! is_array($operations)) {
@@ -704,16 +874,20 @@ final class SharedErrorResponses implements DocumentTransformer
                         continue;
                     }
 
-                    $scope = self::scope((string) $status, self::claimed($response));
-
-                    foreach ($sites($response) as [$pointer, $body]) {
-                        [$stripped] = $split(self::stripProvenance($body));
-                        $name = $names[self::key($scope, $stripped)] ?? null;
+                    foreach ($sites($response) as [$pointer, $body, $claim]) {
+                        $scope = self::scope((string) $status, $claim);
+                        [$stripped, , , $prose] = $split(self::stripProvenance($body));
+                        $key = self::key($scope, $stripped);
+                        $name = $names[$key] ?? null;
                         if ($name === null) {
                             continue;
                         }
 
                         $reference = ['$ref' => $prefix.$name];
+                        if ($prose !== ($spoken[$key] ?? [])) {
+                            $reference += $prose;
+                        }
+
                         if (array_key_exists(self::PROVENANCE, $body)) {
                             $reference = [self::PROVENANCE => $body[self::PROVENANCE]] + $reference;
                         }
@@ -818,7 +992,9 @@ final class SharedErrorResponses implements DocumentTransformer
 
     /**
      * What distinguishes one publication of a body from another carrying the same bytes: its status and
-     * the name a producer declared for it. Why both halves: design §"Shared error components".
+     * the name claimed for the node being published — which for a shape is the enclosing response's
+     * claim only where it speaks for that shape ({@see schemaSites()}). Why both halves: design
+     * §"Shared error components".
      */
     private static function scope(string $status, ?string $name): string
     {

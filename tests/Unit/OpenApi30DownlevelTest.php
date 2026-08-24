@@ -176,6 +176,68 @@ describe('document members 3.0 does not define', function (): void {
     });
 });
 
+describe('prose beside a $ref', function (): void {
+    /**
+     * One document with a `$ref` in all three positions that carry prose: a Reference Object, whose
+     * `summary` and `description` are 3.1 fixed fields 3.0 has no answer for, and two Path Items, where
+     * both members are 3.0's own.
+     *
+     * @return array{array<string, mixed>, list<string>}
+     */
+    $emitted = static function (): array {
+        $pathItem = [
+            '$ref' => '#/components/pathItems/shared',
+            'summary' => 'Things',
+            'description' => 'Everything about things',
+        ];
+
+        $result = (new OpenApi30DownlevelEmitter)->emitWithReport(UirDocument::fromArray([
+            'uir' => '1.0.0',
+            'openapi' => '3.2.0',
+            'info' => ['title' => 'API', 'version' => '1.0.0'],
+            'paths' => [
+                '/things' => $pathItem,
+                '/other' => ['get' => [
+                    'responses' => ['404' => ['$ref' => '#/components/responses/Error404', 'description' => 'Its own words']],
+                    'callbacks' => ['onData' => ['{$request.body#/cb}' => $pathItem]],
+                ]],
+            ],
+            'components' => ['responses' => ['Error404' => ['description' => 'Not Found']]],
+        ]));
+
+        return [
+            json_decode($result->output, true, flags: JSON_THROW_ON_ERROR),
+            array_map(static fn ($d): string => $d->code, $result->report->diagnostics),
+        ];
+    };
+
+    it('drops a reference\'s own wording, naming where it stood', function () use ($emitted): void {
+        [$decoded, $codes] = $emitted();
+
+        expect($decoded['paths']['/other']['get']['responses']['404'])->toBe(['$ref' => '#/components/responses/Error404'])
+            ->and($codes)->toBe(['downlevel.ref-siblings']);
+    });
+
+    it('keeps the wording a path item states, which 3.0 defines itself', function (string $case, array $pointer) use ($emitted): void {
+        // `summary` and `description` are Path Item fixed fields in 3.0 as much as in 3.2, so they are
+        // not siblings a 3.0 reader ignores — and dropping them would lose wording 3.0 can carry. One
+        // note, not three, is the whole assertion: the drop reaches the reference position and no other.
+        [$decoded, $codes] = $emitted();
+
+        $node = $decoded;
+        foreach ($pointer as $token) {
+            $node = $node[$token];
+        }
+
+        expect($node['summary'])->toBe('Things')
+            ->and($node['description'])->toBe('Everything about things')
+            ->and($codes)->toHaveCount(1);
+    })->with([
+        'a path' => ['a path', ['paths', '/things']],
+        'a path item a callback maps' => ['a path item a callback maps', ['paths', '/other', 'get', 'callbacks', 'onData', '{$request.body#/cb}']],
+    ]);
+});
+
 describe('schema dialect conversions', function (): void {
     it('converts every construct 3.0 spells differently', function (array $schema, array $expected, array $codes): void {
         $result = downlevel30($schema);

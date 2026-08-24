@@ -28,6 +28,23 @@ final readonly class SchemaExampleFactory
     private const int MAX_DEPTH = 8;
 
     /**
+     * @param  array<string, string>  $formatSamples  the document's configured samples, merged over
+     *                                                {@see FormatSamples} at the one lookup
+     */
+    public function __construct(private array $formatSamples = []) {}
+
+    /**
+     * The same factory bound to a document's configured samples — `$this` when they change nothing, so
+     * an injected instance survives the default case.
+     *
+     * @param  array<string, string>  $samples
+     */
+    public function withFormatSamples(array $samples): self
+    {
+        return $samples === $this->formatSamples ? $this : new self($samples);
+    }
+
+    /**
      * @param  array<string, mixed>  $schema
      * @param  array<string, mixed>  $components  the document's `components`, for `$ref` resolution
      * @param  list<string>  $stack  `$ref` pointers already being resolved, guarding cycles
@@ -304,7 +321,7 @@ final readonly class SchemaExampleFactory
     {
         $format = $schema['format'] ?? null;
 
-        return is_string($format) ? (FormatSamples::for($format) ?? 'string') : 'string';
+        return is_string($format) ? (FormatSamples::for($format, $this->formatSamples) ?? 'string') : 'string';
     }
 
     /**

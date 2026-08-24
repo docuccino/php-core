@@ -22,9 +22,16 @@ use Docuccino\Core\Support\Arr;
  * Schema level: nullable type-arrays become `nullable: true`, `const` becomes a single-value `enum`,
  * schema `examples` become `example`, numeric exclusive bounds become the boolean form, `$ref`
  * siblings hoist into an `allOf` wrapper, and {@see UNSUPPORTED_SCHEMA_KEYWORDS} is dropped.
+ * Reference level: a Reference Object's own `summary` or `description` — 3.1's way for a reference to
+ * reword what it points at — comes off, since 3.0 defines neither and ignores what stands beside a
+ * `$ref` ({@see isReference()} for the positions where that is what a `$ref` means).
  *
- * Every lossy step warns into an {@see EmitReport} naming the JSON pointer it happened at, so a
- * 3.0 export states what it could not carry instead of quietly shipping a weaker contract.
+ * Every step that changes what a consumer reads is reported into an {@see EmitReport} naming the JSON
+ * pointer it happened at, so a 3.0 export states what it could not carry instead of quietly shipping a
+ * weaker contract: Warning where a contract is lost, Info where it survives in another shape. That is why
+ * `downlevel.ref-siblings` covers both answers to one question at a `$ref` — a schema's siblings moving
+ * into an `allOf` losslessly, and a reference's prose coming off in favour of the wording the component
+ * it points at publishes — and the message says which happened.
  *
  * @internal
  */
@@ -345,6 +352,11 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
             return $node;
         }
 
+        $list = array_is_list($node);
+        if (! $list && is_string($node['$ref'] ?? null) && self::isReference($pointer)) {
+            $node = $this->dropRefProse(Arr::stringKeyed($node), $pointer, $diagnostics);
+        }
+
         $out = [];
 
         foreach ($node as $key => $value) {
@@ -359,7 +371,58 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
             };
         }
 
-        return array_is_list($node) ? array_values($out) : $out;
+        return $list ? array_values($out) : $out;
+    }
+
+    /**
+     * Whether a `$ref` at this position is a Reference Object — where 3.0 defines nothing beside the
+     * `$ref` — rather than a Path Item, whose `summary` and `description` are 3.0 fixed fields of its own
+     * that a `$ref` stands legally beside. Path items are what `paths` maps, and what the expression map
+     * of a Callbacks Object maps; `components.pathItems` and `webhooks` are gone by the time this runs.
+     */
+    private static function isReference(string $pointer): bool
+    {
+        $tokens = explode('/', $pointer);
+        $depth = count($tokens);
+
+        return ! ($depth === 3 && $tokens[1] === 'paths')
+            && ! ($depth >= 4 && $tokens[$depth - 3] === 'callbacks');
+    }
+
+    /**
+     * A Reference Object states `summary` and `description` of its own from 3.1 on, and the shared-error
+     * hoist uses them to keep one operation's wording out of every other's.
+     * 3.0 ignores anything beside a `$ref`, so what it would ignore comes
+     * off rather than sitting in the document reading as though it applied — a schema's siblings have an
+     * `allOf` to move into ({@see hoistRefSiblings()}); prose about a response has nowhere, and the words
+     * the component itself publishes stand in its place.
+     *
+     * @param  array<string, mixed>  $node
+     * @param  list<Diagnostic>  $diagnostics
+     * @return array<string, mixed>
+     */
+    private function dropRefProse(array $node, string $pointer, array &$diagnostics): array
+    {
+        $dropped = array_keys(array_intersect_key($node, array_flip(['summary', 'description'])));
+        if ($dropped === []) {
+            return $node;
+        }
+
+        foreach ($dropped as $member) {
+            unset($node[$member]);
+        }
+
+        $diagnostics[] = new Diagnostic(
+            severity: Severity::Info,
+            code: 'downlevel.ref-siblings',
+            message: sprintf(
+                'Dropped `%s` from the reference at %s; OpenAPI 3.0 ignores a `$ref` sibling, so the referenced component\'s own wording is what a 3.0 reader sees.',
+                implode('` and `', $dropped),
+                $pointer,
+            ),
+        );
+
+        return $node;
     }
 
     /** A child JSON Pointer, with the RFC 6901 escapes a path template needs. */

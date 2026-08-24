@@ -29,6 +29,7 @@ final class DiagnosticDocs
         'config' => 'configuration',
         'content' => 'narrative-content',
         'description-file' => 'attributes',
+        'docblock' => 'docblock-tags',
         'document' => 'routes-operations-and-names',
         'downlevel' => 'emitting-openapi-31-and-30',
         'eloquent' => 'package-integrations',

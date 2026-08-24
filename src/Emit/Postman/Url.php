@@ -28,6 +28,19 @@ final readonly class Url
     ) {}
 
     /**
+     * Bound to a document's configured format samples, so a variable's value illustrates a `format` the
+     * way the rest of the document does. `$this` when they change nothing.
+     *
+     * @param  array<string, string>  $samples
+     */
+    public function withFormatSamples(array $samples): self
+    {
+        $examples = $this->examples->withFormatSamples($samples);
+
+        return $examples === $this->examples ? $this : new self($examples);
+    }
+
+    /**
      * Path-item and operation parameters merged, the operation winning on `(in, name)` as OAS
      * requires, then ordered `in`-rank first so path variables read before query strings.
      *

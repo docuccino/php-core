@@ -20,11 +20,11 @@ use Opis\JsonSchema\Validator;
  * @param  array<string, mixed>  $document
  * @return array<string, mixed>
  */
-function postman(array $document): array
+function postman(array $document, EmitOptions $options = new EmitOptions): array
 {
     /** @var array<string, mixed> $decoded */
     $decoded = json_decode(
-        (new CollectionEmitter)->emit(UirDocument::fromArray($document)),
+        (new CollectionEmitter)->emit(UirDocument::fromArray($document), $options),
         true,
         flags: JSON_THROW_ON_ERROR,
     );
@@ -624,6 +624,43 @@ it('ignores the options that describe a UIR or OpenAPI artifact', function (): v
     expect($emitter->emit($document, $loaded))->toBe($emitter->emit($document))
         ->and($emitter->emit($document, $loaded))->not->toContain('x-docuccino')
         ->and($emitter->emit($document, $loaded))->not->toContain('x-faker');
+});
+
+it('illustrates a format with the sample the document configured, everywhere it fabricates one', function (): void {
+    // The other emit options describe how a UIR or OpenAPI file serialises, which is why the collection
+    // ignores them. This one describes what a value LOOKS like, and the document already used it for its
+    // own synthesized examples — so a collection reading the built-in table instead would make one
+    // document disagree with itself about what an email is.
+    $options = (new EmitOptions)->withFormatSamples([
+        'email' => 'jane@example.net',
+        'uuid' => '00000000-0000-4000-8000-000000000000',
+    ]);
+
+    $leaves = postmanLeaves(postman(loadFixture('postman-surface.uir.json'), $options)['item']);
+
+    // A saved example fabricated from the component schema.
+    $saved = $leaves['/Accounts/List accounts']['response'][0]['body'];
+
+    // …a path variable fabricated from the parameter schema.
+    $variable = array_column($leaves['/Accounts/Replace the avatar']['request']['url']['variable'], 'value', 'key');
+
+    expect($saved)->toContain('"email": "jane@example.net"')
+        ->and($saved)->toContain('"id": "00000000-0000-4000-8000-000000000000"')
+        ->and($saved)->not->toContain('user@example.com')
+        // A format left out keeps its built-in sample: the merge is per format, not a replacement.
+        ->and($saved)->toContain('"closedAt": "2024-01-01T00:00:00Z"')
+        ->and($variable['id'])->toBe('00000000-0000-4000-8000-000000000000')
+        // …and a value the DOCUMENT states still outranks any sample, configured or built in.
+        ->and(array_column($leaves['/Accounts/Open an account']['request']['body']['urlencoded'], 'value', 'key'))
+        ->toBe(['email' => 'ada@example.com', 'referrer' => 'string']);
+});
+
+it('leaves every fabricated value alone when no sample is configured', function (): void {
+    // The map merges per format at one lookup, so an empty one has to be byte-identical to no map.
+    $document = UirDocument::fromArray(loadFixture('postman-surface.uir.json'));
+    $emitter = new CollectionEmitter;
+
+    expect($emitter->emit($document, (new EmitOptions)->withFormatSamples([])))->toBe($emitter->emit($document));
 });
 
 it('carries a deprecation in prose, which is the only place the format has for it', function (): void {

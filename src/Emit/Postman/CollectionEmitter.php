@@ -88,6 +88,32 @@ final readonly class CollectionEmitter implements ReportingEmitter
      */
     public function toCollectionArray(UirDocument $document, array &$diagnostics, EmitOptions $options = new EmitOptions): array
     {
+        // Every fabricated value in here comes from one of two collaborators, so the document's
+        // configured format samples are bound once, before anything reads a schema.
+        $bound = $this->withFormatSamples($options->formatSamples);
+
+        return $bound->collection($document, $diagnostics, $options);
+    }
+
+    /**
+     * @param  array<string, string>  $samples
+     */
+    private function withFormatSamples(array $samples): self
+    {
+        $examples = $this->examples->withFormatSamples($samples);
+        $urls = $this->urls->withFormatSamples($samples);
+
+        return $examples === $this->examples && $urls === $this->urls
+            ? $this
+            : new self($this->oas32, $this->serializer, $examples, $this->auth, $urls);
+    }
+
+    /**
+     * @param  list<Diagnostic>  $diagnostics
+     * @return array<string, mixed>
+     */
+    private function collection(UirDocument $document, array &$diagnostics, EmitOptions $options): array
+    {
         if ($options->yaml) {
             // Postman reads JSON only, so a YAML "collection" is a file it refuses to import.
             $diagnostics[] = new Diagnostic(
