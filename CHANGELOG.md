@@ -7,6 +7,12 @@ User-facing changes to `docuccino/core` — features, fixes, performance work an
 taken from the commit messages scoped `core`. Entries begin after v0.1.2; older history is in
 the [repository](https://github.com/docuccino/docuccino) git log.
 
+## v0.9.1
+
+### Bug fixes
+
+- audit examples against the document that ships, and never let a lint kill the export ([#189](https://github.com/docuccino/docuccino/pull/189))
+
 ## v0.9.0
 
 ### Breaking changes
