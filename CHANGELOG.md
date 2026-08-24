@@ -7,6 +7,16 @@ User-facing changes to `docuccino/core` — features, fixes, performance work an
 taken from the commit messages scoped `core`. Entries begin after v0.1.2; older history is in
 the [repository](https://github.com/docuccino/docuccino) git log.
 
+## v0.8.5
+
+### Features
+
+- synthesize a property example from the validation rules a request recovers ([#171](https://github.com/docuccino/docuccino/pull/171))
+
+### Bug fixes
+
+- publish the reason a deprecated operation carries ([#167](https://github.com/docuccino/docuccino/pull/167))
+
 ## v0.8.4
 
 ### Features
