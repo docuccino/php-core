@@ -24,9 +24,11 @@ use stdClass;
  *
  * The reading is a function of the type SET, never of the order its members were met — a union is tried
  * most specific first, so `integer|null` reads `7` as a number and `null` as null. Where the schema
- * states no type of its own the text stands exactly as written: a `$ref` or an `anyOf` may well accept
- * it, nothing here can tell, and the example audit that runs over the finished document is what holds
- * that case to its schema.
+ * states no type of its own — a `$ref`, an `anyOf` — the text stands as written, save a complete JSON
+ * string literal, which is read as the string it quotes: whatever the member behind the ref turns out
+ * to accept, `"draft"` is the author writing a JSON literal and `draft` is the value. Nothing else
+ * about such a member is knowable here, and the example audit that runs over the finished document is
+ * what holds that case to its schema.
  *
  * An object literal is classified off an OBJECT-decode and then read by {@see JsonValue}, the reader the
  * `#[Example(file:)]` and recorded-body paths also go through — one literal, one reading, however it
@@ -42,8 +44,8 @@ final class TypedExample
      * distinguishable from "does not read as this type"; null when nothing in `$type` reads it.
      *
      * `$type` is a schema's own `type` keyword — one name, a list of them (OAS 3.1 nullability), or
-     * absent. An absent or unrecognised type constrains nothing a string would violate, so there the
-     * text stands as written.
+     * absent. Where it is absent the text stands as written, save a complete JSON string literal,
+     * which is read as the string it quotes ({@see quoted()}).
      *
      * @return array{mixed}|null
      */
@@ -51,7 +53,7 @@ final class TypedExample
     {
         $types = self::types($type);
         if ($types === []) {
-            return [$text];
+            return self::quoted($text) ?? [$text];
         }
 
         foreach (self::ORDER as $candidate) {
@@ -94,6 +96,35 @@ final class TypedExample
                 .'type gets copied out of the document and rejected by your own API, so it is dropped rather '
                 .'than published.',
         );
+    }
+
+    /**
+     * The string a text quotes, when the text is a complete JSON string literal (`"draft"` → `draft`);
+     * null for anything else.
+     *
+     * Read only where the schema states no `type` — a `$ref`, an `anyOf`. Every reading of such a
+     * member that could accept the text is the string itself and never the quotes: a `$ref` to an enum
+     * of `["draft", …]` rejects `"draft"`, so the quotes are the author writing a JSON literal, not two
+     * characters of the value. A schema that DOES say `string` keeps the author's bytes, quotes
+     * included, because there nothing rules them out.
+     *
+     * @return array{string}|null
+     */
+    private static function quoted(string $text): ?array
+    {
+        $trimmed = trim($text);
+        if (! str_starts_with($trimmed, '"') || ! str_ends_with($trimmed, '"') || strlen($trimmed) < 2) {
+            return null;
+        }
+
+        try {
+            /** @var mixed $read */
+            $read = json_decode($trimmed, false, 512, JSON_THROW_ON_ERROR);
+        } catch (JsonException) {
+            return null;
+        }
+
+        return is_string($read) ? [$read] : null;
     }
 
     /** @return array{mixed}|null */

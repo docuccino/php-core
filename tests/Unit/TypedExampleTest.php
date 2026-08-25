@@ -179,6 +179,55 @@ it('leaves the text alone where the schema declares no type it knows', function 
     'a list mixing a known type with junk' => [[7, false]],
 ]);
 
+/*
+ * The one exception to "the text stands as written" where no type is stated. A member whose type is
+ * carried by a `$ref` — an enum component, alone or inside a nullable `anyOf` — is a real constraint, and
+ * `"draft"` beside it published the six characters `"draft"` against an enum of `draft`: an example the
+ * document's own lint then reported as a mismatch, correctly. Every reading such a member could accept is
+ * the string the literal quotes and never the quotes, so the quotes are the author writing JSON.
+ */
+it('reads a quoted JSON string literal as the string it quotes where no type is stated', function (mixed $type, string $text, string $expected): void {
+    expect(TypedExample::of($text, $type))->toBe([$expected]);
+})->with([
+    'a $ref to a string-backed enum' => [null, '"standard"', 'standard'],
+    'a nullable anyOf around one' => [null, '"hybrid"', 'hybrid'],
+    'padded, since whitespace around a docblock tag is layout' => [null, "  \"draft\"\t", 'draft'],
+    'a value carrying the characters JSON escapes' => [null, '"a \"quoted\" word"', 'a "quoted" word'],
+    'an escape sequence, read as the character it names' => [null, '"a\\/b"', 'a/b'],
+    'an empty string, which is a value a schema can carry' => [null, '""', ''],
+    'a type nobody knows, which states nothing either' => ['widget', '"standard"', 'standard'],
+]);
+
+it('leaves everything that is not a complete quoted string exactly as written', function (string $text): void {
+    // The reading is JSON's, not "strip the outer quotes": a half-quoted or malformed literal is text an
+    // author wrote, and guessing at it would publish something they did not.
+    expect(TypedExample::of($text, null))->toBe([$text]);
+})->with([
+    'unquoted' => ['standard'],
+    'opening quote only' => ['"standard'],
+    'closing quote only' => ['standard"'],
+    'a lone quote' => ['"'],
+    'two literals, not one' => ['"a" "b"'],
+    'an unterminated escape' => ['"a\\"'],
+    // A number, an object and a list all decode, but none of them decodes to a STRING — and what a `$ref`
+    // would want of them is unknowable, so they stay as written rather than change type on a guess.
+    'a number' => ['7'],
+    'a boolean' => ['true'],
+    'null' => ['null'],
+    'an object literal' => ['{"id": 1}'],
+    'a list literal' => ['["a"]'],
+]);
+
+it('keeps publishing a string type byte for byte, quotes and all', function (mixed $type): void {
+    // The other half of the rule, and the reason it is scoped to a stated-no-type schema: where the
+    // schema says `string` and nothing narrows which string, the quotes may be part of the value, so the
+    // author's bytes stand. This is the row that must not move.
+    expect(TypedExample::of('"hello"', $type))->toBe(['"hello"']);
+})->with([
+    'a plain string' => ['string'],
+    'a nullable string' => [['string', 'null']],
+]);
+
 it('reads nothing from an empty literal, whatever the type', function (string $type): void {
     // A tag whose value is whitespace states nothing. The string branch is the exception: an author who
     // wrote spaces into a string example wrote spaces.
