@@ -4,9 +4,17 @@ declare(strict_types=1);
 
 use Docuccino\Core\Canonical\Canonicalizer;
 use Docuccino\Core\Canonical\CanonicalJsonSerializer;
+use Docuccino\Core\Contract\Pointer;
+use Docuccino\Core\Document\UirDocument;
+use Docuccino\Core\Draft\SchemaKeywords;
+use Docuccino\Core\Emit\OpenApi30DownlevelEmitter;
+use Docuccino\Core\Emit\OpenApi31DownlevelEmitter;
 use Docuccino\Core\Emit\UirEmitter;
 use Docuccino\Core\Extensions\Schema\EnumDecoration;
+use Docuccino\Core\SpecValidation\Validator;
 use Docuccino\Core\Support\JsonValue;
+use Opis\JsonSchema\Errors\ErrorFormatter;
+use Opis\JsonSchema\Validator as OpisValidator;
 
 /**
  * Reverses the key order of every map (associative array) at every depth while leaving
@@ -326,3 +334,128 @@ it('reads every spelling of an enum-value-keyed map back as an object', function
     'sparse indexes' => ['{"0":"Free.","2":"Paid."}'],
     'words' => ['{"draft":"Not yet.","live":"Serving."}'],
 ]);
+
+/*
+ * The OTHER arm of the subschema reading, and the one that says nothing.
+ *
+ * A boolean at a subschema position is published as written, because it is a schema. Anything that is no
+ * schema at all — `items: 7`, a schema component holding a string — becomes `{}`: vague and valid beats
+ * a document no validator accepts. That is a widening, and widening is the arm the rules ask to be said
+ * out loud with a diagnostic. It is deliberately silent, and the three facts below are why.
+ *
+ * FIRST, the widening is total: it is the same answer at all three subschema positions, read off the
+ * position table so the sweep cannot go short.
+ */
+it('widens anything that is no schema at all to the empty schema, at every subschema position', function (): void {
+    $positions = [
+        SchemaKeywords::POSITION_SCHEMA,
+        SchemaKeywords::POSITION_SCHEMA_MAP,
+        SchemaKeywords::POSITION_SCHEMA_LIST,
+    ];
+
+    $widened = [];
+
+    foreach ($positions as $position) {
+        foreach (SchemaKeywords::at($position) as $keyword) {
+            foreach ([7, 'nonsense', 1.5] as $nonSchema) {
+                $value = match ($position) {
+                    SchemaKeywords::POSITION_SCHEMA_MAP => ['member' => $nonSchema],
+                    SchemaKeywords::POSITION_SCHEMA_LIST => [$nonSchema],
+                    default => $nonSchema,
+                };
+
+                $published = Pointer::read(
+                    $this->canonicalizer->canonicalize(['components' => ['schemas' => ['X' => [$keyword => $value]]]]),
+                    ['components', 'schemas', 'X', $keyword],
+                );
+
+                // Read the subschema back from where the POSITION says it sits, not from anywhere `{}`
+                // happens to appear — a dropped keyword would leave `"X": {}` and pass a string match.
+                $subschema = match ($position) {
+                    // A map comes back as an array or a stdClass depending on its keys; either is a map.
+                    SchemaKeywords::POSITION_SCHEMA_MAP => is_array($published) || is_object($published)
+                        ? (((array) $published)['member'] ?? null)
+                        : null,
+                    SchemaKeywords::POSITION_SCHEMA_LIST => is_array($published) ? ($published[0] ?? null) : null,
+                    default => $published,
+                };
+
+                $widened[$keyword] = ($widened[$keyword] ?? true)
+                    && $subschema instanceof stdClass
+                    && (array) $subschema === [];
+            }
+        }
+    }
+
+    // `dependentRequired` carries string lists rather than subschemas, so it is not in this sweep.
+    expect(count($widened))->toBeGreaterThan(15)
+        ->and(array_keys(array_filter($widened, static fn (bool $v): bool => ! $v)))->toBe([]);
+});
+
+/*
+ * SECOND, the site cannot say anything useful. `subschemaValue()` is a pure function with no pointer
+ * state, reached from identity hashing, content hashing, spec validation and every emitter — two of
+ * those run per fragment, many times a build, with nowhere to put a diagnostic. A report that fired on
+ * a 3.0 export and not on a UIR emit would be one policy per producer, which is the anti-pattern.
+ *
+ * `downlevel.boolean-subschema` is not the precedent it looks like: it reports a LOSS an author can act
+ * on, because 3.0 has no boolean subschema and the `false` they wrote is being weakened. A value that
+ * was never a schema is nobody's claim, so there is nothing to tell them about.
+ */
+it('says nothing when it widens, at any emitted format', function (): void {
+    $document = [
+        '$schema' => 'https://spec.docuccino.app/uir/1.0/schema.json',
+        'uir' => '1.0.0',
+        'openapi' => '3.2.0',
+        'info' => ['title' => 'T', 'version' => '1.0.0'],
+        'paths' => ['/t' => ['get' => ['operationId' => 't.i', 'responses' => ['200' => ['description' => 'OK', 'content' => [
+            'application/json' => ['schema' => ['type' => 'array', 'items' => 7]],
+        ]]]]]],
+        'components' => ['schemas' => ['Nonsense' => 'not a schema']],
+    ];
+
+    $uir = UirDocument::fromArray($document);
+
+    expect((new UirEmitter)->emitWithReport($uir)->report->diagnostics)->toBe([])
+        ->and((new OpenApi31DownlevelEmitter)->emitWithReport($uir)->report->diagnostics)->toBe([])
+        ->and((new OpenApi30DownlevelEmitter)->emitWithReport($uir)->report->diagnostics)->toBe([])
+        // …and the emitted bytes carry the widening at both slots, so the silence is over something real.
+        ->and((new UirEmitter)->emit($uir))->toContain('"items": {}', '"Nonsense": {}');
+});
+
+/*
+ * THIRD, `document.schema-invalid` cannot stand in for it, and moving the validation earlier is not the
+ * fix it looks like. The validator canonicalises BEFORE validating, so the coercion runs first and
+ * launders the problem — but that hop is what turns a PHP array into JSON at all, and an array cannot
+ * tell the empty object from the empty list. Validate the bytes as handed over and a legitimate
+ * `properties: {}` is rejected: the validator is a post-condition on what the emitter writes, not a
+ * pre-condition on the array it was given, and reordering it makes it a different, wrong check.
+ */
+it('cannot see the widening from the spec validator, because the hop that hides it is the hop that makes JSON', function (): void {
+    $document = static fn (array $subject): array => [
+        '$schema' => 'https://spec.docuccino.app/uir/1.0/schema.json',
+        'uir' => '1.0.0',
+        'openapi' => '3.2.0',
+        'info' => ['title' => 'T', 'version' => '1.0.0'],
+        'paths' => ['/t' => ['get' => ['operationId' => 't.i', 'responses' => ['200' => ['description' => 'OK']]]]],
+        'components' => ['schemas' => ['X' => $subject]],
+    ];
+
+    $withoutTheHop = static function (array $doc): array {
+        $schema = json_decode((string) file_get_contents(Validator::defaultSchemaPath()), false, flags: JSON_THROW_ON_ERROR);
+        $error = (new OpisValidator)->validate(json_decode((string) json_encode($doc), false, flags: JSON_THROW_ON_ERROR), $schema)->error();
+
+        return $error === null ? [] : (new ErrorFormatter)->format($error, true);
+    };
+
+    $nonSchema = $document(['type' => 'array', 'items' => 7]);
+    $legitimate = $document(['type' => 'object', 'properties' => []]);
+
+    // The laundering: the product's validator sees nothing wrong with a slot holding an integer.
+    expect((new Validator)->validate($nonSchema)->errors)->toBe([])
+        ->and($withoutTheHop($nonSchema))->toHaveKey('/components/schemas/X/items')
+        // And the reason it cannot simply validate first: the same check refuses an empty object, which
+        // every schema the product builds from an `array<string, mixed>` arrives as.
+        ->and((new Validator)->validate($legitimate)->errors)->toBe([])
+        ->and($withoutTheHop($legitimate))->toHaveKey('/components/schemas/X/properties');
+});

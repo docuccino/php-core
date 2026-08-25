@@ -7,6 +7,7 @@ namespace Docuccino\Core\Pipeline;
 use Docuccino\Core\Extensions\Context\RouteDependencies;
 use Docuccino\Core\Extensions\Context\RouteDescriptor;
 use Docuccino\Core\Support\AtomicFile;
+use Docuccino\Core\Support\ConfinedPath;
 use Docuccino\Core\Support\GeneratedDirectory;
 use Docuccino\Core\Support\Hydrate;
 use Docuccino\Core\Support\JsonValue;
@@ -59,14 +60,22 @@ final readonly class FragmentCache
 
     private const UNREADABLE = '@unreadable';
 
+    private bool $enabled;
+
     public function __construct(
-        private bool $enabled,
+        bool $enabled,
         private string $path,
         private string $toolVersion,
         private string $specVersion,
         private string $identityVersion,
         private FileDigests $digests = new FileDigests,
-    ) {}
+    ) {
+        // A directory no filesystem call can accept is a cache that is OFF, not a build that dies:
+        // every read and write below would raise on it ({@see ConfinedPath::holdable()}), and `@` does
+        // not suppress a throw. A permanently cold cache costs one rebuild per route and still answers
+        // exactly what a warm one would; the adapter reports the configured path that got it turned off.
+        $this->enabled = $enabled && ConfinedPath::holdable($path) !== null;
+    }
 
     /** A no-op cache — every lookup misses, nothing is stored. This is the default. */
     public static function disabled(): self

@@ -23,6 +23,17 @@ final readonly class ClassNames
 {
     public function __construct(private SourcePathResolver $paths) {}
 
+    /**
+     * {@see ofName()} for a caller with no application root to strip — a schema mapper, which is handed
+     * a `class-string` and nothing about where the application lives. The resolver still relativises
+     * against the nearest `composer.json` ancestor, so an inline class in an app or a package reads as
+     * where it stands either way.
+     */
+    public static function publishable(string $class): string
+    {
+        return (new self(new RootRelativeSourcePathResolver('')))->ofName($class);
+    }
+
     public function of(object $subject): string
     {
         return $this->ofName($subject::class);

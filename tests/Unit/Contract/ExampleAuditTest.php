@@ -153,17 +153,45 @@ it('descends through every schema keyword that holds schemas', function (array $
     expect(array_map(static fn ($f): string => $f->pointer, $report->findings))->toBe([$pointer]);
 })->with(exampleAuditSubschemaPositions());
 
+/**
+ * Every keyword the table positions, reached by a route the generator above does not take:
+ * {@see SchemaKeywords::objectValued()} is the whole table bar the list-valued applicators, so the two
+ * together are all of it. Read this way, the expectation is the TABLE's, not a restatement of the three
+ * `at()` calls the dataset is built from — which would agree with the generator about anything both
+ * forgot.
+ *
+ * @return list<string>
+ */
+function exampleAuditPositionedKeywords(): array
+{
+    return [...SchemaKeywords::objectValued(), ...SchemaKeywords::at(SchemaKeywords::POSITION_SCHEMA_LIST)];
+}
+
 it('builds a case for every subschema-carrying keyword the table names', function (): void {
     // Anti-vacuity for the dataset above: a generator that stopped seeing a position would quietly
-    // stop proving the walk reaches it, which is exactly how five went unaudited.
+    // stop proving the walk reaches it, which is exactly how five went unaudited. An exact count stood
+    // here, which fails on a keyword ADDED correctly as loudly as on one dropped — so it asked to be
+    // bumped rather than read. What it was for is this: one case per positioned keyword that carries a
+    // schema, which the table itself can answer.
     $cases = exampleAuditSubschemaPositions();
 
-    expect($cases)->toHaveCount(21)
-        ->and(array_keys($cases))->toContain('if', 'then', 'else', 'unevaluatedItems', 'unevaluatedProperties')
-        ->and(array_keys($cases))->toContain('properties', 'items', 'allOf', '$defs', 'contentSchema', 'definitions')
+    $expected = array_values(array_filter(
+        exampleAuditPositionedKeywords(),
         // `dependentRequired` carries string lists rather than schemas, so it is the one positioned
         // keyword with no case — and the only one.
-        ->and(array_keys($cases))->not->toContain('dependentRequired');
+        static fn (string $keyword): bool => SchemaKeywords::positionOf($keyword) !== SchemaKeywords::POSITION_STRING_LIST_MAP,
+    ));
+
+    $actual = array_keys($cases);
+    sort($expected);
+    sort($actual);
+
+    // A floor beside the equality, because both sides could go empty together: it EQUALS the count on
+    // the tree, so a keyword added passes and a table that stopped answering fails.
+    expect($actual)->toBe($expected)
+        ->and($cases)->toHaveCount(count($expected))
+        ->and(count($cases))->toBeGreaterThanOrEqual(21)
+        ->and($actual)->not->toContain('dependentRequired');
 });
 
 it('never follows a $ref while descending, so a recursive schema terminates', function (): void {

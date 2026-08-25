@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
+use Docuccino\Core\Extensions\Schema\ComponentNames;
 use Docuccino\Core\Extensions\Schema\ComponentRegistry;
 
 it('dedupes a class by its schemaId across references', function (): void {
@@ -224,4 +225,13 @@ it('re-files a schema body only where the name still holds the identity given', 
     $registry->replaceSchema('Absent', ['type' => 'string'], 'App\\A\\Node');
 
     expect($registry->schemas())->toBe(['Node' => ['type' => 'integer']]);
+});
+
+it('answers the name rule and its wording as the one core owns', function (): void {
+    // The extension author's view of a rule ComponentNames owns, and its only reader now that the
+    // adapter's two `#[ErrorComponent]` producers share one report drawn from the owner directly. An alias
+    // that drifted from its owner would send a refused author to a rule that is not the one applied.
+    expect(ComponentRegistry::LEGAL_NAME_HELP)->toBe(ComponentNames::LEGAL_NAME_HELP)
+        ->and((new ComponentRegistry)->isLegalName('NotFound'))->toBeTrue()
+        ->and((new ComponentRegistry)->isLegalName('Not Found'))->toBeFalse();
 });

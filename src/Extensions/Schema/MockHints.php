@@ -8,6 +8,7 @@ use Docuccino\Attributes\Mock;
 use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
 use Docuccino\Core\Extensions\Contracts\SchemaContext;
+use Docuccino\Core\Provenance\ClassNames;
 use ReflectionClass;
 
 /**
@@ -62,6 +63,11 @@ final class MockHints
         $reflection = new ReflectionClass($fqcn);
         $diagnostics = [];
 
+        // The name every diagnostic below names the class by — never the raw `class-string` the caller was
+        // handed, which for an ANONYMOUS class carries the build machine and a per-process counter
+        // ({@see ClassNames}).
+        $site = ClassNames::publishable($fqcn);
+
         // Class-level first, so a property's own attribute overwrites the one that named it from afar.
         $hints = [];
         foreach ($reflection->getAttributes(Mock::class) as $attribute) {
@@ -69,14 +75,14 @@ final class MockHints
             $property = self::text($mock->property);
 
             if ($property === null) {
-                $diagnostics[] = self::invalid(sprintf('#[Mock] on class %s names no property', $fqcn));
+                $diagnostics[] = self::invalid(sprintf('#[Mock] on class %s names no property', $site));
 
                 continue;
             }
 
             $hint = self::hint($mock);
             if ($hint === []) {
-                $diagnostics[] = self::invalid(sprintf('#[Mock(property: \'%s\')] on class %s carries no faker expression and no seed group', $property, $fqcn));
+                $diagnostics[] = self::invalid(sprintf('#[Mock(property: \'%s\')] on class %s carries no faker expression and no seed group', $property, $site));
 
                 continue;
             }
@@ -91,7 +97,7 @@ final class MockHints
                 $diagnostics[] = new Diagnostic(
                     severity: Severity::Warning,
                     code: 'attribute.mock-unknown-property',
-                    message: sprintf('#[Mock(property: \'%s\')] on class %s names a property the schema does not publish; the hint is dropped.', $property, $fqcn),
+                    message: sprintf('#[Mock(property: \'%s\')] on class %s names a property the schema does not publish; the hint is dropped.', $property, $site),
                     help: 'Name a property the schema publishes, or drop the attribute — a hidden or unrecovered property has nothing to carry it.',
                 );
             }
@@ -108,14 +114,14 @@ final class MockHints
                 $mock = $attribute->newInstance();
 
                 if (self::text($mock->property) !== null) {
-                    $diagnostics[] = self::invalid(sprintf('#[Mock] on %s::$%s names a property, which only a class-level one needs', $fqcn, $property->getName()));
+                    $diagnostics[] = self::invalid(sprintf('#[Mock] on %s::$%s names a property, which only a class-level one needs', $site, $property->getName()));
                 }
 
                 $hint = [...$hint, ...self::hint($mock)];
             }
 
             if ($hint === []) {
-                $diagnostics[] = self::invalid(sprintf('#[Mock] on %s::$%s carries no faker expression and no seed group', $fqcn, $property->getName()));
+                $diagnostics[] = self::invalid(sprintf('#[Mock] on %s::$%s carries no faker expression and no seed group', $site, $property->getName()));
 
                 continue;
             }

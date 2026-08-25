@@ -12,6 +12,7 @@ use Docuccino\Core\Examples\RecordingStore;
 use Docuccino\Core\Extensions\Context\DocumentConfig;
 use Docuccino\Core\Extensions\Context\DocumentContext;
 use Docuccino\Core\Extensions\Document\UirDocumentDraft;
+use Docuccino\Core\Support\ConfinedPath;
 
 /**
  * Every recording diagnostic is raised here, so this is the dataset over every way a committed
@@ -68,6 +69,29 @@ it('says a configured directory holds nothing yet, once', function (): void {
         // it is running under is what names the recorder.
         ->and($findings[0]->help)->toContain('running your suite with the recorder registered')
         ->and($findings[0]->help)->not->toContain('Docuccino\\Laravel');
+});
+
+it('reports a recordings directory that was refused for leaving the application', function (string $configured): void {
+    $findings = auditFindings(auditBase(), recordings: $configured);
+
+    expect($findings)->toHaveCount(1)
+        ->and($findings[0]->severity)->toBe(Severity::Warning)
+        ->and($findings[0]->code)->toBe('examples.recordings-escapes-base')
+        // The key the author typed it under, so they know which document config to go and edit — and the
+        // consequence, so a refusal never reads as "nothing was recorded yet".
+        ->and($findings[0]->message)->toContain('examples.recordings')
+        ->and($findings[0]->message)->toContain($configured)
+        ->and($findings[0]->message)->toContain('publishes no recorded examples')
+        ->and($findings[0]->help)->toBe(ConfinedPath::CONFIG_FILE_ESCAPED_HELP);
+})->with([
+    'a traversal out of the application' => ['../../etc'],
+    'a traversal that lands back on the root' => ['..'],
+]);
+
+it('says nothing twice about a recordings directory no filesystem could hold', function (): void {
+    // The adapter reports a NUL byte against the config key that held it, for every path key at once, so
+    // this must not add a second voice — and it cannot tell that refusal from any other from here.
+    expect(auditFindings(auditBase(), recordings: "docs\0/recordings"))->toBe([]);
 });
 
 it('reports a file that is not a recording it can read', function (string $contents): void {

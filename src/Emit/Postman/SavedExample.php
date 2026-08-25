@@ -121,10 +121,14 @@ final class SavedExample
 
         foreach ($names as $name) {
             $header = Arr::stringKeyed(is_array($declared[$name] ?? null) ? $declared[$name] : []);
-            $schema = is_array($header['schema'] ?? null) ? Arr::stringKeyed($header['schema']) : [];
-            $value = $schema === [] ? '' : $examples->value($schema, $components);
+            $member = $examples->member($header['schema'] ?? null, $components);
 
-            $entry = ['key' => $name, 'value' => is_scalar($value) ? (string) $value : ''];
+            // A header whose schema admits no value is a header the response cannot carry.
+            if ($member === null) {
+                continue;
+            }
+
+            $entry = ['key' => $name, 'value' => is_scalar($member[0]) ? (string) $member[0] : ''];
 
             $description = Description::text($header['description'] ?? null);
             if ($description !== '') {
@@ -164,9 +168,14 @@ final class SavedExample
             return ['', 'json'];
         }
 
-        $value = $stated === null ? $examples->value($schema, $components) : $stated[0];
+        $value = $stated === null ? $examples->member($schema, $components) : [$stated[0]];
 
-        return [rtrim((new CanonicalJsonSerializer)->serialize($value ?? new stdClass), "\n"), 'json'];
+        // A schema nothing satisfies has no body to record; an empty one claims nothing.
+        if ($value === null) {
+            return ['', 'json'];
+        }
+
+        return [rtrim((new CanonicalJsonSerializer)->serialize($value[0] ?? new stdClass), "\n"), 'json'];
     }
 
     /**

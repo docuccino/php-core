@@ -512,6 +512,11 @@ describe('schema dialect conversions', function (): void {
      * closes with `additionalProperties: false`, so a keyword absent both from 3.0 and from the drop
      * list fails 3.0's own gate whatever value it carries — which is how `additionalItems` shipped
      * invalid at every value, with the whole suite green.
+     *
+     * The universe it sweeps is {@see schemaKeywordVocabulary()} — BOTH product tables, not the
+     * canonicaliser's order alone. Order named 57 keywords and the drop lists named four it had never
+     * heard of, so those four sat outside the sweep entirely: removing one changed what a 3.0 export
+     * publishes and nothing failed.
      */
     it('answers for every schema keyword, against what 3.0 actually defines', function (): void {
         $schema = OpenApiMetaSchema::decode('openapi-3.0')->definitions->Schema;
@@ -533,7 +538,7 @@ describe('schema dialect conversions', function (): void {
         ];
 
         $unanswered = array_values(array_filter(
-            canonicalizerSchemaOrder(),
+            schemaKeywordVocabulary(),
             static fn (string $keyword): bool => ! str_starts_with($keyword, 'x-') && ! in_array($keyword, $answered, true),
         ));
 

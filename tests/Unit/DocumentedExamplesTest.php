@@ -83,6 +83,36 @@ it('publishes no example it cannot read, and says which property and type', func
         ->and($codes)->toBe(['docblock.example-untypable']);
 });
 
+it('names an anonymous class by where it stands, not by where the build machine keeps it', function (): void {
+    // The third of the three property readers a mapper runs on one class-string, and the last one still
+    // printing it raw: `::class` on an anonymous class is the base name, a NUL byte, the ABSOLUTE file it
+    // was written in and a counter of the anonymous classes this process declared first. The name reaches
+    // the document twice over — in the diagnostic below, and as the component the class hoists to.
+    $subject = new class
+    {
+        public int $renewals = 0;
+    };
+    $fqcn = $subject::class;
+
+    $components = new ComponentRegistry;
+    $engine = new StubTypeEngine(classes: [
+        $fqcn => new ClassMetadata($fqcn, [new PropertyMetadata('renewals', ScalarT::int(), null, 'n/a')]),
+    ]);
+    (new SchemaConverter(DefaultTypeMappers::all(), $engine, $components))->toSchema(new ClassT($fqcn));
+
+    $message = $components->diagnostics()[0]->message ?? '';
+
+    expect($message)->toContain('class@anonymous declared in tests/Unit/DocumentedExamplesTest.php:')
+        ->and($message)->toContain('::$renewals')
+        ->and($message)->not->toContain("\0")
+        ->and($message)->not->toContain(dirname(__DIR__, 3))
+        ->and($message)->not->toMatch('/\$[0-9a-f]+::/')
+        // And the component it hoisted to: a name a generated client turns into a type, so an absolute
+        // path with its separators stripped and a process counter on the end is the same defect published
+        // where it cannot be read as a mistake.
+        ->and(array_keys($components->schemas()))->toBe(['classanonymous']);
+});
+
 it('says nothing about an example on a member the schema hides', function (): void {
     // There is no member to carry it and nothing the author could do, so a diagnostic here would fire
     // where the reader cannot act — the one code raised above is the untypable one, and only that.

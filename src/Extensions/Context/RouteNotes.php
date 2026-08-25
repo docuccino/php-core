@@ -44,6 +44,26 @@ final class RouteNotes
     }
 
     /**
+     * A restorable snapshot, for a producer that asks a mapper what a response WOULD be and then
+     * discards the answer: a note written while building something nobody will see is a fact about
+     * nothing, and it reaches the document as a diagnostic asking the author to fix it.
+     *
+     * @return array<string, array<string, list<string>>>
+     */
+    public function snapshot(): array
+    {
+        return $this->notes;
+    }
+
+    /**
+     * @param  array<string, array<string, list<string>>>  $snapshot
+     */
+    public function restore(array $snapshot): void
+    {
+        $this->notes = $snapshot;
+    }
+
+    /**
      * Every note, sorted by channel, then key, then value.
      *
      * @return array<string, array<string, list<string>>>

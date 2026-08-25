@@ -12,6 +12,8 @@ use Docuccino\Core\Extensions\Context\RepresentationPolicy;
 use Docuccino\Core\Extensions\Contracts\DocumentTransformer;
 use Docuccino\Core\Extensions\Document\UirDocumentDraft;
 use Docuccino\Core\Lint\LintOperation;
+use Docuccino\Core\Support\ConfinedPath;
+use Docuccino\Core\Support\PlainText;
 
 /**
  * Says what is wrong with the committed recordings, once per document.
@@ -38,9 +40,27 @@ final readonly class RecordedExampleAudit implements DocumentTransformer
 
     public function transform(UirDocumentDraft $document, DocumentContext $context): void
     {
+        $configured = $context->config->recordingsDir();
         $store = RecordingStore::for($context->config, $this->basePath);
 
         if ($store === null) {
+            // A directory the document named and {@see RecordingStore::for()} answered nothing for was
+            // REFUSED, which is the one thing this silence must not read as: an author who typed a path
+            // that leaves the application would otherwise get a document with no recorded examples and no
+            // reason why. A path holding a NUL byte never reaches here — `recordingsDir()` answers null for
+            // it and the adapter reports it against the key that held it — so this has one cause and says it.
+            if ($configured !== null) {
+                $context->report(new Diagnostic(
+                    severity: Severity::Warning,
+                    code: 'examples.recordings-escapes-base',
+                    message: sprintf(
+                        'examples.recordings "%s" does not name a path inside the application and was rejected, so the document publishes no recorded examples.',
+                        PlainText::of($configured),
+                    ),
+                    help: ConfinedPath::CONFIG_FILE_ESCAPED_HELP,
+                ));
+            }
+
             return;
         }
 
@@ -54,7 +74,7 @@ final readonly class RecordedExampleAudit implements DocumentTransformer
                 // layout reads differently on every checkout and points at nothing the reader wrote.
                 message: sprintf(
                     'No response recordings were found in %s, so the document publishes none.',
-                    $context->config->recordingsDir() ?? $store->directory,
+                    $configured ?? $store->directory,
                 ),
                 help: 'Record some by running your suite with the recorder registered, or drop examples.recordings from the document config.',
             ));

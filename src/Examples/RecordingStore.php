@@ -32,8 +32,9 @@ final readonly class RecordingStore
 
     /**
      * The store this document reads, or null when it names no recordings directory — or names one
-     * outside the application, which {@see ConfinedPath} refuses the same way it refuses one for
-     * `content.dir`.
+     * {@see ConfinedPath} refused for leaving the application. Those are one answer here and two facts
+     * to a reader, so {@see RecordedExampleAudit} tells them apart: it holds the configured value
+     * beside this null, and a refusal it reports rather than publishing nothing in silence.
      */
     public static function for(DocumentConfig $document, string $basePath): ?self
     {

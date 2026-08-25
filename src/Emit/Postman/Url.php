@@ -215,7 +215,13 @@ final readonly class Url
     {
         $name = self::nameOf($parameter);
         $required = ($parameter['required'] ?? false) === true;
-        $schema = $this->schemaOf($parameter, $components);
+        $schema = self::schemaOf($parameter);
+
+        // A parameter whose schema admits no value is not one the consumer may send, so it gets no
+        // entry at all rather than an empty one they would try to fill in.
+        if ($this->examples->member($parameter['schema'] ?? null, $components) === null) {
+            return [];
+        }
 
         if (($parameter['style'] ?? null) === 'deepObject') {
             $properties = is_array($schema['properties'] ?? null) ? $schema['properties'] : [];
@@ -233,10 +239,17 @@ final readonly class Url
 
             $out = [];
             foreach ($keys as $key) {
+                $member = $this->examples->member($properties[$key] ?? null, $components);
+
+                // A member the schema forbids is not a key the consumer may type.
+                if ($member === null) {
+                    continue;
+                }
+
                 $property = Arr::stringKeyed(is_array($properties[$key] ?? null) ? $properties[$key] : []);
                 $out[] = $this->entry(
                     $name.'['.$key.']',
-                    $this->scalar($this->examples->value($property, $components)),
+                    $this->scalar($member[0]),
                     false,
                     $this->describe(['schema' => $property] + ['description' => $property['description'] ?? null]),
                 );
@@ -497,7 +510,7 @@ final readonly class Url
         $stated = $this->examples->illustration($parameter);
 
         return $this->scalar($stated === null
-            ? $this->examples->value($this->schemaOf($parameter, $components), $components)
+            ? $this->examples->value(self::schemaOf($parameter), $components)
             : $stated[0]);
     }
 
@@ -524,11 +537,14 @@ final readonly class Url
     }
 
     /**
+     * The parameter's own schema, taken as written: a `$ref` here would need no resolving, since a
+     * deepObject's properties are always inline and everything else hands the schema on to
+     * {@see SchemaExampleFactory}, which resolves against the components itself.
+     *
      * @param  array<string, mixed>  $parameter
-     * @param  array<string, mixed>  $components
      * @return array<string, mixed>
      */
-    private function schemaOf(array $parameter, array $components): array
+    private static function schemaOf(array $parameter): array
     {
         $schema = $parameter['schema'] ?? null;
 

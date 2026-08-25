@@ -22,6 +22,7 @@ use Docuccino\Core\Inference\TraceReport;
 use Docuccino\Core\Inference\TraceVisitor;
 use Docuccino\Core\Inference\TypeEngine;
 use Docuccino\Core\Provenance\ClassNames;
+use Docuccino\Core\Provenance\RootRelativeSourcePathResolver;
 use Docuccino\Core\Provenance\Source;
 use Docuccino\Core\Provenance\SourcePathResolver;
 
@@ -319,12 +320,26 @@ final class RouteContext
         }
 
         $line = $this->actionRef->line > 0 ? $this->actionRef->line : null;
-        $file = $this->pathResolver->relative($this->actionRef->file);
+
+        return new Source($this->pathResolver->relative($this->actionRef->file), $line, $this->actionLabel());
+    }
+
+    /**
+     * The action as a diagnostic MESSAGE may name it — the same composition {@see actionSource()}
+     * publishes, and the one answer for a reporter that wants the label without a source. Total where
+     * that is not: with no resolver the file still relativises against the nearest `composer.json`
+     * ancestor, and a name is better than the absolute path {@see ActionRef::symbol()} would hand over.
+     */
+    public function actionLabel(): string
+    {
+        $paths = $this->pathResolver ?? new RootRelativeSourcePathResolver('');
         $class = $this->actionRef->class;
 
-        $declaring = $class === null ? $file : (new ClassNames($this->pathResolver))->ofName($class);
+        $declaring = $class === null
+            ? $paths->relative($this->actionRef->file)
+            : (new ClassNames($paths))->ofName($class);
 
-        return new Source($file, $line, $declaring.'::'.$this->actionRef->method);
+        return $declaring.'::'.$this->actionRef->method;
     }
 
     /**

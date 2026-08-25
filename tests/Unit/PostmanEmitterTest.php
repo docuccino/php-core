@@ -227,6 +227,87 @@ it('emits a Postman collection byte-identical to the committed golden', function
         ->toBe(loadGolden('postman-surface.postman.json'));
 });
 
+/**
+ * One collection built from $body as the request body's schema, plus $parameters and $headers.
+ *
+ * @param  array<string, mixed>  $body
+ * @param  list<array<string, mixed>>  $parameters
+ * @param  array<string, mixed>  $headers
+ * @return array<string, mixed>
+ */
+function postmanRequestWith(string $mediaType, array $body, array $parameters = [], array $headers = []): array
+{
+    $operation = [
+        'operationId' => 'things.store',
+        'summary' => 'Store a thing',
+        'requestBody' => ['content' => [$mediaType => ['schema' => $body]]],
+        'responses' => ['201' => ['description' => 'Created', 'headers' => $headers]],
+    ];
+
+    if ($parameters !== []) {
+        $operation['parameters'] = $parameters;
+    }
+
+    /** @var array<string, mixed> $item */
+    $item = postman(postmanDocumentWithPaths(['/things' => ['post' => $operation]]))['item'][0];
+
+    return $item;
+}
+
+/*
+ * A boolean IS a schema at a subschema position, and `false` forbids the member outright — so anything
+ * built as though the member were merely UNDESCRIBED hands the consumer a request the server will
+ * reject. The collection is the one artifact that puts schema-derived values in front of a human, and
+ * three separate readers here listed a schema's properties as fields of their own.
+ */
+it('never offers a member the schema forbids', function (): void {
+    $body = ['type' => 'object', 'properties' => ['legacy' => false, 'name' => ['type' => 'string']]];
+
+    $json = postmanRequestWith('application/json', $body);
+    $form = postmanRequestWith('application/x-www-form-urlencoded', $body);
+
+    // The raw JSON body; the form fields, derived one per declared property; and a `deepObject` query,
+    // which names each property as a bracketed key the consumer types.
+    $deep = postmanRequestWith('application/json', ['type' => 'object'], [[
+        'name' => 'filter',
+        'in' => 'query',
+        'style' => 'deepObject',
+        'schema' => ['type' => 'object', 'properties' => ['legacy' => false, 'status' => ['type' => 'string']]],
+    ]]);
+
+    expect($json['request']['body']['raw'])->toBe("{\n  \"name\": \"string\"\n}")
+        ->and(array_column($form['request']['body']['urlencoded'], 'key'))->toBe(['name'])
+        ->and(array_column($deep['request']['url']['query'], 'key'))->toBe(['filter[status]']);
+});
+
+it('omits the whole field, parameter or header a schema forbids outright', function (): void {
+    // Negative paths: where nothing survives the omission there is no empty shell to publish either.
+    $allForbidden = postmanRequestWith(
+        'application/x-www-form-urlencoded',
+        ['type' => 'object', 'properties' => ['legacy' => false]],
+        [['name' => 'unusable', 'in' => 'query', 'schema' => false]],
+        ['X-Gone' => ['schema' => false], 'X-Kept' => ['schema' => ['type' => 'string']]],
+    );
+
+    expect($allForbidden['request'])->not->toHaveKey('body')
+        ->and($allForbidden['request']['url'])->not->toHaveKey('query')
+        ->and(array_column($allForbidden['response'][0]['header'], 'key'))->toBe(['X-Kept']);
+});
+
+it('records an empty body where the response schema admits none', function (): void {
+    // A saved example is what the server SAID it returns, so a schema nothing satisfies has nothing to
+    // record — and an empty body claims nothing rather than claiming `{}` the schema rejects.
+    $collection = postman(postmanDocumentWithPaths(['/things' => ['get' => [
+        'operationId' => 'things.index',
+        'summary' => 'List things',
+        'responses' => ['200' => ['description' => 'OK', 'content' => ['application/json' => [
+            'schema' => ['$ref' => '#/components/schemas/Never'],
+        ]]]],
+    ]]]) + ['components' => ['schemas' => ['Never' => false]]]);
+
+    expect($collection['item'][0]['response'][0]['body'])->toBe('');
+});
+
 it('sends the payload the document illustrates, not one derived from the schema', function (): void {
     // `example` and `examples` sit BESIDE the schema, not in it, so reading only the schema silently
     // threw away every hand-written example the document publishes and shipped `{"id": 0}` placeholders

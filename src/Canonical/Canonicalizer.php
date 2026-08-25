@@ -27,6 +27,21 @@ final class Canonicalizer
     private const array PARAMETER_IN_RANK = ['path' => 0, 'query' => 1, 'header' => 2, 'cookie' => 3];
 
     /**
+     * Every member an object that is NOT a Schema Object reads as one, and the position it reads it at.
+     * The handler maps below are BUILT from this ({@see schemaSlots()}), so the table is the set of outer
+     * schema slots rather than a description of one: a slot with no line here is not read as a schema at
+     * all, which is what makes a guard reading this table bite instead of agreeing with itself.
+     *
+     * @var array<string, array<string, string>>
+     */
+    public const array SCHEMA_SLOTS = [
+        'components' => ['schemas' => SchemaKeywords::POSITION_SCHEMA_MAP],
+        'header' => ['schema' => SchemaKeywords::POSITION_SCHEMA],
+        'mediaType' => ['schema' => SchemaKeywords::POSITION_SCHEMA, 'itemSchema' => SchemaKeywords::POSITION_SCHEMA],
+        'parameter' => ['schema' => SchemaKeywords::POSITION_SCHEMA],
+    ];
+
+    /**
      * @param  array<string, mixed>  $document
      * @return array<string, mixed>
      */
@@ -63,6 +78,23 @@ final class Canonicalizer
     private function keep(mixed $value): mixed
     {
         return $value;
+    }
+
+    /**
+     * One object's schema-slot handlers, spliced into its member map where that object's normative
+     * member order puts them.
+     *
+     * @return array<string, callable(mixed): mixed>
+     */
+    private function schemaSlots(string $object): array
+    {
+        $handlers = [];
+
+        foreach (self::SCHEMA_SLOTS[$object] as $member => $position) {
+            $handlers[$member] = fn (mixed $v): mixed => $this->subschema($position, $v);
+        }
+
+        return $handlers;
     }
 
     private function compareKeys(int|string $a, int|string $b): int
@@ -160,6 +192,7 @@ final class Canonicalizer
         return $this->object($node, fn (array $server) => $this->build($server, [
             'url' => $this->keep(...),
             'description' => $this->keep(...),
+            'name' => $this->keep(...),
             'variables' => fn (mixed $v): mixed => $this->sortedMap($v, fn (mixed $var): mixed => $this->object($var, fn (array $variable) => $this->build($variable, [
                 'enum' => $this->canonicalizeStringList(...),
                 'default' => $this->keep(...),
@@ -300,7 +333,7 @@ final class Canonicalizer
             'style' => $this->keep(...),
             'explode' => $this->keep(...),
             'allowReserved' => $this->keep(...),
-            'schema' => $this->subschemaValue(...),
+            ...$this->schemaSlots('parameter'),
             'example' => $this->keep(...),
             'examples' => fn (mixed $v): mixed => $this->sortedMap($v, $this->canonicalizeExample(...)),
             'content' => fn (mixed $v): mixed => $this->sortedMap($v, $this->canonicalizeMediaType(...)),
@@ -350,7 +383,7 @@ final class Canonicalizer
             'deprecated' => $this->keep(...),
             'style' => $this->keep(...),
             'explode' => $this->keep(...),
-            'schema' => $this->subschemaValue(...),
+            ...$this->schemaSlots('header'),
             'example' => $this->keep(...),
             'examples' => fn (mixed $v): mixed => $this->sortedMap($v, $this->canonicalizeExample(...)),
             'content' => fn (mixed $v): mixed => $this->sortedMap($v, $this->canonicalizeMediaType(...)),
@@ -360,14 +393,24 @@ final class Canonicalizer
     /**
      * @return array<string, mixed>|stdClass
      */
+    /**
+     * All three encoding slots read an Encoding Object the same generic way: an Encoding Object carries
+     * no schema of its own, so nothing here turns on knowing one, and reading `itemEncoding` any
+     * differently from `encoding` would publish two member orders for one kind of object.
+     *
+     * @return array<string, mixed>|stdClass
+     */
     private function canonicalizeMediaType(mixed $node): array|stdClass
     {
         return $this->object($node, fn (array $media) => $this->build($media, [
             'x-docuccino' => $this->canonicalizeDocuccino(...),
-            'schema' => $this->subschemaValue(...),
+            'description' => $this->keep(...),
+            ...$this->schemaSlots('mediaType'),
             'example' => $this->keep(...),
             'examples' => fn (mixed $v): mixed => $this->sortedMap($v, $this->canonicalizeExample(...)),
             'encoding' => fn (mixed $v): mixed => $this->sortedMap($v, $this->canonicalizeGeneric(...)),
+            'prefixEncoding' => fn (mixed $v): mixed => $this->mapList($v, $this->canonicalizeGeneric(...)),
+            'itemEncoding' => $this->canonicalizeGeneric(...),
         ]));
     }
 
@@ -380,6 +423,10 @@ final class Canonicalizer
             'x-docuccino' => $this->canonicalizeDocuccino(...),
             'summary' => $this->keep(...),
             'description' => $this->keep(...),
+            // `dataValue` is the application's data exactly as `value` is; `serializedValue` is its
+            // wire form, a string.
+            'dataValue' => $this->canonicalizeGeneric(...),
+            'serializedValue' => $this->keep(...),
             'value' => $this->canonicalizeGeneric(...),
             'externalValue' => $this->keep(...),
         ]));
@@ -391,12 +438,13 @@ final class Canonicalizer
     private function canonicalizeComponents(mixed $node): array|stdClass
     {
         return $this->object($node, fn (array $components) => $this->build($components, [
-            'schemas' => fn (mixed $v): mixed => $this->sortedMap($v, $this->subschemaValue(...)),
+            ...$this->schemaSlots('components'),
             'responses' => fn (mixed $v): mixed => $this->sortedMap($v, $this->canonicalizeResponse(...)),
             'parameters' => fn (mixed $v): mixed => $this->sortedMap($v, $this->canonicalizeParameter(...)),
             'examples' => fn (mixed $v): mixed => $this->sortedMap($v, $this->canonicalizeExample(...)),
             'requestBodies' => fn (mixed $v): mixed => $this->sortedMap($v, $this->canonicalizeRequestBody(...)),
             'headers' => fn (mixed $v): mixed => $this->sortedMap($v, $this->canonicalizeHeader(...)),
+            'mediaTypes' => fn (mixed $v): mixed => $this->sortedMap($v, $this->canonicalizeMediaType(...)),
             'securitySchemes' => fn (mixed $v): mixed => $this->sortedMap($v, $this->canonicalizeGeneric(...)),
             'links' => fn (mixed $v): mixed => $this->sortedMap($v, $this->canonicalizeGeneric(...)),
             'callbacks' => fn (mixed $v): mixed => $this->sortedMap($v, fn (mixed $cb): mixed => $this->sortedMap($cb, $this->canonicalizePathItem(...))),
@@ -541,8 +589,9 @@ final class Canonicalizer
      * ONE Schema Object, wherever it sits — inside a schema, and equally at the slots a schema hangs off
      * something that is not one. A boolean is published as written, since it is a schema at every 2020-12
      * subschema position and the load-bearing value there; anything that is no schema at all becomes `{}`,
-     * vague and valid beating a document no validator accepts. Design doc §1 "The empty-object invariant"
-     * for why the position rather than the value answers.
+     * vague and valid beating a document no validator accepts. That second arm is deliberately silent,
+     * unlike every other widening — design doc §1 "The empty-object invariant" for that and for why the
+     * position rather than the value answers.
      */
     private function subschemaValue(mixed $value): mixed
     {

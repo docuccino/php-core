@@ -63,3 +63,22 @@ it('has no source at all where there is no resolver or no file', function () use
     expect($context(new ActionRef('', null, '{closure}'))->actionSource())->toBeNull()
         ->and($context(new ActionRef('/home/alice/checkout/routes/api.php', null, '{closure}'), false)->actionSource())->toBeNull();
 });
+
+it('hands a message the same label the source publishes', function () use ($context): void {
+    // A diagnostic that prints the action in its SENTENCE had only `ActionRef::symbol()` to reach for,
+    // and that is the identity key the source half already refuses. One answer for both, or the two
+    // spellings of one action drift and only one of them is publishable.
+    $closure = $context(new ActionRef('/home/alice/checkout/routes/api.php', null, '{closure}', 12));
+
+    expect($closure->actionLabel())->toBe('routes/api.php::{closure}')
+        ->and($closure->actionLabel())->toBe($closure->actionSource()?->symbol);
+});
+
+it('still names an action rather than a machine where there is no resolver', function () use ($context): void {
+    // No resolver means no SOURCE — better none than a churny path. A message has no such option: it
+    // either names the action or names nothing, so the label falls back to the composer-root walk.
+    $label = $context(new ActionRef('/home/alice/checkout/routes/api.php', null, '{closure}'), false)->actionLabel();
+
+    expect($label)->toEndWith('api.php::{closure}')
+        ->and($label)->not->toContain('/home/alice/checkout/routes/');
+});

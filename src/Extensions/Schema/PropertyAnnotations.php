@@ -10,7 +10,6 @@ use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
 use Docuccino\Core\Extensions\Contracts\SchemaContext;
 use Docuccino\Core\Provenance\ClassNames;
-use Docuccino\Core\Provenance\RootRelativeSourcePathResolver;
 use ReflectionClass;
 use ReflectionProperty;
 use Throwable;
@@ -77,7 +76,7 @@ final class PropertyAnnotations
         // handed, and `::class` on an ANONYMOUS class is the base name, a NUL byte, the absolute file it
         // was written in and a counter of the anonymous classes the PROCESS declared before it — none of
         // which a published diagnostic may carry ({@see ClassNames}).
-        $site = (new ClassNames(new RootRelativeSourcePathResolver('')))->ofName($fqcn);
+        $site = ClassNames::publishable($fqcn);
 
         $diagnostics = [];
         foreach ((new ReflectionClass($fqcn))->getProperties() as $property) {

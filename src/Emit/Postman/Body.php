@@ -76,7 +76,7 @@ final class Body
 
         // XML from a JSON Schema would be a guess, and a guessed body is worse than an empty one the
         // consumer fills in knowingly.
-        self::reportMediaType($base, $signature, $diagnostics);
+        self::reportMediaType($base, $diagnostics);
 
         return $base === 'application/octet-stream'
             ? ['mode' => 'formdata', 'formdata' => [['key' => 'file', 'type' => 'file', 'src' => null]]]
@@ -96,11 +96,17 @@ final class Body
             return '';
         }
 
-        $value = $stated === null ? $examples->value($schema, $components) : $stated[0];
+        $value = $stated === null ? $examples->member($schema, $components) : [$stated[0]];
+
+        // A schema nothing satisfies has no body to show, and an empty one claims nothing rather than
+        // claiming a payload the server will reject.
+        if ($value === null) {
+            return '';
+        }
 
         // An object with no properties must serialise as `{}`; an empty PHP array would render `[]`,
         // which is a body that lies about its own shape.
-        return rtrim((new CanonicalJsonSerializer)->serialize($value ?? new stdClass), "\n");
+        return rtrim((new CanonicalJsonSerializer)->serialize($value[0] ?? new stdClass), "\n");
     }
 
     /**
@@ -157,23 +163,34 @@ final class Body
 
         foreach ($keys as $key) {
             $key = (string) $key;
-            $property = Arr::stringKeyed(is_array($properties[$key] ?? null) ? $properties[$key] : []);
-            $value = array_key_exists($key, $illustrated)
-                ? [$illustrated[$key]]
-                : null;
-            $fields[] = self::field($mode, $key, $property, $components, $examples, in_array($key, $required, true), $value);
+            $member = $examples->member($properties[$key] ?? null, $components);
+
+            // The illustration decides a field's VALUE; the schema decides which fields exist at all.
+            // So a member nothing satisfies is left out even where the body's example names it — that
+            // is the example contradicting its own schema, which the example lint reports.
+            if ($member === null) {
+                continue;
+            }
+
+            $fields[] = self::field(
+                $mode,
+                $key,
+                Arr::stringKeyed(is_array($properties[$key] ?? null) ? $properties[$key] : []),
+                array_key_exists($key, $illustrated) ? [$illustrated[$key]] : $member,
+                in_array($key, $required, true),
+            );
         }
 
-        return ['mode' => $mode, $mode => $fields];
+        // No field the consumer may send: omit `body` entirely rather than shipping an empty array.
+        return $fields === [] ? null : ['mode' => $mode, $mode => $fields];
     }
 
     /**
      * @param  array<string, mixed>  $property
-     * @param  array<string, mixed>  $components
-     * @param  array{mixed}|null  $stated  the value the body's own example gives this field, if any
+     * @param  array{mixed}  $value  what to send: the body's own example for this field, or the shape's
      * @return array<string, mixed>
      */
-    private static function field(string $mode, string $key, array $property, array $components, SchemaExampleFactory $examples, bool $required, ?array $stated = null): array
+    private static function field(string $mode, string $key, array $property, array $value, bool $required): array
     {
         $binary = ($property['format'] ?? null) === 'binary' || isset($property['contentMediaType']);
 
@@ -181,7 +198,7 @@ final class Body
         // machine's filesystem into a committed artifact, and it would be wrong on every other one.
         $field = $binary && $mode === 'formdata'
             ? ['key' => $key, 'type' => 'file', 'src' => null]
-            : ['key' => $key, 'value' => self::scalar($stated === null ? $examples->value($property, $components) : $stated[0]), 'type' => 'text'];
+            : ['key' => $key, 'value' => self::scalar($value[0]), 'type' => 'text'];
 
         if (! $required) {
             $field['disabled'] = true;
@@ -205,11 +222,13 @@ final class Body
 
     /**
      * Deduplicated by media type across the WHOLE document: a document with 300 XML endpoints owes its
-     * reader one warning naming `application/xml`, not 300 that bury every other diagnostic.
+     * reader one warning naming `application/xml`, not 300 that bury every other diagnostic. That is
+     * also why it carries no route signature — the one warning would name whichever route was met
+     * first, which is a fact about encounter order rather than about the media type.
      *
      * @param  list<Diagnostic>  $diagnostics
      */
-    private static function reportMediaType(string $base, string $signature, array &$diagnostics): void
+    private static function reportMediaType(string $base, array &$diagnostics): void
     {
         foreach ($diagnostics as $diagnostic) {
             if ($diagnostic->code === 'postman.body-media-type' && str_contains($diagnostic->message, sprintf('`%s`', $base))) {

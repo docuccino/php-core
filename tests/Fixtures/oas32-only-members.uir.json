@@ -1,0 +1,160 @@
+{
+  "uir": "1.0.0",
+  "openapi": "3.2.0",
+  "jsonSchemaDialect": "https://spec.openapis.org/oas/3.2/dialect/base",
+  "info": {
+    "title": "Every member OpenAPI 3.2 added",
+    "version": "1.0.0",
+    "description": "One document carrying every member 3.2 defines that 3.1 and 3.0 have no word for, so the meta-schema oracle sees each of them at every emitted version. Nothing in the built-in producers writes these members: they reach a document through an overlay or by hand, which is exactly why the corpus had no fixture to trigger the 3.0 oracle on them."
+  },
+  "servers": [
+    {
+      "url": "https://api.example.test",
+      "description": "Production.",
+      "name": "production"
+    }
+  ],
+  "tags": [
+    {"name": "Streaming", "summary": "Streams", "kind": "nav"},
+    {"name": "Events", "description": "Individual events.", "parent": "Streaming", "kind": "nav"}
+  ],
+  "paths": {
+    "/events": {
+      "get": {
+        "operationId": "events.index",
+        "tags": ["Events"],
+        "responses": {
+          "200": {
+            "summary": "A stream of events",
+            "description": "Newline-delimited events.",
+            "headers": {
+              "X-Stream-Id": {
+                "description": "The stream this response belongs to.",
+                "schema": {"type": "string"},
+                "examples": {
+                  "one": {"summary": "A stream id", "dataValue": "s_1", "serializedValue": "s_1"}
+                }
+              }
+            },
+            "content": {
+              "application/jsonl": {
+                "description": "One event per line.",
+                "schema": {"type": "array", "items": {"$ref": "#/components/schemas/Event"}},
+                "itemSchema": {"$ref": "#/components/schemas/Event"},
+                "itemEncoding": {"contentType": "application/json"},
+                "examples": {
+                  "one": {
+                    "summary": "A single event",
+                    "dataValue": {"id": "e_1", "kind": "created"},
+                    "serializedValue": "{\"id\":\"e_1\",\"kind\":\"created\"}"
+                  }
+                }
+              },
+              "application/json": {"$ref": "#/components/mediaTypes/EventList"}
+            }
+          }
+        }
+      },
+      "query": {
+        "operationId": "events.query",
+        "responses": {"200": {"description": "Matching events."}}
+      },
+      "additionalOperations": {
+        "PURGE": {
+          "operationId": "events.purge",
+          "responses": {"204": {"description": "Purged."}}
+        }
+      }
+    },
+    "/uploads": {
+      "post": {
+        "operationId": "uploads.store",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "description": "A manifest and its parts.",
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "manifest": {"type": "object"},
+                  "parts": {"type": "array", "items": {"type": "string"}}
+                }
+              },
+              "encoding": {
+                "manifest": {
+                  "contentType": "application/json",
+                  "headers": {
+                    "X-Part-Checksum": {"schema": {"type": "string"}}
+                  },
+                  "encoding": {
+                    "nested": {"contentType": "text/csv"}
+                  }
+                },
+                "parts": {
+                  "contentType": "application/octet-stream",
+                  "itemEncoding": {"contentType": "application/octet-stream"},
+                  "prefixEncoding": [{"contentType": "text/plain"}]
+                }
+              }
+            },
+            "application/jsonl": {
+              "schema": {"type": "object"},
+              "prefixEncoding": [{"contentType": "text/plain"}]
+            }
+          }
+        },
+        "responses": {"202": {"description": "Accepted."}}
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Event": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "kind": {"type": "string"}
+        },
+        "required": ["id"]
+      }
+    },
+    "mediaTypes": {
+      "EventList": {
+        "description": "The whole page of events, as one document.",
+        "schema": {"type": "array", "items": {"$ref": "#/components/schemas/Event"}},
+        "itemSchema": {"$ref": "#/components/schemas/Event"}
+      }
+    },
+    "examples": {
+      "AnEvent": {
+        "summary": "An event",
+        "dataValue": {"id": "e_1", "kind": "created"},
+        "serializedValue": "{\"id\":\"e_1\"}"
+      }
+    },
+    "securitySchemes": {
+      "LegacyKey": {
+        "type": "apiKey",
+        "name": "X-Api-Key",
+        "in": "header",
+        "deprecated": true
+      },
+      "Device": {
+        "type": "oauth2",
+        "oauth2MetadataUrl": "https://api.example.test/.well-known/oauth-authorization-server",
+        "flows": {
+          "deviceAuthorization": {
+            "deviceAuthorizationUrl": "https://api.example.test/oauth/device",
+            "tokenUrl": "https://api.example.test/oauth/token",
+            "scopes": {"events:read": "Read events"}
+          },
+          "clientCredentials": {
+            "tokenUrl": "https://api.example.test/oauth/token",
+            "scopes": {"events:read": "Read events"}
+          }
+        }
+      }
+    }
+  }
+}

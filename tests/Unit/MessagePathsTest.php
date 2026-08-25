@@ -95,6 +95,20 @@ it('leaves nothing in a published message that names the machine it was built on
     ['a directory one segment under the root', 'mkdir(/app/root/storage): Permission denied', 'mkdir(storage): Permission denied'],
     ['a package tree the build could not read', 'scandir(/app/root/vendor): Permission denied', 'scandir(vendor): Permission denied'],
     ['a file with no extension under the root', 'require(/app/root/artisan) failed', 'require(artisan) failed'],
+    // A colon is legal in a POSIX directory name, and a run cut in front of one no longer ends in a
+    // filename — which is all reason 4 has to go on. So the two rows below were published whole while
+    // the same paths without the colon reduced to their names.
+    [
+        'a colon in a directory name',
+        'file_get_contents(/Users/dev/Caches/a:b/Reader.php): Failed to open stream',
+        'file_get_contents(Reader.php): Failed to open stream',
+    ],
+    [
+        'a timestamped directory, which spells two colons',
+        'file_get_contents(/Users/dev/Caches/2026-08-25T10:30:00/Reader.php): Failed to open stream',
+        'file_get_contents(Reader.php): Failed to open stream',
+    ],
+    ['a colon in a directory under the root', 'require(/app/root/storage/a:b/X.php) failed', 'require(storage/a:b/X.php) failed'],
     // The root itself has nothing left after the strip, and the one thing `relative()` can answer with
     // there — the name of the directory the checkout sits in — is a different string on every machine.
     ['the project root itself', 'mkdir(/app/root): Permission denied', 'mkdir(): Permission denied'],
@@ -171,6 +185,12 @@ it('leaves alone every run that a machine did not put there', function (string $
     ['a date', 'Expected 2026/08/25 style'],
     ['a single-segment absolute path', 'The directory /tmp is not writable'],
     ['no path at all', 'Undefined array key "form"'],
+    // The other end of the colon tolerance. A colon joins a run only where more path follows it before
+    // the next delimiter, so each of these keeps the colon as the delimiter it is: nothing after it
+    // reaches a separator.
+    ['a clock time beside no path', 'Analysis gave up at 10:30:00'],
+    ['a rule naming a range', 'Rule "between:1,10" could not be read'],
+    ['a host and a port', 'Could not reach cache at redis:6379'],
 ]);
 
 it('takes every local stream wrapper as proof, and no other scheme', function (string $prefix, bool $reduced): void {
@@ -221,6 +241,47 @@ it('redacts the install prefix PHP appends to a failed include', function (): vo
     foreach ($entries as $entry) {
         expect($scrubbed)->not->toContain($entry);
     }
+});
+
+it('redacts a machine root however deep it happens to be', function (string $case, string $configured): void {
+    // The row above reads THIS machine's include_path, so how shallow a prefix it proves anything about
+    // is a fact about the developer's PHP install: a two-segment prefix survived whole while a
+    // three-segment one was redacted, which is the same code emitting different bytes for the machine it
+    // ran on. Here the prefix is the input, so both depths are answered on every machine.
+    $restore = (string) ini_get('include_path');
+
+    try {
+        ini_set('include_path', '.'.PATH_SEPARATOR.$configured);
+        $scrubbed = (new MessagePaths(new RootRelativeSourcePathResolver('/app/root')))->relative(sprintf(
+            "Failed opening required 'x.php' (include_path='.%s%s')",
+            PATH_SEPARATOR,
+            $configured,
+        ));
+    } finally {
+        ini_set('include_path', $restore);
+    }
+
+    expect($scrubbed)->not->toContain($configured);
+})->with([
+    ['a two-segment prefix', '/opt/php'],
+    ['a three-segment prefix', '/opt/brew/php'],
+    ['a deep prefix', '/opt/homebrew/Cellar/php/8.5.0/share/php/pear'],
+    // One segment stays: `/tmp` is a word our own sentences spell, and redaction is a literal replace
+    // with nothing to tell the two apart.
+]);
+
+it('leaves a one-segment machine root alone, because prose spells one', function (): void {
+    $restore = (string) ini_get('include_path');
+
+    try {
+        ini_set('include_path', '.'.PATH_SEPARATOR.'/tmp');
+        $scrubbed = (new MessagePaths(new RootRelativeSourcePathResolver('/app/root')))
+            ->relative('The directory /tmp is not writable');
+    } finally {
+        ini_set('include_path', $restore);
+    }
+
+    expect($scrubbed)->toBe('The directory /tmp is not writable');
 });
 
 it('scrubs the file a callable label names and leaves the rest of the label alone', function (string $case, string $label, string $expected): void {

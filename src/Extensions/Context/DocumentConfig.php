@@ -6,6 +6,7 @@ namespace Docuccino\Core\Extensions\Context;
 
 use Docuccino\Core\Emit\Formats;
 use Docuccino\Core\Extensions\Contracts\TagMapper;
+use Docuccino\Core\Support\ConfinedPath;
 use Docuccino\Core\Support\Fqcn;
 use Docuccino\Core\Support\Hydrate;
 use Docuccino\Core\Support\Json;
@@ -357,6 +358,19 @@ final readonly class DocumentConfig
     }
 
     /**
+     * A configured filesystem path this document names, or null when it names none this build can use:
+     * absent, not a string, empty, or holding a NUL byte, which is a path no filesystem call can accept
+     * ({@see ConfinedPath::holdable()}). All four are "the document has none" to every reader, which is
+     * a shape they all already handle — and the last of them would otherwise reach a `glob()` or a
+     * `file_get_contents()` and take the whole build with it. The raw bag keeps the value either way, so
+     * the `configHash` still describes what was configured and the adapter can report the refusal.
+     */
+    private static function configuredPath(mixed $value): ?string
+    {
+        return is_string($value) && $value !== '' ? ConfinedPath::holdable($value) : null;
+    }
+
+    /**
      * The markdown tree the content compiler reads, from `content.dir`, or null when unset. May be
      * relative — the adapter resolves and confines it against the app base path.
      */
@@ -365,7 +379,7 @@ final readonly class DocumentConfig
         $content = is_array($this->raw['content'] ?? null) ? $this->raw['content'] : [];
         $dir = $content['dir'] ?? null;
 
-        return is_string($dir) && $dir !== '' ? $dir : null;
+        return self::configuredPath($dir);
     }
 
     /**
@@ -378,7 +392,7 @@ final readonly class DocumentConfig
         $webhooks = is_array($this->raw['webhooks'] ?? null) ? $this->raw['webhooks'] : [];
         $dir = $webhooks['dir'] ?? null;
 
-        return is_string($dir) && $dir !== '' ? $dir : null;
+        return self::configuredPath($dir);
     }
 
     /**
@@ -395,7 +409,7 @@ final readonly class DocumentConfig
         $examples = is_array($this->raw['examples'] ?? null) ? $this->raw['examples'] : [];
         $dir = $examples['recordings'] ?? null;
 
-        return is_string($dir) && $dir !== '' ? $dir : null;
+        return self::configuredPath($dir);
     }
 
     /**
@@ -412,7 +426,7 @@ final readonly class DocumentConfig
         $coverage = is_array($this->raw['coverage'] ?? null) ? $this->raw['coverage'] : [];
         $dir = $coverage['log'] ?? null;
 
-        return is_string($dir) && $dir !== '' ? $dir : null;
+        return self::configuredPath($dir);
     }
 
     /**
@@ -425,7 +439,7 @@ final readonly class DocumentConfig
      */
     public function exportPath(): string
     {
-        return is_string($this->export()['path'] ?? null) ? $this->export()['path'] : 'docs/openapi.json';
+        return self::configuredPath($this->export()['path'] ?? null) ?? 'docs/openapi.json';
     }
 
     /**
@@ -463,9 +477,9 @@ final readonly class DocumentConfig
             }
 
             $format = $entry['format'] ?? null;
-            $path = $entry['path'] ?? null;
+            $path = self::configuredPath($entry['path'] ?? null);
 
-            if (is_string($format) && $format !== '' && is_string($path) && $path !== '') {
+            if (is_string($format) && $format !== '' && $path !== null) {
                 $targets[] = new ExportTarget($format, $path);
             }
         }
@@ -511,9 +525,11 @@ final readonly class DocumentConfig
         }
 
         $format = $entry['format'] ?? null;
-        $path = $entry['path'] ?? null;
+        // A path holding a NUL is as unusable as an absent one and reports as the same `shape` problem:
+        // the adapter refuses to build on either, which is the whole point of reporting them here.
+        $path = self::configuredPath($entry['path'] ?? null);
 
-        if (! is_string($format) || $format === '' || ! is_string($path) || $path === '') {
+        if (! is_string($format) || $format === '' || $path === null) {
             return [['index' => $index, 'problem' => 'shape', 'detail' => '']];
         }
 

@@ -11,6 +11,7 @@ use Docuccino\Core\Diagnostics\Severity;
 use Docuccino\Core\Document\UirDocument;
 use Docuccino\Core\Draft\SchemaKeywords;
 use Docuccino\Core\Support\Arr;
+use Docuccino\Core\Support\JsonPointer;
 
 /**
  * Downlevels to OpenAPI 3.0.4 for toolchains pinned to 3.0 (AWS API Gateway, older codegen and
@@ -453,7 +454,7 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
 
         foreach ($node as $key => $value) {
             $key = (string) $key;
-            $child = self::pointer($pointer, $key);
+            $child = JsonPointer::child($pointer, $key);
 
             // `security` is a fixed field of the document and of an Operation Object; a component may be
             // NAMED `security` without being one, so the parent's kind is what admits it. A Security
@@ -559,7 +560,7 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
 
         foreach ($map as $key => $item) {
             $key = (string) $key;
-            $child = self::pointer($pointer, $key);
+            $child = JsonPointer::child($pointer, $key);
 
             if (str_starts_with($key, 'x-') || ! is_array($item)) {
                 $out[$key] = $item;
@@ -769,7 +770,7 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
                 code: 'downlevel.empty-responses',
                 message: sprintf(
                     'Added a placeholder `default` response to the operation at %s, which documents none; OpenAPI 3.0 requires every operation to declare at least one.',
-                    self::pointer($pointer, $method),
+                    JsonPointer::child($pointer, $method),
                 ),
                 routeSignature: self::routeSignature($pointer, $method),
                 help: 'Name what the endpoint returns — a #[Response] attribute, a return docblock, or an overlay — so the artifact carries the real shape rather than a placeholder.',
@@ -793,12 +794,6 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
             : null;
     }
 
-    /** A child JSON Pointer, with the RFC 6901 escapes a path template needs. */
-    private static function pointer(string $parent, string $token): string
-    {
-        return $parent.'/'.str_replace(['~', '/'], ['~0', '~1'], $token);
-    }
-
     /**
      * @param  array<mixed, mixed>  $map
      * @param  list<Diagnostic>  $diagnostics
@@ -810,7 +805,7 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
 
         foreach ($map as $name => $schema) {
             $name = (string) $name;
-            $out[$name] = $this->subschema($schema, self::pointer($pointer, $name), $diagnostics);
+            $out[$name] = $this->subschema($schema, JsonPointer::child($pointer, $name), $diagnostics);
         }
 
         return $out;

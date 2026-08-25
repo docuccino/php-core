@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Emit;
 
+use Docuccino\Core\Canonical\Canonicalizer;
 use Docuccino\Core\Support\Arr;
 use Docuccino\Core\Support\FormatSamples;
 use Docuccino\Core\Support\JsonValue;
@@ -21,6 +22,11 @@ use stdClass;
  * An empty object comes back as a {@see stdClass}, not `[]` ({@see JsonValue} for that convention). The
  * value is serialised into a JSON string for the collection, and an empty PHP array would render as
  * `[]` — a body that lies about its shape.
+ *
+ * A subschema may be a BOOLEAN, and `false` admits no value at all — so the recursion answers
+ * `array{mixed}|null` throughout, `null` meaning "nothing validates here" rather than "the value is
+ * null". Every position decides what that means for itself ({@see subschema()}), because an example a
+ * schema forbids is the one thing worse than no example: a consumer copies it verbatim and sends it.
  *
  * @internal
  */
@@ -53,8 +59,37 @@ final readonly class SchemaExampleFactory
      */
     public function value(array $schema, array $components = [], int $depth = 0, array $stack = []): mixed
     {
+        // A schema nothing satisfies has no honest value, and a caller at the top has nowhere to put
+        // that fact — so it collapses to `null`, which is already this factory's answer for a schema
+        // that told it nothing.
+        return ($this->candidate($schema, $components, $depth, $stack) ?? [null])[0];
+    }
+
+    /**
+     * ONE subschema's value, for a caller listing a schema's members as fields of its own — a form body,
+     * a `deepObject` query, a response header. Wrapped, because {@see value()} answers `null` both for a
+     * schema that said nothing and for one nothing satisfies, and here the two want opposite things: a
+     * `false` forbids the member outright, so the field is not undescribed but disallowed, and the caller
+     * leaves it out rather than offering a consumer something the server will reject.
+     *
+     * @param  array<string, mixed>  $components
+     * @return array{mixed}|null null where NO value validates
+     */
+    public function member(mixed $subschema, array $components = []): ?array
+    {
+        return $this->subschema($subschema, $components, 0, []);
+    }
+
+    /**
+     * @param  array<string, mixed>  $schema
+     * @param  array<string, mixed>  $components
+     * @param  list<string>  $stack
+     * @return array{mixed}|null null where NO value validates
+     */
+    private function candidate(array $schema, array $components, int $depth, array $stack): ?array
+    {
         if ($depth > self::MAX_DEPTH) {
-            return $this->empty($schema);
+            return [$this->empty($schema)];
         }
 
         if (isset($schema['$ref']) && is_string($schema['$ref'])) {
@@ -63,7 +98,7 @@ final readonly class SchemaExampleFactory
 
         $stated = $this->stated($schema);
         if ($stated !== null) {
-            return $stated[0];
+            return $stated;
         }
 
         $composed = $this->composed($schema, $components, $depth, $stack);
@@ -72,6 +107,25 @@ final readonly class SchemaExampleFactory
         }
 
         return $this->byType($schema, $components, $depth, $stack);
+    }
+
+    /**
+     * ONE subschema, wherever it sits. A boolean is a schema at every 2020-12 subschema position and
+     * `true` is the empty schema, so it reads exactly as `{}` does; anything that is no schema at all
+     * widens to `{}` the same way {@see Canonicalizer} publishes it. `false` admits nothing, and no
+     * value is a value this factory may invent — so it comes back as `null` for the position to answer.
+     *
+     * @param  array<string, mixed>  $components
+     * @param  list<string>  $stack
+     * @return array{mixed}|null
+     */
+    private function subschema(mixed $value, array $components, int $depth, array $stack): ?array
+    {
+        if ($value === false) {
+            return null;
+        }
+
+        return $this->candidate(is_array($value) ? Arr::stringKeyed($value) : [], $components, $depth, $stack);
     }
 
     /**
@@ -147,37 +201,59 @@ final readonly class SchemaExampleFactory
     }
 
     /**
+     * The outer wrapper says whether a composition keyword answered at all; the inner one is the
+     * candidate it answered with ({@see candidate()}).
+     *
      * @param  array<string, mixed>  $schema
      * @param  array<string, mixed>  $components
      * @param  list<string>  $stack
-     * @return array{mixed}|null
+     * @return array{array{mixed}|null}|null
      */
     private function composed(array $schema, array $components, int $depth, array $stack): ?array
     {
         if (isset($schema['allOf']) && is_array($schema['allOf'])) {
             $merged = [];
+            $scalar = null;
+
             foreach ($schema['allOf'] as $branch) {
-                $value = is_array($branch) ? $this->value(Arr::stringKeyed($branch), $components, $depth, $stack) : null;
+                $value = $this->subschema($branch, $components, $depth, $stack);
+
+                // A conjunction is only as satisfiable as its narrowest branch, wherever that branch
+                // sits — so every one is read before any value comes back out.
+                if ($value === null) {
+                    return [null];
+                }
 
                 // Objects compose; a scalar branch simply replaces what came before it.
-                if (is_array($value) || $value instanceof stdClass) {
-                    $merged = array_merge($merged, (array) $value);
+                if (is_array($value[0]) || $value[0] instanceof stdClass) {
+                    $merged = array_merge($merged, (array) $value[0]);
 
                     continue;
                 }
 
-                if ($value !== null) {
-                    return [$value];
+                if ($value[0] !== null) {
+                    $scalar ??= $value;
                 }
             }
 
-            return [$merged === [] ? new stdClass : $merged];
+            return [$scalar ?? [$merged === [] ? new stdClass : $merged]];
         }
 
         foreach (['oneOf', 'anyOf'] as $keyword) {
-            // Branch 0: the list is authored, and it is the branch every other reader shows.
-            if (isset($schema[$keyword]) && is_array($schema[$keyword]) && is_array($schema[$keyword][0] ?? null)) {
-                return [$this->value(Arr::stringKeyed($schema[$keyword][0]), $components, $depth, $stack)];
+            $branches = is_array($schema[$keyword] ?? null) ? array_values($schema[$keyword]) : [];
+
+            // `false` is the one branch to walk past: nothing satisfies it, so it is not an alternative
+            // any consumer has, and a list of nothing else leaves the union with no value at all.
+            $inhabited = array_values(array_filter($branches, static fn (mixed $b): bool => $b !== false));
+
+            if ($branches !== [] && $inhabited === []) {
+                return [null];
+            }
+
+            // Branch 0 of what remains: the list is authored, and it is the branch every other reader
+            // of the document shows.
+            if (is_array($inhabited[0] ?? null) || ($inhabited[0] ?? null) === true) {
+                return [$this->subschema($inhabited[0], $components, $depth, $stack)];
             }
         }
 
@@ -187,24 +263,30 @@ final readonly class SchemaExampleFactory
     /**
      * @param  array<string, mixed>  $components
      * @param  list<string>  $stack
+     * @return array{mixed}|null
      */
-    private function fromRef(string $ref, array $components, int $depth, array $stack): mixed
+    private function fromRef(string $ref, array $components, int $depth, array $stack): ?array
     {
         // A pointer already on the stack is a cycle: return the empty shape rather than recursing.
         if (in_array($ref, $stack, true)) {
-            return new stdClass;
+            return [new stdClass];
         }
 
         $resolved = $this->resolve($ref, $components);
 
+        // A pointer nothing answers says nothing about what is there, so the empty shape stands. What
+        // the pointer DOES answer is read as the subschema it is, boolean included.
         return $resolved === null
-            ? new stdClass
-            : $this->value($resolved, $components, $depth + 1, [...$stack, $ref]);
+            ? [new stdClass]
+            : $this->subschema($resolved[0], $components, $depth + 1, [...$stack, $ref]);
     }
 
     /**
+     * The value the pointer addresses, wrapped so a boolean schema there is distinguishable from a
+     * pointer that resolves to nothing.
+     *
      * @param  array<string, mixed>  $components
-     * @return array<string, mixed>|null
+     * @return array{mixed}|null
      */
     private function resolve(string $ref, array $components): ?array
     {
@@ -221,27 +303,25 @@ final readonly class SchemaExampleFactory
             $cursor = $cursor[$segment];
         }
 
-        /** @var array<string, mixed>|null $out */
-        $out = is_array($cursor) ? $cursor : null;
-
-        return $out;
+        return [$cursor];
     }
 
     /**
      * @param  array<string, mixed>  $schema
      * @param  array<string, mixed>  $components
      * @param  list<string>  $stack
+     * @return array{mixed}|null
      */
-    private function byType(array $schema, array $components, int $depth, array $stack): mixed
+    private function byType(array $schema, array $components, int $depth, array $stack): ?array
     {
         return match ($this->type($schema)) {
             'object' => $this->object($schema, $components, $depth, $stack),
-            'array' => $this->list($schema, $components, $depth, $stack),
-            'string' => $this->string($schema),
-            'integer', 'number' => $this->number($schema),
-            'boolean' => true,
-            'null' => null,
-            default => null,
+            'array' => [$this->list($schema, $components, $depth, $stack)],
+            'string' => [$this->string($schema)],
+            'integer', 'number' => [$this->number($schema)],
+            'boolean' => [true],
+            'null' => [null],
+            default => [null],
         };
     }
 
@@ -280,26 +360,40 @@ final readonly class SchemaExampleFactory
 
     /**
      * Every declared property, not only the required ones: a body someone is about to edit should show
-     * the whole shape, and hiding the optional half hides the contract.
+     * the whole shape, and hiding the optional half hides the contract. One a `false` forbids is the
+     * exception — that is not part of the contract, it is the contract saying no.
      *
      * @param  array<string, mixed>  $schema
      * @param  array<string, mixed>  $components
      * @param  list<string>  $stack
+     * @return array{mixed}|null
      */
-    private function object(array $schema, array $components, int $depth, array $stack): mixed
+    private function object(array $schema, array $components, int $depth, array $stack): ?array
     {
         $properties = is_array($schema['properties'] ?? null) ? $schema['properties'] : [];
+        $required = is_array($schema['required'] ?? null) ? array_filter($schema['required'], is_string(...)) : [];
 
         $keys = array_map(strval(...), array_keys($properties));
         sort($keys, SORT_STRING);
 
         $out = [];
         foreach ($keys as $key) {
-            $property = $properties[$key] ?? null;
-            $out[$key] = is_array($property) ? $this->value(Arr::stringKeyed($property), $components, $depth + 1, $stack) : null;
+            $property = $this->subschema($properties[$key] ?? null, $components, $depth + 1, $stack);
+
+            // A property nothing satisfies is a property no request may carry, so the example leaves it
+            // out — and an object that REQUIRES one has no valid instance at all.
+            if ($property === null) {
+                if (in_array($key, $required, true)) {
+                    return null;
+                }
+
+                continue;
+            }
+
+            $out[$key] = $property[0];
         }
 
-        return $out === [] ? new stdClass : $out;
+        return [$out === [] ? new stdClass : $out];
     }
 
     /**
@@ -310,10 +404,15 @@ final readonly class SchemaExampleFactory
      */
     private function list(array $schema, array $components, int $depth, array $stack): array
     {
-        // Exactly one item, whatever `minItems` says: an example is a shape, not a load test.
-        return is_array($schema['items'] ?? null)
-            ? [$this->value(Arr::stringKeyed($schema['items']), $components, $depth + 1, $stack)]
-            : [];
+        if (! array_key_exists('items', $schema)) {
+            return [];
+        }
+
+        $item = $this->subschema($schema['items'], $components, $depth + 1, $stack);
+
+        // Exactly one item, whatever `minItems` says: an example is a shape, not a load test. Where no
+        // element can validate — `items: false` — the empty list is the only array that does.
+        return $item === null ? [] : [$item[0]];
     }
 
     /**

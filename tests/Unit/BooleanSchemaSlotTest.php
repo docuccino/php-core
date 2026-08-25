@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Docuccino\Core\Canonical\Canonicalizer;
 use Docuccino\Core\Diff\DocumentDiffer;
 use Docuccino\Core\Document\UirDocument;
 use Docuccino\Core\Emit\EmitOptions;
@@ -26,9 +27,11 @@ use Docuccino\Core\Tests\Support\OpenApiMetaSchema;
  */
 
 /**
- * One document with `$value` at one schema slot, and the pointer the emitted graph publishes it at.
+ * One document with `$value` at one schema slot, the pointer the emitted graph publishes it at, and the
+ * `Canonicalizer::SCHEMA_SLOTS` entry — object and member — the case exercises. Every slot here is legal
+ * in every dialect this product emits; a slot 3.2 added lives in {@see booleanSchemaSlots32()}.
  *
- * @return array<string, array{callable(mixed): array<string, mixed>, list<string|int>, string}>
+ * @return array<string, array{callable(mixed): array<string, mixed>, list<string|int>, string, string}>
  */
 function booleanSchemaSlots(): array
 {
@@ -36,6 +39,7 @@ function booleanSchemaSlots(): array
         'components.schemas member' => [
             static fn (mixed $v): array => ['components' => ['schemas' => ['Slot' => $v]]],
             ['components', 'schemas', 'Slot'],
+            'components',
             'schemas',
         ],
         'an operation parameter' => [
@@ -46,6 +50,7 @@ function booleanSchemaSlots(): array
             ]]]],
             ['paths', '/a', 'get', 'parameters', 0, 'schema'],
             'parameter',
+            'schema',
         ],
         'components.parameters member' => [
             static fn (mixed $v): array => ['components' => ['parameters' => ['Q' => [
@@ -53,6 +58,7 @@ function booleanSchemaSlots(): array
             ]]]],
             ['components', 'parameters', 'Q', 'schema'],
             'parameter',
+            'schema',
         ],
         'a response header' => [
             static fn (mixed $v): array => ['paths' => ['/a' => ['get' => [
@@ -61,11 +67,13 @@ function booleanSchemaSlots(): array
             ]]]],
             ['paths', '/a', 'get', 'responses', '200', 'headers', 'X-T', 'schema'],
             'header',
+            'schema',
         ],
         'components.headers member' => [
             static fn (mixed $v): array => ['components' => ['headers' => ['X-T' => ['schema' => $v]]]],
             ['components', 'headers', 'X-T', 'schema'],
             'header',
+            'schema',
         ],
         'a response media type' => [
             static fn (mixed $v): array => ['paths' => ['/a' => ['get' => [
@@ -74,6 +82,7 @@ function booleanSchemaSlots(): array
             ]]]],
             ['paths', '/a', 'get', 'responses', '200', 'content', 'application/json', 'schema'],
             'mediaType',
+            'schema',
         ],
         'a request body media type' => [
             static fn (mixed $v): array => ['paths' => ['/a' => ['post' => [
@@ -83,8 +92,59 @@ function booleanSchemaSlots(): array
             ]]]],
             ['paths', '/a', 'post', 'requestBody', 'content', 'application/json', 'schema'],
             'mediaType',
+            'schema',
         ],
     ];
+}
+
+/**
+ * The schema slots OpenAPI 3.2 added, which the UIR and the 3.2 artifact publish as written and both
+ * downlevels drop — so they are read as schemas at the two formats that HAVE the slot, and are gone at
+ * the two that do not. Same table, different expectations, which is why they are declared apart.
+ *
+ * @return array<string, array{callable(mixed): array<string, mixed>, list<string|int>, string, string}>
+ */
+function booleanSchemaSlots32(): array
+{
+    return [
+        'a response media type itemSchema' => [
+            static fn (mixed $v): array => ['paths' => ['/a' => ['get' => [
+                'operationId' => 'a.get',
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/jsonl' => [
+                    'schema' => ['type' => 'object'], 'itemSchema' => $v,
+                ]]]],
+            ]]]],
+            ['paths', '/a', 'get', 'responses', '200', 'content', 'application/jsonl', 'itemSchema'],
+            'mediaType',
+            'itemSchema',
+        ],
+        'a request body media type itemSchema' => [
+            static fn (mixed $v): array => ['paths' => ['/a' => ['post' => [
+                'operationId' => 'a.post',
+                'requestBody' => ['content' => ['application/jsonl' => [
+                    'schema' => ['type' => 'object'], 'itemSchema' => $v,
+                ]]],
+                'responses' => ['204' => ['description' => 'none']],
+            ]]]],
+            ['paths', '/a', 'post', 'requestBody', 'content', 'application/jsonl', 'itemSchema'],
+            'mediaType',
+            'itemSchema',
+        ],
+    ];
+}
+
+/** slot × value for the 3.2-only slots. */
+function booleanSchemaSlot32Cases(): array
+{
+    $cases = [];
+
+    foreach (booleanSchemaSlots32() as $slot => [$build, $pointer]) {
+        foreach (['false' => false, 'true' => true, 'an empty object' => [], 'an object' => ['type' => 'string']] as $label => $value) {
+            $cases[$slot.' · '.$label] = [$build, $pointer, $value];
+        }
+    }
+
+    return $cases;
 }
 
 /** slot × value, the cross this file exists to walk. */
@@ -145,22 +205,32 @@ function booleanSchemaSlotDocument(callable $build, mixed $value): array
 }
 
 it('covers every schema slot the canonicaliser reads as one', function (): void {
-    // The canonicaliser is the source of truth: `subschemaValue()` at an OUTER slot is one of these, and
-    // its three uses inside `subschema()` are the subschema positions that file already covers. A fifth
-    // outer slot added there fails here rather than shipping uncovered.
-    $source = (string) file_get_contents(dirname(__DIR__, 2).'/src/Canonical/Canonicalizer.php');
-    $outer = preg_match_all("/'schemas?' => (?:fn \(mixed \\\$v\): mixed => \\\$this->sortedMap\(\\\$v, )?\\\$this->subschemaValue\(\.\.\.\)/", $source);
+    // Coupled to the table the CANONICALISER ITSELF reads: `Canonicalizer::SCHEMA_SLOTS` is what builds its
+    // handler maps, so a slot cannot be read as a schema without appearing here, and one added there with
+    // no case below fails this. The predecessor counted `subschemaValue(` call sites with a regex over the
+    // source — a fifth slot arrived, the count still matched, and the whole suite stayed green.
+    $declared = [];
 
-    $kinds = array_values(array_unique(array_map(
-        static fn (array $slot): string => $slot[2],
-        booleanSchemaSlots(),
-    )));
+    foreach (Canonicalizer::SCHEMA_SLOTS as $object => $members) {
+        foreach (array_keys($members) as $member) {
+            $declared[] = $object.'.'.$member;
+        }
+    }
 
-    sort($kinds);
+    $covered = array_map(
+        static fn (array $slot): string => $slot[2].'.'.$slot[3],
+        [...array_values(booleanSchemaSlots()), ...array_values(booleanSchemaSlots32())],
+    );
 
-    expect($outer)->toBe(4, 'outer subschemaValue() sites in the canonicaliser')
-        ->and($kinds)->toBe(['header', 'mediaType', 'parameter', 'schemas'])
-        ->and(count(booleanSchemaSlotCases()))->toBe(21);
+    sort($declared);
+    $unique = array_values(array_unique($covered));
+    sort($unique);
+
+    // The plausible minimum, so a table that stopped being read — or a dataset that stopped matching it —
+    // fails loudly instead of agreeing with itself about an empty set.
+    expect(count($declared))->toBeGreaterThanOrEqual(5, 'declared outer schema slots')
+        ->and($unique)->toBe($declared, 'every declared slot has a case')
+        ->and(array_diff($covered, $declared))->toBe([], 'no case names a slot the canonicaliser does not read');
 });
 
 it('publishes a schema slot as written in every dialect that spells a boolean', function (callable $build, array $pointer, mixed $value): void {
@@ -171,6 +241,29 @@ it('publishes a schema slot as written in every dialect that spells a boolean', 
         expect(booleanSchemaSlotPublished($format, $document, $pointer))->toBe($expected, $format);
     }
 })->with(booleanSchemaSlotCases());
+
+it('reads a 3.2-only schema slot as a schema where the dialect has one', function (callable $build, array $pointer, mixed $value): void {
+    // `itemSchema` holds a Schema Object, so it owes the same reading as `schema` beside it: a boolean and
+    // an empty object are schemas here, and the members come out in Schema Object order rather than
+    // key-sorted, which is what falling through to the generic path used to publish.
+    $document = booleanSchemaSlotDocument($build, $value);
+    $expected = $value === [] ? '{}' : (string) json_encode($value);
+
+    foreach (['uir', 'openapi-3.2'] as $format) {
+        expect(booleanSchemaSlotPublished($format, $document, $pointer))->toBe($expected, $format);
+    }
+})->with(booleanSchemaSlot32Cases());
+
+it('drops a 3.2-only schema slot where the target has no word for it', function (callable $build, array $pointer, mixed $value): void {
+    // Dropped rather than published: 3.1 closes the Media Type Object with `unevaluatedProperties: false`
+    // and 3.0 with `additionalProperties: false`, so an `itemSchema` that survives is a document the 3.0
+    // meta-schema rejects outright. `booleanSchemaSlotPublished()` runs both oracles on the way.
+    $document = booleanSchemaSlotDocument($build, $value);
+
+    foreach (['openapi-3.1', 'openapi-3.0'] as $format) {
+        expect(booleanSchemaSlotPublished($format, $document, $pointer))->toBe('<<DROPPED>>', $format);
+    }
+})->with(booleanSchemaSlot32Cases());
 
 it('publishes a schema slot in the 3.0 spelling of the same constraint', function (callable $build, array $pointer, mixed $value): void {
     // Never `<<DROPPED>>`, and never the OTHER boolean: 3.0 has no word for one outside

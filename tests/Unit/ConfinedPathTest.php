@@ -58,4 +58,21 @@ it('refuses a path no filesystem can hold rather than raising on it', function (
     ['a NUL in a relative configured dir', ConfinedPath::configuredDir('/app', "content\0/x")],
     // The absolute branch takes a configured directory verbatim, so it never reached resolve() at all.
     ['a NUL in an absolute configured dir', ConfinedPath::configuredDir('/app', "/srv/content\0/x")],
+    // And the same refusal for the paths this class does NOT confine — an overlay glob, an export
+    // destination, a fragment-cache directory. Confinement has exceptions; holdability has none.
+    ['an unconfined path holding a NUL', ConfinedPath::holdable("resources\0/overlays/*.yaml")],
+    ['an unconfined absolute path holding a NUL', ConfinedPath::holdable("/srv/exports\0/api.json")],
+]);
+
+it('holds every path a filesystem call could accept, however it points', function (string $path): void {
+    // The refusal is about ONE byte and nothing else: a relative path, an absolute one, a glob and a
+    // traversal are all things `glob()` and `file_get_contents()` will happily be handed, and answering
+    // null for any of them here would silently drop a path that works.
+    expect(ConfinedPath::holdable($path))->toBe($path);
+})->with([
+    'relative' => 'resources/docs/api',
+    'absolute' => '/srv/exports/api.json',
+    'a glob' => 'resources/docs/overlays/*.yaml',
+    'a traversal' => '../../elsewhere/api.json',
+    'empty' => '',
 ]);

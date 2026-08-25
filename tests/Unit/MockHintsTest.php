@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Docuccino\Attributes\Mock;
 use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Extensions\BuiltIn\DefaultTypeMappers;
 use Docuccino\Core\Extensions\Schema\ComponentRegistry;
@@ -74,6 +75,28 @@ it('reports every #[Mock] that cannot publish anything', function (): void {
         'attribute.mock-invalid: #[Mock] on '.MockedNode::class.'::$empty carries no faker expression and no seed group; it is ignored.',
         'attribute.mock-invalid: #[Mock] on '.MockedNode::class.'::$misdirected names a property, which only a class-level one needs; it is ignored.',
     ]);
+});
+
+it('names an anonymous class by where it stands, not by where the build machine keeps it', function (): void {
+    // Same reader, same argument, same hardening as PropertyAnnotations beside it: `::class` on an
+    // anonymous class is the base name, a NUL byte, the ABSOLUTE file it was written in and a counter of
+    // the anonymous classes this process declared first. These diagnostics are embedded in the document,
+    // so raw the site puts the build machine into the output and makes two runs over one tree disagree.
+    $subject = new class
+    {
+        #[Mock]
+        public string $empty = '';
+    };
+
+    [, $diagnostics] = MockHints::apply(stringObject(['empty']), $subject::class);
+
+    $message = $diagnostics[0]->message ?? '';
+
+    expect($message)->toContain('class@anonymous declared in tests/Unit/MockHintsTest.php:')
+        ->and($message)->toContain('::$empty')
+        ->and($message)->not->toContain("\0")
+        ->and($message)->not->toContain(dirname(__DIR__, 3))
+        ->and($message)->not->toMatch('/\$[0-9a-f]+::/');
 });
 
 it('drops a class-level hint naming a property the schema hides, and says so', function (): void {

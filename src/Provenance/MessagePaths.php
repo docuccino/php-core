@@ -46,8 +46,16 @@ final readonly class MessagePaths
      * A path body: anything but the punctuation that delimits a path in prose. An interior space is
      * allowed because `$HOME` ordinarily contains one on macOS and Windows; which spaces a reduction may
      * then cross is decided by {@see pathRun()}, not by the matcher.
+     *
+     * A colon delimits a path far more often than it sits inside one — `X.php:18`, `regex:/…/`, the
+     * `include_path='.:/…'` list — so it is excluded, EXCEPT where more path follows it before the next
+     * delimiter. A colon is a legal character in a POSIX directory name (a timestamped cache directory
+     * spells one), and a run cut in front of the colon no longer ends in a filename, which is the only
+     * thing reason 4 has left to go on: `/home/alice/a:b/Reader.php` was published whole while
+     * `/home/alice/ab/Reader.php` reduced to its name. The lookahead admits a colon of its own, so a
+     * `10:30:00` segment is crossed rather than stopping at the second one.
      */
-    private const BODY = '(?:[^\\s\'"(),;:<>]| (?=\\S))';
+    private const BODY = '(?:[^\\s\'"(),;:<>]| (?=\\S)|:(?=[^\\s\'"(),;<>]*/))';
 
     /**
      * Two segments appended to a path to ask the ladder something its answer alone cannot say: did it
@@ -303,7 +311,10 @@ final readonly class MessagePaths
 
             // A bare root, not a prefix of anything: only where it is deep enough that no sentence of
             // ours could be spelling it, so `/tmp` in prose survives and an install prefix does not.
-            if (substr_count($root, '/') >= 3) {
+            // TWO segments is that line, not three: PHP's failed-include tail names every entry BARE,
+            // so a three-segment threshold published a two-segment prefix (`/opt/php`) whole while
+            // hiding a deeper one — the same code emitting different bytes for the machine it ran on.
+            if (substr_count($root, '/') >= 2) {
                 $message = str_replace($root, '', $message);
             }
         }

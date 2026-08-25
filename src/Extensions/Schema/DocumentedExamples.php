@@ -6,6 +6,7 @@ namespace Docuccino\Core\Extensions\Schema;
 
 use Docuccino\Core\Extensions\Contracts\SchemaContext;
 use Docuccino\Core\Inference\PropertyMetadata;
+use Docuccino\Core\Provenance\ClassNames;
 
 /**
  * Writes each property's docblock `@example` onto the member it publishes, typed through
@@ -47,6 +48,11 @@ final class DocumentedExamples
             return $object;
         }
 
+        // The name a report names the property's class by — never the raw `class-string` the caller was
+        // handed, which for an ANONYMOUS class carries the build machine and a per-process counter
+        // ({@see ClassNames}).
+        $site = ClassNames::publishable($fqcn);
+
         foreach ($properties as $property) {
             if ($property->example === null) {
                 continue;
@@ -63,7 +69,7 @@ final class DocumentedExamples
             $example = TypedExample::of($property->example, $schema['type'] ?? null);
             if ($example === null) {
                 $context->diagnostic(TypedExample::untypable(
-                    $fqcn.'::$'.$property->name,
+                    $site.'::$'.$property->name,
                     $property->example,
                     $schema['type'] ?? null,
                 ));

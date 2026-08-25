@@ -126,6 +126,11 @@ final class SchemaKeywords
         'maxItems' => ['array'],
         'minItems' => ['array'],
         'uniqueItems' => ['array'],
+        // Bounds on how many items `contains` has to match. `contains` is a shape keyword and goes with
+        // the shape; these two are array refinements in their own right, so they go the same way a
+        // `minItems` does rather than surviving onto whatever replaced the array.
+        'maxContains' => ['array'],
+        'minContains' => ['array'],
         'maxProperties' => ['object'],
         'minProperties' => ['object'],
     ];
@@ -141,6 +146,10 @@ final class SchemaKeywords
         'x-docuccino',
         '$id',
         '$anchor',
+        // The dialect the schema is written in, and a note for the schema's own readers. Neither says
+        // anything about the instance, so a declared shape leaves both where it found them.
+        '$schema',
+        '$comment',
         '$defs',
         // Draft-07's spelling of `$defs`. A store of subschemas says nothing about the value that
         // carries it, so neither is retracted by a declared shape.
