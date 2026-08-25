@@ -7,6 +7,41 @@ User-facing changes to `docuccino/core` — features, fixes, performance work an
 taken from the commit messages scoped `core`. Entries begin after v0.1.2; older history is in
 the [repository](https://github.com/docuccino/docuccino) git log.
 
+## v0.10.0
+
+### Breaking changes
+
+- scrub a machine out of a message without rewriting what the author wrote ([#218](https://github.com/docuccino/docuccino/pull/218))
+  - the drop half of `downlevel.path-item-ref` is now `downlevel.path-item-unresolved`. A pipeline at `--fail-on=warning` that accepted the old code to silence the inlining notice can now fail on the drop, which is the point — the two were never the same finding.
+- derive a schema keyword's shape from its own contract ([#203](https://github.com/docuccino/docuccino/pull/203))
+  - `unevaluatedItems`, `unevaluatedProperties` and `additionalItems` now publish as objects rather than empty arrays and take their place in the normative member order. A boolean at `items`, `contains`, `not`, `if`, `then`, `else` or `propertyNames` is published as written, which reverses what `not: false` means to a generated client.
+- downlevel a response whose key is spelled like a keyword ([#202](https://github.com/docuccino/docuccino/pull/202))
+  - a 3.0 document's `responses.default` and any component or header named after a schema keyword are now converted rather than passed through, so 2020-12 constructs at those positions become their 3.0 equivalents. A `components.pathItems` entry referenced from `paths` is inlined at each use site instead of leaving a `$ref` to a bucket 3.0 does not have.
+- stop a numeric or multi-shape component name colliding in silence ([#199](https://github.com/docuccino/docuccino/pull/199))
+  - a shared error response offering two or more representations that each reference a distinct component is now published as `AuthenticationChallenge_ProblemDetailsData` rather than `AuthenticationChallengeProblemDetailsData`, renaming that type in generated clients. `--yaml` output quotes numeric mapping keys, so every `responses` key moves from `200:` to `'200':`.
+- give every server variable the default the spec requires ([#196](https://github.com/docuccino/docuccino/pull/196))
+  - `postman.server-variable-no-default` is retired in favour of `server.variable-no-default`, which every emitter raises; a `diagnostics.accept` entry or `--fail-on` filter naming the old code stops matching and will surface as `config.accept-unused`. A server variable declaring an `enum` and no `default` now publishes the enum's first value as its `default`; one declaring neither is no longer emitted.
+- name a contested error response for the body it actually carries ([#192](https://github.com/docuccino/docuccino/pull/192))
+  - an error response carrying a representation its claimed name does not describe is now published under a name derived from the components it references, instead of that claim plus a content hash. A document that published two hash-suffixed variants of one name now publishes the claimed name and a derived one, so a generated client's type name changes for the contested body.
+
+### Features
+
+- read #[Example] and #[Description] on the properties they declare ([#204](https://github.com/docuccino/docuccino/pull/204))
+
+### Bug fixes
+
+- say a recordings directory was refused instead of publishing nothing ([#236](https://github.com/docuccino/docuccino/pull/236))
+- reduce a path a colon interrupts, and redact a shallow machine prefix ([#229](https://github.com/docuccino/docuccino/pull/229))
+- name a class the same way wherever a build prints one ([#227](https://github.com/docuccino/docuccino/pull/227))
+- read a boolean subschema as the schema it is when building an example ([#226](https://github.com/docuccino/docuccino/pull/226))
+- drop every member OpenAPI 3.2 added when downleveling ([#224](https://github.com/docuccino/docuccino/pull/224))
+- read a boolean at a top-level Schema slot instead of dropping the member ([#221](https://github.com/docuccino/docuccino/pull/221))
+- close the loose ends a diagnostics sweep left ([#208](https://github.com/docuccino/docuccino/pull/208))
+- pull JSON into a document through one reader ([#200](https://github.com/docuccino/docuccino/pull/200))
+- write empty maps as maps in YAML output ([#197](https://github.com/docuccino/docuccino/pull/197))
+- give a 3.0 operation the responses the spec requires of it ([#195](https://github.com/docuccino/docuccino/pull/195))
+- keep an authored empty-object example an object from docblock to bytes ([#191](https://github.com/docuccino/docuccino/pull/191))
+
 ## v0.9.1
 
 ### Bug fixes
