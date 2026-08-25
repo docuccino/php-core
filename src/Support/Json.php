@@ -14,9 +14,8 @@ use stdClass;
  * Arrays are re-keyed in ascending key order before encoding, so structurally-equal values encode to
  * the same bytes whatever their insertion order. List keys (`0,1,2,…`) are already ordered, so element
  * order survives. Objects collapse to their class-string, since closures and mappers have no stable
- * serialisable identity — except {@see stdClass}, which is how a JSON object with keys an array cannot
- * carry travels here, and whose members ARE its identity. It descends, and stays an object so `{}` and
- * `[]` do not fingerprint alike.
+ * serialisable identity — except {@see stdClass}, whose members ARE its identity ({@see JsonValue}). It
+ * descends, and stays an object so `{}` and `[]` do not fingerprint alike.
  *
  * Callers hand this arbitrary values — an extension's own properties, a schema an integration built —
  * so the normalizer is TOTAL: anything `json_encode` would refuse is carried as a marker instead of

@@ -22,6 +22,7 @@ use Docuccino\Core\Patch\Contribution;
 use Docuccino\Core\Support\ConfinedPath;
 use Docuccino\Core\Support\Fqcn;
 use Docuccino\Core\Support\LineEndings;
+use Docuccino\Core\Support\PlainText;
 
 /**
  * The overrides layer: docblock summary/description (docblock precedence), then the operation
@@ -151,12 +152,15 @@ final class AttributeOverridesExtension implements OperationExtension
      */
     private function describedFile(RouteContext $context, string $path): ?string
     {
+        // The path is the author's own text on its way into a published message, so it is escaped
+        // before it is quoted — a NUL byte is exactly what gets one refused below.
+        $quoted = PlainText::of($path);
         $resolved = ConfinedPath::resolve($this->basePath, $path);
         if ($resolved === null) {
             $this->report($context, Severity::Error, 'description-file.escapes-base-path', sprintf(
-                '#[Description] file "%s" escapes the application base path and was rejected.',
-                $path,
-            ), 'Point `file:` at a path inside the application, written relative to its root.');
+                '#[Description] file "%s" does not name a path inside the application and was rejected.',
+                $quoted,
+            ), ConfinedPath::FILE_ESCAPED_HELP);
 
             return null;
         }
@@ -167,8 +171,8 @@ final class AttributeOverridesExtension implements OperationExtension
         if ($contents === false) {
             $this->report($context, Severity::Warning, 'description-file.missing', sprintf(
                 '#[Description] file "%s" could not be read; the description was not documented.',
-                $path,
-            ), 'Create the file, or correct the path — it is read relative to the application root.');
+                $quoted,
+            ), ConfinedPath::FILE_MISSING_HELP);
 
             return null;
         }

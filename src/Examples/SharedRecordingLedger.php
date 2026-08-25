@@ -134,7 +134,11 @@ final class SharedRecordingLedger extends RecordingLedger
         }
 
         try {
-            $decoded = json_decode($contents, true, 512, JSON_THROW_ON_ERROR);
+            // Through the shared reader, exactly as {@see RecordingStore::at()} reads the committed
+            // sidecar: a session carries recorded BODIES, and an associative decode reads a `{}` in one
+            // back as `[]`. The two files hold the same values and must be read the same way, or which
+            // worker won a slot decides whether an example keeps its shape.
+            $decoded = RecordedBody::decode($contents);
         } catch (JsonException) {
             return null;
         }

@@ -8,6 +8,8 @@ use Docuccino\Core\Extensions\Context\RouteDependencies;
 use Docuccino\Core\Extensions\Context\RouteDescriptor;
 use Docuccino\Core\Support\AtomicFile;
 use Docuccino\Core\Support\GeneratedDirectory;
+use Docuccino\Core\Support\Hydrate;
+use Docuccino\Core\Support\JsonValue;
 use JsonException;
 
 /**
@@ -35,6 +37,10 @@ use JsonException;
  * cold one; bump it for a change to the encoding too, since an entry written by a lossier one restores
  * different values. A miss costs one rebuild; a wrong warm answer costs the document.
  *
+ * What comes back out has to be the same PHP value that went in, and neither direction of PHP's JSON
+ * manages that on its own: floats are pinned to shortest-round-trip on the way out ({@see put()}), and
+ * the way in goes through {@see JsonValue} so an empty or index-keyed object is not restored as a list.
+ *
  * Dependency hashing goes through {@see FileDigests}, so one build hashes each file once — one cache
  * instance is one build's worth of memo, and callers get a fresh one per build.
  *
@@ -43,7 +49,7 @@ use JsonException;
 final readonly class FragmentCache
 {
     /** The entry format {@see get()} will read. An entry stamped anything else is a miss. */
-    public const FORMAT = 5;
+    public const FORMAT = 6;
 
     /**
      * The manifest's stand-ins for the two things a digest cannot be. Neither can be mistaken for one:
@@ -106,8 +112,11 @@ final readonly class FragmentCache
         }
 
         try {
-            /** @var array<string, mixed> $decoded */
-            $decoded = json_decode($raw, true, flags: JSON_THROW_ON_ERROR);
+            // Through the shared reader, not `json_decode(…, true)`: an associative decode reads `{}`
+            // back as `[]`, and a fragment carries examples verbatim. That took `{}` out of a warm
+            // build's bytes, changed the hashes computed off them, and had the example lint report a
+            // mismatch on the warm build that the cold one never saw ({@see JsonValue}).
+            $decoded = Hydrate::map(JsonValue::decode($raw));
         } catch (JsonException) {
             return null;
         }

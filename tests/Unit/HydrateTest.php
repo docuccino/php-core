@@ -78,6 +78,46 @@ it('hydrates a single nested map or returns null', function (): void {
     expect(Hydrate::objectOrNull('nope', $factory))->toBeNull();
 });
 
+it('reads a schema slot, keeping a boolean and widening what is no schema', function (): void {
+    $factory = static fn (array $m): array => $m;
+
+    // A boolean is a Schema Object at a schema slot, so it survives as itself. `objectOrNull()` answers
+    // `null` for all three of these, and at this position that is a lost member rather than a degradation.
+    expect(Hydrate::schemaOrNull(false, $factory))->toBeFalse()
+        ->and(Hydrate::schemaOrNull(true, $factory))->toBeTrue()
+        ->and(Hydrate::schemaOrNull(['type' => 'string'], $factory))->toBe(['type' => 'string'])
+        // The `{}` a JSON object with no members arrives as, and anything that is no schema at all.
+        ->and(Hydrate::schemaOrNull(new stdClass, $factory))->toBe([])
+        ->and(Hydrate::schemaOrNull(7, $factory))->toBe([])
+        ->and(Hydrate::schemaOrNull('nope', $factory))->toBe([])
+        // Absent is the one answer that stays absent: nothing can reference a slot on an object.
+        ->and(Hydrate::schemaOrNull(null, $factory))->toBeNull();
+});
+
+it('keeps every named member of a schema map, whatever it was written as', function (): void {
+    $factory = static fn (array $m): array => $m;
+
+    // Nothing is dropped here, because these names are what `$ref` points at — a vanished member leaves
+    // every reference to it dangling. Keys coerce to strings the way the other map helpers do.
+    expect(Hydrate::schemaMap([
+        'Forbidden' => false,
+        'Anything' => true,
+        'Typed' => ['type' => 'string'],
+        'Empty' => new stdClass,
+        'Nonsense' => 7,
+        9 => 'nope',
+    ], $factory))->toBe([
+        'Forbidden' => false,
+        'Anything' => true,
+        'Typed' => ['type' => 'string'],
+        'Empty' => [],
+        'Nonsense' => [],
+        '9' => [],
+    ])
+        ->and(Hydrate::schemaMap(null, $factory))->toBe([])
+        ->and(Hydrate::schemaMap('nope', $factory))->toBe([]);
+});
+
 it('takes the sorted, deduplicated string union of two arrays', function (): void {
     expect(Arr::sortedUnion(['b', 'a'], ['c', 'a']))->toBe(['a', 'b', 'c']);
     expect(Arr::sortedUnion([2, 1], [1, 3]))->toBe(['1', '2', '3']);

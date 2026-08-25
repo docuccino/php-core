@@ -28,23 +28,10 @@ use Docuccino\Core\Support\Json;
  *
  * What REPEATS decides whether a body is hoisted; what its producer DECLARED
  * ({@see ResponseDraft::claimComponentName()}) decides only what the component is called — so a
- * declaration can add a component and never take one away. It names the RESPONSE, and reaches the shape
- * inside it only where that shape is the whole of it ({@see schemaSites()}). Design §"Shared error
- * components".
- *
- * A media type's `example` and its `examples` map are how an operation ILLUSTRATES the body, not what the
- * body IS, so the second pass keeps both out of the key and republishes every arm's illustration on the
- * one shared response — design §"Shared error components". An author's own example NAMES survive that
- * merge and outrank the minted ones. A name two arms give to two DIFFERENT examples is held by neither:
- * each is published under a key minted from that name and its own content, so no illustration is lost, no
- * arm's example ends up behind another's label, and nothing about how a body is illustrated can cost the
- * document a component.
- *
- * A response's `summary` and `description` are prose about the same body for the same reason, so they are
- * out of the key too ({@see spoken()}): what they never do is retire the name of a contract they do not
- * change. The component publishes the wording the most arms state, and an arm that says something else
- * states its own on the reference that overrides it — `summary` and `description` are fixed fields of a
- * Reference Object from OAS 3.1 on.
+ * declaration can add a component and never take one away. Illustration ({@see illustrate()}) and prose
+ * ({@see spoken()}) stay out of both keys, for the reason and with the consequences the design section
+ * spells out: they are not what a body IS, and keying on them retires the name of a contract they do not
+ * change.
  *
  * Deliberately narrow: 4xx/5xx only, only bodies that actually repeat, and only responses carrying
  * `content`. Anything already a `$ref` is left alone, which is what makes a second run a no-op.
@@ -104,8 +91,10 @@ final class SharedErrorResponses implements DocumentTransformer
         $shapes = self::shareable(self::collect($paths, self::schemaSites(...), self::stated(...)));
         [$paths, $schemas, $schemaContests, $aliases] = self::shareShapes($paths, $shapes, self::bucket($components, 'schemas'));
 
-        $bodies = self::shareable(self::collect($paths, self::responseSites(...), self::illustrated(...), $aliases));
-        [$paths, $responses, $responseContests] = self::shareResponses($paths, $bodies, self::bucket($components, 'responses'));
+        $sites = static fn (array $response): array => self::responseSites($response, $aliases);
+
+        $bodies = self::shareable(self::collect($paths, $sites, self::illustrated(...), $aliases));
+        [$paths, $responses, $responseContests] = self::shareResponses($paths, $bodies, self::bucket($components, 'responses'), $sites);
 
         foreach ([...self::rejectedClaims($shapes, $bodies), ...$schemaContests, ...$responseContests] as $diagnostic) {
             $context->report($diagnostic);
@@ -180,9 +169,10 @@ final class SharedErrorResponses implements DocumentTransformer
      * @param  array<array-key, mixed>  $paths
      * @param  array<string, Occurrence>  $bodies
      * @param  array<string, mixed>  $existing
+     * @param  callable(array<array-key, mixed>): list<array{list<array-key>, array<array-key, mixed>, string|null}>  $sites
      * @return array{array<array-key, mixed>, array<string, mixed>|null, list<Diagnostic>}
      */
-    private static function shareResponses(array $paths, array $bodies, array $existing): array
+    private static function shareResponses(array $paths, array $bodies, array $existing, callable $sites): array
     {
         if ($bodies === []) {
             return [$paths, null, []];
@@ -207,7 +197,7 @@ final class SharedErrorResponses implements DocumentTransformer
         );
 
         return [
-            self::rewrite($paths, $names, self::responseSites(...), self::illustrated(...), self::RESPONSES, $spoken),
+            self::rewrite($paths, $names, $sites, self::illustrated(...), self::RESPONSES, $spoken),
             $bucket,
             [...self::collisions($contests, $names, 'responses'), ...$disagreements],
         ];
@@ -286,12 +276,12 @@ final class SharedErrorResponses implements DocumentTransformer
      * Every hoistable node of one response, as `[pointer into the response, body, the name claimed for
      * it]`. A schema pass reads one per media type; a response pass reads the response itself.
      *
-     * A producer's claim names the RESPONSE, and it reaches the shape underneath only where the response
-     * states exactly ONE representation — there the shape IS the named error's body, and the two buckets
-     * publish one concept under one name. A response offering several says nothing about which of them
-     * the name belongs to, so each shape asks for its status instead: `components.schemas` and
-     * `components.responses` hold different kinds of thing, and a shape named after the response
-     * enclosing it asserts it is that error when it may be the alternative representation beside it.
+     * A producer's claim reaches the shape underneath only where the response states exactly ONE
+     * representation — there the shape IS the named error's body, and the two buckets publish one concept
+     * under one name. A response offering several says nothing about which of them the name belongs to,
+     * so each shape asks for its status instead: `components.schemas` and `components.responses` hold
+     * different kinds of thing, and a shape named after the response enclosing it asserts it is that
+     * error when it may be the alternative representation beside it.
      *
      * @param  array<array-key, mixed>  $response
      * @return list<array{list<array-key>, array<array-key, mixed>, string|null}>
@@ -315,12 +305,99 @@ final class SharedErrorResponses implements DocumentTransformer
     }
 
     /**
+     * The response itself, under the name it asks for. A producer's claim is that name only where the
+     * response states ONE representation — exactly as the claim reaches the shape under it only there
+     * ({@see schemaSites()}) — and otherwise it asks for what it carries ({@see carries()}), with the
+     * claim leaving its dedupe scope alongside its name. The one exception is a claim that says of itself
+     * that it names the whole response ({@see namesResponse()}). Design §"Shared error components" has all
+     * three arguments and the application that measured them.
+     *
      * @param  array<array-key, mixed>  $response
+     * @param  array<string, string>  $minted  the schema names this run published, which are not the
+     *                                         document's own and so name nothing for it
      * @return list<array{list<array-key>, array<array-key, mixed>, string|null}>
      */
-    private static function responseSites(array $response): array
+    private static function responseSites(array $response, array $minted = []): array
     {
-        return [[[], $response, self::claimed($response)]];
+        /** @var array<array-key, mixed> $content */
+        $content = $response['content'];
+
+        if (count($content) === 1) {
+            return [[[], $response, self::claimed($response)]];
+        }
+
+        $whole = self::namesResponse($response) ? self::claimed($response) : null;
+
+        return [[[], $response, $whole ?? self::carries($content, $minted)]];
+    }
+
+    /**
+     * Whether the standing claim says of itself that it names the whole response rather than the one body
+     * its claimer built ({@see ResponseDraft::COMPONENT_NAMES_RESPONSE}) — the claimer's own statement,
+     * frozen beside the name and travelling with it.
+     *
+     * Only the claimer knows: the layer it wrote at cannot say, since `#[ErrorComponent]` on an exception
+     * class writes at `attribute` and speaks for the error that class IS, seeing nothing of the
+     * representation another producer put beside it at the same status.
+     *
+     * @param  array<array-key, mixed>  $response
+     */
+    private static function namesResponse(array $response): bool
+    {
+        $extension = $response[self::PROVENANCE] ?? null;
+        $facts = is_array($extension) ? ($extension['facts'] ?? null) : null;
+
+        return is_array($facts) && ($facts[ResponseDraft::COMPONENT_NAMES_RESPONSE] ?? null) === true;
+    }
+
+    /**
+     * What a response stating several representations is called: the components they reference, one per
+     * distinct shape, in the order the media types sort. Null — so the body takes its status — where any
+     * representation names no shape, or names one this run minted; design §"Shared error components" for
+     * why a partial answer is refused rather than assembled.
+     *
+     * The join must be INJECTIVE, which is the whole reason for the `_`: concatenation is not, since
+     * `{Foo, BarBaz}` and `{FooBar, Baz}` both spell `FooBarBaz`. `_` only splits back apart if no part
+     * carries one, so a shape whose own name does is refused however many it stands with — a lone
+     * `Auth_Challenge` reads as a join, and exempting the one-shape case would put both in one codomain
+     * and hand the collision back. `.` and `-` are the only other legal characters and neither survives as
+     * an identifier in a generated client.
+     *
+     * @param  array<array-key, mixed>  $content
+     * @param  array<string, string>  $minted
+     */
+    private static function carries(array $content, array $minted): ?string
+    {
+        $mediaTypes = array_map(strval(...), array_keys($content));
+        sort($mediaTypes, SORT_STRING);
+
+        $shapes = [];
+        foreach ($mediaTypes as $mediaType) {
+            $media = $content[$mediaType] ?? null;
+            $schema = is_array($media) ? ($media['schema'] ?? null) : null;
+            $ref = is_array($schema) ? ($schema['$ref'] ?? null) : null;
+
+            if (! is_string($ref) || ! str_starts_with($ref, self::SCHEMAS)) {
+                return null;
+            }
+
+            $shape = substr($ref, strlen(self::SCHEMAS));
+            if ($shape === '' || isset($minted[$shape])) {
+                return null;
+            }
+
+            $shapes[$shape] = true;
+        }
+
+        $names = array_map(strval(...), array_keys($shapes));
+
+        if (array_filter($names, static fn (string $n): bool => str_contains($n, '_')) !== []) {
+            return null;
+        }
+
+        $name = implode('_', $names);
+
+        return $name !== '' && ComponentNames::isLegal($name) ? $name : null;
     }
 
     /**
@@ -337,23 +414,15 @@ final class SharedErrorResponses implements DocumentTransformer
     }
 
     /**
-     * The same split for a whole response, where a media type's `example` and its `examples` map are both
-     * illustration: they come off the key, so two arms rendering one contract with two example bodies are
-     * one response, and the examples travel with it ({@see illustrate()}).
+     * The same split for a whole response: `example`, `examples` and the response's own `summary` and
+     * `description` all come off the key and travel with it ({@see illustrate()}, {@see spoken()}), an
+     * authored map keeping the names its author gave it. Design §"Shared error components" for why the
+     * names are kept instead of the key.
      *
-     * An authored map is lifted whole, under the names its author gave it. Leaving it in the key was the
-     * defensible-looking answer — a document has published those names and nothing here may rename one —
-     * and it is the wrong one: it makes the response's identity a function of who annotated it, so
-     * naming an example on ONE route pushed an unrelated route's body back inline and retired the shared
-     * component both were referencing. The names are kept instead of the key ({@see illustrate()}).
-     *
-     * Only BESIDE a schema. A media type stating an example and no shape has nothing to illustrate — the
-     * example is the only claim it makes — so that one stays part of what the response is. One stating
-     * BOTH members is left whole too: OpenAPI already calls that document wrong, and this pass has no
-     * business tidying it by merging half of it away.
-     *
-     * The response's own `summary` and `description` come off the key with them ({@see spoken()}): they
-     * are the words an operation puts to a body, and a body is what a component is.
+     * Only BESIDE a schema, though. A media type stating an example and no shape has nothing to
+     * illustrate — the example is the only claim it makes — so that one stays part of what the response
+     * IS. One stating BOTH members is left whole too: OpenAPI already calls that document wrong, and this
+     * pass has no business tidying it by merging half of it away.
      *
      * @param  array<array-key, mixed>  $response
      * @return array{array<array-key, mixed>, Illustrations, Authored, Prose}
@@ -411,28 +480,15 @@ final class SharedErrorResponses implements DocumentTransformer
 
     /**
      * The shared response as it publishes: the body every arm agreed on, plus the illustrations they did
-     * not. ONE illustration goes out as the media type's `example` — the simplest thing that says it, the
-     * bytes an unmerged document already published, and a member no OpenAPI version this emits refuses.
-     * Several go out as `examples`, whose keys {@see ComponentNames} mints from each body's own content.
+     * not — ONE as the media type's `example`, several as an `examples` map whose unnamed keys
+     * {@see ComponentNames} mints from each body's own content and whose named ones are the author's own.
+     * Design §"Shared error components" has the merge, the name contest ({@see disagreements()}) and why
+     * neither kind of key can displace the other.
      *
-     * A content-derived key is opaque, which for a COMPONENT name would be a real cost — a generated
-     * client is written against it. An example key is not: no code generator turns one into a type, so
-     * this is the one place the invariant can be paid for in readability rather than in meaning. Every
-     * MINTED key is a function of its own example alone, so an arm arriving or leaving never renames
-     * another's.
-     *
-     * Nothing here can make an illustration false. The arms were merged on a key that keeps every media
-     * type and every `schema` in it, so each example sits beside exactly the schema it sat beside before
-     * — a merge widens no contract, and there is none to re-check against.
-     *
-     * Where an arm named its examples, the shared component publishes those names: an author's key is
-     * already a function of their declaration, so it disturbs nothing, and it reads far better than a
-     * hash. Minting climbs past the names they used, so neither kind of key can take the other's place
-     * and no illustration is lost to a collision.
-     *
-     * A name two arms gave to two different examples is the one an author has to settle, and the ladder
-     * every contested name in this document climbs is what settles it here too: each example takes that
-     * name plus a hash of its own content ({@see disagreements()}).
+     * This is the one place a content-derived key costs nothing: no code generator turns an example key
+     * into a type, unlike a component name. And nothing here can make an illustration FALSE — the arms
+     * merged on a key holding every media type and every `schema`, so each example still sits beside
+     * exactly the schema it did before.
      *
      * @param  array<array-key, mixed>  $body
      * @param  Illustrations  $illustrations
@@ -492,7 +548,9 @@ final class SharedErrorResponses implements DocumentTransformer
      *
      * @param  array<string, mixed>  $values  canonical bytes → the example they encode
      * @param  array<string, array<string, mixed>>  $contested  contested name → canonical bytes → the Example Object under it
-     * @param  list<string>  $taken  names an author already gave an example on this media type
+     * @param  list<array-key>  $taken  names an author already gave an example on this media type; these
+     *                                  are bucket KEYS, so a numeric one arrives as an int
+     *                                  ({@see ComponentNames::mint()}, which normalises them)
      * @return array<string, mixed>
      */
     private static function named(array $values, array $contested, array $taken): array
@@ -736,17 +794,12 @@ final class SharedErrorResponses implements DocumentTransformer
      * The published name of every shared body, the bucket it was hoisted into, and the names that were
      * contested.
      *
-     * The naming is {@see ComponentNames}'s, not this transformer's: every path that mints a component
-     * name owes it that invariant, and a second implementation of "plain name, then content hash, then
-     * a numeric tail" is how the two would come to disagree. Each body states a claim with no identity
-     * to carry, so the bytes stand in for one and the ladder degenerates to exactly that pair.
-     *
-     * So a base name — `Error<status>`, or whatever the producer declared — belongs to a body only
-     * while ONE claims it: two make it contested and each takes a name derived from its own content,
-     * and a third arriving later disturbs neither. A component already holding a name with a DIFFERENT
-     * body is `$taken` and cannot move — this pass runs after the registry's names are published — so
-     * the shared body climbs past it instead. One holding an IDENTICAL body is not taken, which is what
-     * keeps a rebuild over a restored document byte-identical.
+     * The naming is {@see ComponentNames}'s ladder, not a second copy of it — an error claim carries no
+     * identity, so it degenerates to base-then-content-hash (design §2 "Component naming"). What is local
+     * here is `$taken`: a component already holding a name with a DIFFERENT body cannot move, since this
+     * pass runs after the registry's names are published, so the shared body climbs past it. One holding
+     * an IDENTICAL body is not taken, which is what keeps a rebuild over a restored document
+     * byte-identical.
      *
      * @param  array<string, Occurrence>  $bodies
      * @param  array<string, mixed>  $existing
@@ -831,9 +884,10 @@ final class SharedErrorResponses implements DocumentTransformer
                         $bucket,
                     ),
                 help: ($incumbent
-                    ? 'The component already holding the name was published before this pass ran and cannot move. Give the error body a name of its own with #[ErrorComponent], or rename the component holding this one, and it publishes under a plain name again.'
-                    : 'A shared error body is named after its status unless something names it, and a name belongs to one body only while it holds it alone. Nothing to do if these really are different errors and the derived names read well enough; otherwise have the operations state one body, or name each body with #[ErrorComponent] — one name per body, since a name spread over an exception family, or over a method answering at several statuses, is contested the same way.'
-                ).($bucket === 'schemas' ? ' A declared name names the response, so it names the shape under it only where the response states one representation; a response offering several says nothing about which of them is the one it named.' : ''),
+                    ? 'The component already holding the name was published before this pass ran and cannot move. Give the error body a name of its own, or rename the component holding this one, and it publishes under a plain name again.'
+                    : 'A shared error body is named after its status unless something names it, and a name belongs to one body only while it holds it alone. Nothing to do if these really are different errors and the derived names read well enough; otherwise give each body a name of its own — one name per body, since a name spread over an exception family, or over a method answering at several statuses, is contested the same way.'
+                ).' Name a body that arises from a throw with #[ErrorComponent] on the exception class or its render method; name one the operation declares itself with the errorComponent: argument of the #[Response] that declares it.'
+                    .($bucket === 'schemas' ? ' A name reaches the shape under a response only where the response states one representation; a response offering several says nothing about which of them is the one it named.' : ''),
             );
         }
 
@@ -1079,7 +1133,7 @@ final class SharedErrorResponses implements DocumentTransformer
                     $producer === null ? 'A producer' : sprintf('"%s"', $producer),
                     $name,
                 ),
-                help: 'A component key is letters, digits, ".", "_" and "-" only. A reason phrase as one word — "NotFound", "TooManyRequests" — is what reads best as a generated client\'s type.',
+                help: ComponentNames::LEGAL_NAME_HELP,
             );
         }
 

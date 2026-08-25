@@ -81,10 +81,40 @@ it('says so differently when every branch is empty', function () use ($on): void
     $findings = lintDiagnostics(new VacuousUnionLint($on), $document);
 
     expect($findings)->toHaveCount(1)
-        ->and($findings[0]->message)->toContain('whose every branch is an unconstrained {}')
+        ->and($findings[0]->message)->toContain('whose every branch is unconstrained')
         // The typed-branch half of the wording would be a lie here.
         ->and($findings[0]->message)->not->toContain('typed branches');
 });
+
+/*
+ * `true` is the empty schema spelled short, so it is the most vacuous branch a union can carry — and
+ * the canonicalizer publishes it as written rather than flattening it to `{}`. A rule that read only the
+ * object spelling would go silent on exactly the unions it exists for.
+ */
+it('reads a boolean branch as the schema it is', function (array $anyOf, int $expected, string $wording) use ($on): void {
+    $document = lintDocument(['GET /api/positions' => [
+        'responses' => ['200' => ['content' => ['application/json' => ['schema' => ['anyOf' => $anyOf]]]]],
+    ]]);
+
+    $findings = lintDiagnostics(new VacuousUnionLint($on), $document);
+
+    expect($findings)->toHaveCount($expected);
+
+    if ($expected > 0) {
+        expect($findings[0]->message)->toContain($wording);
+    }
+})->with([
+    // The headline: a `true` beside a typed branch erases the type exactly as `{}` does.
+    'true beside a typed branch' => [[true, ['type' => 'string']], 1, 'with an unconstrained branch'],
+    'true beside a $ref' => [[true, ['$ref' => '#/components/schemas/A']], 1, 'with an unconstrained branch'],
+    'true beside {}' => [[true, []], 1, 'whose every branch is unconstrained'],
+    'nothing but true' => [[true, true], 1, 'whose every branch is unconstrained'],
+    // `false` is the opposite of vacuous: it accepts nothing, so it constrains everything beside it.
+    'false beside a typed branch' => [[false, ['type' => 'string']], 0, ''],
+    'nothing but false' => [[false, false], 0, ''],
+    // …and a `false` beside a `{}` is still flagged for the `{}`, not for the `false`.
+    'false beside {}' => [[false, []], 1, 'with an unconstrained branch'],
+]);
 
 it('stays out of subtrees that carry data rather than schemas', function (array $schema) use ($on): void {
     // A value a consumer sees — an example, a default, an enum member, an extension payload — may be

@@ -7,6 +7,7 @@ namespace Docuccino\Core\Emit\Postman;
 use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
 use Docuccino\Core\Emit\SchemaExampleFactory;
+use Docuccino\Core\Emit\ServerVariables;
 use Docuccino\Core\Support\Arr;
 use Docuccino\Core\Support\Hydrate;
 
@@ -409,20 +410,19 @@ final readonly class Url
             }
 
             $variable = Arr::stringKeyed(is_array($declared[$name] ?? null) ? $declared[$name] : []);
-            $default = $variable['default'] ?? null;
+            $default = ServerVariables::resolve($variable);
 
-            if (! is_string($default) || $default === '') {
-                $enum = is_array($variable['enum'] ?? null) ? array_values($variable['enum']) : [];
-                $default = is_string($enum[0] ?? null) ? $enum[0] : '';
-
-                $diagnostics[] = new Diagnostic(
-                    severity: Severity::Warning,
-                    code: 'postman.server-variable-no-default',
-                    message: sprintf('Server variable `%s` declares no default, so the collection cannot suggest a value for it.', $name),
+            if (! ServerVariables::declaresDefault($variable)) {
+                // The same fact the OpenAPI emitters report, at the same code: a collection cannot leave
+                // the variable out the way a document can, so it is published blank instead.
+                $diagnostics[] = ServerVariables::noDefault(
+                    $name,
+                    $variable,
+                    'it declares no `enum` to take one from either, so the collection publishes it blank for you to fill in.',
                 );
             }
 
-            $entry = $this->variable($name, $default);
+            $entry = $this->variable($name, $default ?? '');
             $description = is_string($variable['description'] ?? null) ? $variable['description'] : '';
             if ($description !== '') {
                 $entry['description'] = $description;

@@ -24,6 +24,48 @@ it('produces the same bytes from the model as from the raw array', function (): 
     expect($this->emitter->emit($document))->toBe($this->emitter->emitArray($array));
 });
 
+/**
+ * Every UIR fixture in the tree, discovered rather than listed.
+ *
+ * @return array<string, array{string}>
+ */
+function fidelityFixtures(): array
+{
+    $fixtures = [];
+
+    foreach (glob(dirname(__DIR__).'/Fixtures/*.json') ?: [] as $path) {
+        $decoded = json_decode((string) file_get_contents($path), true);
+
+        if (is_array($decoded) && isset($decoded['uir'], $decoded['info'])) {
+            $fixtures[basename($path, '.json')] = [basename($path)];
+        }
+    }
+
+    ksort($fixtures);
+
+    return $fixtures;
+}
+
+/*
+ * The same equivalence over the whole corpus, because it is the shape of an entire class of defect: the
+ * canonicaliser reads a raw array, the model is hydrated first, and anything the model coerces or DROPS
+ * shows up here as two different documents from one input. It was asserted on a single fixture, which is
+ * why a parameter's `schema: false` and a boolean `components.schemas` member could go missing in
+ * hydration with the suite green. A model reader that stops seeing a member fails here on every fixture
+ * carrying one, whatever the member turns out to be.
+ */
+it('hydrates without changing a byte the canonicaliser would have published', function (string $fixture): void {
+    $array = loadFixture($fixture);
+
+    expect($this->emitter->emit(UirDocument::fromArray($array)))->toBe($this->emitter->emitArray($array));
+})->with(fidelityFixtures());
+
+it('reads a plausible minimum of fixtures for that equivalence', function (): void {
+    // A glob that stopped matching would report a clean bill of health over an empty corpus.
+    expect(count(fidelityFixtures()))->toBeGreaterThanOrEqual(5)
+        ->and(array_keys(fidelityFixtures()))->toContain('boolean-schema-slots.uir');
+});
+
 it('keeps contentHash stable when only x-docuccino.generator changes', function (): void {
     $a = workedExample();
     $b = workedExample();

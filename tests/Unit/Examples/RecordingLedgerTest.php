@@ -153,6 +153,26 @@ it('publishes the best object-shaped body whichever worker met it', function ():
     }
 });
 
+it('carries an empty object through the session file a second worker reads', function (): void {
+    // The session file is how a body reaches the worker that did not record it, and it was read with an
+    // associative decode while the committed sidecar beside it went through `RecordedBody`. So `{}` came
+    // back as `[]` — and which worker happened to win a slot decided whether the published example kept
+    // its shape.
+    [$recordings, $scratch] = ledgerDirectories();
+    $store = new RecordingStore($recordings);
+
+    $body = RecordedBody::decode('{"id":1,"meta":{},"tags":[]}');
+
+    foreach ([0, 1] as $worker) {
+        (new SharedRecordingLedger($store, 'empty-object-run', $scratch))
+            ->record(LEDGER_OPERATION, 'GET /api/invoices', RecordedExample::of('200', 'application/json', $body));
+    }
+
+    expect(file_get_contents((string) $store->pathFor(LEDGER_OPERATION)))
+        ->toContain('"meta": {}')
+        ->not->toContain('"meta": []');
+});
+
 it('leaves a committed body alone across workers while its shape is unchanged', function (): void {
     [$recordings, $scratch] = ledgerDirectories();
     $store = new RecordingStore($recordings);

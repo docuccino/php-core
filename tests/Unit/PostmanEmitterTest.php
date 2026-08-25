@@ -7,6 +7,8 @@ use Docuccino\Core\Document\UirDocument;
 use Docuccino\Core\Emit\EmitOptions;
 use Docuccino\Core\Emit\Postman\CollectionEmitter;
 use Docuccino\Core\Emit\Postman\Description;
+use Docuccino\Core\Tests\Support\EmittedDocument;
+use Docuccino\Core\Tests\Support\SchemaFindings;
 use Opis\JsonSchema\Validator;
 
 /**
@@ -136,7 +138,38 @@ function postmanDocumentWithPaths(array $paths, array $tags = []): array
     return $document;
 }
 
-it('emits a schema-valid v2.1.0 collection for every fixture', function (string $fixture): void {
+/**
+ * Every UIR fixture in the tree, discovered rather than listed — the hand-written list this replaced had
+ * gone stale, leaving `contract` and `downlevel` emitting collections nothing ever validated.
+ *
+ * @return list<string>
+ */
+function postmanSchemaFixtures(): array
+{
+    $fixtures = [];
+
+    foreach (glob(dirname(__DIR__).'/Fixtures/*.json') ?: [] as $path) {
+        $decoded = json_decode((string) file_get_contents($path), true);
+
+        if (is_array($decoded) && isset($decoded['uir'], $decoded['info'])) {
+            $fixtures[] = basename($path);
+        }
+    }
+
+    sort($fixtures);
+
+    return $fixtures;
+}
+
+/** The vendored Postman schema, cached — parsing it per assertion is the cost worth avoiding. */
+function postmanSchemaValidator(): Validator
+{
+    static $validator = null;
+
+    if ($validator instanceof Validator) {
+        return $validator;
+    }
+
     // Postman publishes its collection schema as draft-04, which opis does not parse. The vendored file
     // stays byte-exact as Postman ships it and the dialect is lifted here: the draft-04 `id` anchors go
     // (every `$ref` in the file is a `#/definitions/…` pointer that resolves without them) and the
@@ -146,21 +179,48 @@ it('emits a schema-valid v2.1.0 collection for every fixture', function (string 
         flags: JSON_THROW_ON_ERROR,
     ));
 
-    $collection = json_decode(
+    $validator = new Validator;
+    $validator->setMaxErrors(50);
+
+    // An oracle may not touch what it reads: opis writes schema `default`s INTO the instance otherwise.
+    $validator->parser()->setOption('allowDefaults', false);
+
+    $validator->resolver()?->registerRaw($schema, 'https://docuccino.test/postman-collection.json');
+
+    return $validator;
+}
+
+/** The emitted collection for $fixture, decoded to the object graph the oracle reads. */
+function postmanCollection(string $fixture): mixed
+{
+    return json_decode(
         (new CollectionEmitter)->emit(UirDocument::fromArray(loadFixture($fixture))),
         flags: JSON_THROW_ON_ERROR,
     );
+}
 
-    $validator = new Validator;
-    $validator->resolver()->registerRaw($schema, 'https://docuccino.test/postman-collection.json');
+it('emits a schema-valid v2.1.0 collection for every fixture', function (string $fixture): void {
+    expect(SchemaFindings::of(
+        postmanSchemaValidator(),
+        postmanCollection($fixture),
+        'https://docuccino.test/postman-collection.json',
+    ))->toBe([]);
+})->with(postmanSchemaFixtures());
 
-    expect($validator->validate($collection, 'https://docuccino.test/postman-collection.json')->isValid())->toBeTrue();
-})->with([
-    'worked-example' => ['worked-example.json'],
-    'kitchen-sink' => ['kitchen-sink.uir.json'],
-    'tag-hierarchy' => ['tag-hierarchy.uir.json'],
-    'postman-surface' => ['postman-surface.uir.json'],
-]);
+/**
+ * A scan that finds nothing must fail, and it counts what was VALIDATED rather than what sits on disk —
+ * an emitter answering `{}` for every fixture would otherwise clear this unchanged.
+ */
+it('validates a plausible minimum of collections and positions', function (): void {
+    $positions = 0;
+
+    foreach (postmanSchemaFixtures() as $fixture) {
+        $positions += EmittedDocument::nodes(postmanCollection($fixture));
+    }
+
+    expect(count(postmanSchemaFixtures()))->toBeGreaterThanOrEqual(5)
+        ->and($positions)->toBeGreaterThanOrEqual(1000);
+});
 
 it('emits a Postman collection byte-identical to the committed golden', function (): void {
     expect((new CollectionEmitter)->emit(UirDocument::fromArray(loadFixture('postman-surface.uir.json'))))
@@ -604,6 +664,52 @@ it('reports webhooks, which describe what the API sends rather than what you sen
     expect(postmanCodes(loadFixture('kitchen-sink.uir.json')))->toContain('postman.webhooks-dropped');
 });
 
+it('names each credential Postman has no auth type for', function (): void {
+    // openIdConnect and mutualTLS have no Postman equivalent at all, so the request ships with no auth
+    // rather than the wrong one — and the reader is told which route lost which scheme.
+    $unsupported = array_values(array_filter(
+        postmanReport(loadFixture('postman-surface.uir.json')),
+        static fn (Diagnostic $d): bool => $d->code === 'postman.auth-unsupported',
+    ));
+
+    expect(array_map(static fn (Diagnostic $d): ?string => $d->routeSignature, $unsupported))
+        ->toBe(['GET /tree', 'GET /vault'])
+        ->and($unsupported[0]->message)->toContain('oidc')
+        ->and($unsupported[1]->message)->toContain('mtls');
+});
+
+it('reports a form body that is not an object, which has no fields to build', function (): void {
+    // Postman's urlencoded and formdata modes are lists of key/value fields, so a body the document says
+    // is an array has nothing to become — a guessed field would be a request that fails on Send.
+    $codes = postmanCodes(postmanDocumentWithPaths([
+        '/tags' => [
+            'post' => [
+                'requestBody' => ['content' => ['application/x-www-form-urlencoded' => [
+                    'schema' => ['type' => 'array', 'items' => ['type' => 'string']],
+                ]]],
+                'responses' => ['204' => ['description' => 'No content']],
+            ],
+        ],
+    ]));
+
+    expect($codes)->toContain('postman.body-not-object');
+});
+
+it('reports the callbacks it drops, which describe a request the API makes', function (): void {
+    $codes = postmanCodes(postmanDocumentWithPaths([
+        '/subscriptions' => [
+            'post' => [
+                'responses' => ['201' => ['description' => 'Created']],
+                'callbacks' => ['onEvent' => ['{$request.body#/url}' => ['post' => [
+                    'responses' => ['200' => ['description' => 'OK']],
+                ]]]],
+            ],
+        ],
+    ]));
+
+    expect($codes)->toContain('postman.callbacks-dropped');
+});
+
 it('writes JSON and says so when asked for YAML', function (): void {
     $document = loadFixture('worked-example.json');
     $result = (new CollectionEmitter)->emitWithReport(UirDocument::fromArray($document), (new EmitOptions)->withYaml());
@@ -713,11 +819,22 @@ it('says a document with no servers needs a host before anything will run', func
         ->and(postmanCodes(loadFixture('tag-hierarchy.uir.json')))->toContain('postman.no-server');
 });
 
-it('reports a server variable it cannot suggest a value for', function (): void {
-    expect(postmanCodes(loadFixture('postman-surface.uir.json')))->toContain('postman.server-variable-no-default');
+it('reports a server variable that declares no default, at the code every producer reports it at', function (): void {
+    // One fact, one code: the OpenAPI emitters raise `server.variable-no-default` for the same variable.
+    expect(postmanCodes(loadFixture('postman-surface.uir.json')))->toContain('server.variable-no-default');
 
     // …and still falls back to the first enum entry rather than leaving it blank.
     expect(array_column(postman(loadFixture('postman-surface.uir.json'))['variable'], 'value', 'key')['version'])->toBe('v1');
+});
+
+it('publishes a variable blank where nothing in the document names a legal value', function (): void {
+    $document = loadFixture('tag-hierarchy.uir.json');
+    $document['servers'] = [['url' => 'https://{tenant}.example.com', 'variables' => ['tenant' => ['description' => 'Your tenant']]]];
+
+    // A collection cannot leave the variable out the way a document can — the request would carry an
+    // unresolved template — so it is published empty for a person to fill in, and said so.
+    expect(array_column(postman($document)['variable'], 'value', 'key')['tenant'])->toBe('')
+        ->and(postmanCodes($document))->toContain('server.variable-no-default');
 });
 
 it('yields to the base URL when a server variable would collide with it', function (): void {

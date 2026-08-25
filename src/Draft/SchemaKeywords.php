@@ -5,10 +5,11 @@ declare(strict_types=1);
 namespace Docuccino\Core\Draft;
 
 /**
- * The JSON Schema keyword classification {@see SchemaDraft::declareShape()} reasons over: which
- * keywords DESCRIBE a value's shape, which merely REFINE values of some type, and which are
- * annotations that say nothing about the value at all. Every keyword the document can carry is
- * classified once here, so no producer has to keep its own list of what its body replaces.
+ * What the JSON Schema keywords MEAN, in the one place anything that reads a schema asks. Two
+ * questions live here: the classification {@see SchemaDraft::declareShape()} reasons over — shape,
+ * refinement or annotation — and the subschema position {@see SUBSCHEMA_POSITIONS} a keyword's
+ * value occupies, which is what tells a reader an array there is a JSON object rather than a list.
+ * Every keyword the document can carry is answered once here, so no producer keeps its own copy.
  *
  * A keyword this does not know is never superseded: we do not retract what we cannot read.
  *
@@ -16,6 +17,52 @@ namespace Docuccino\Core\Draft;
  */
 final class SchemaKeywords
 {
+    /** A single subschema (or, in every one of these positions, a boolean schema). */
+    public const string POSITION_SCHEMA = 'schema';
+
+    /** A map of subschemas — the keys are property/pattern/`$defs` names, the values recurse. */
+    public const string POSITION_SCHEMA_MAP = 'schemaMap';
+
+    /** A list of subschemas. The only position here whose JSON value is an ARRAY. */
+    public const string POSITION_SCHEMA_LIST = 'schemaList';
+
+    /** A map of string lists — `dependentRequired` and nothing else. */
+    public const string POSITION_STRING_LIST_MAP = 'stringListMap';
+
+    /**
+     * Where a keyword's value sits relative to the schema carrying it — the keyword's own contract, and
+     * the only thing that can tell a reader whether an array there is a JSON object or a list. A keyword
+     * named here needs no further entry anywhere; what derives from it, and why draft-07's `dependencies`
+     * has no row and cannot have one, are in docs/design/uir-and-extensions.md §1 "The empty-object
+     * invariant". `dependentSchemas` and `dependentRequired`, 2020-12's split of that keyword, are both here.
+     *
+     * @var array<string, string>
+     */
+    private const array SUBSCHEMA_POSITIONS = [
+        'additionalItems' => self::POSITION_SCHEMA,
+        'additionalProperties' => self::POSITION_SCHEMA,
+        'allOf' => self::POSITION_SCHEMA_LIST,
+        'anyOf' => self::POSITION_SCHEMA_LIST,
+        'contains' => self::POSITION_SCHEMA,
+        'contentSchema' => self::POSITION_SCHEMA,
+        '$defs' => self::POSITION_SCHEMA_MAP,
+        'definitions' => self::POSITION_SCHEMA_MAP,
+        'dependentRequired' => self::POSITION_STRING_LIST_MAP,
+        'dependentSchemas' => self::POSITION_SCHEMA_MAP,
+        'else' => self::POSITION_SCHEMA,
+        'if' => self::POSITION_SCHEMA,
+        'items' => self::POSITION_SCHEMA,
+        'not' => self::POSITION_SCHEMA,
+        'oneOf' => self::POSITION_SCHEMA_LIST,
+        'patternProperties' => self::POSITION_SCHEMA_MAP,
+        'prefixItems' => self::POSITION_SCHEMA_LIST,
+        'properties' => self::POSITION_SCHEMA_MAP,
+        'propertyNames' => self::POSITION_SCHEMA,
+        'then' => self::POSITION_SCHEMA,
+        'unevaluatedItems' => self::POSITION_SCHEMA,
+        'unevaluatedProperties' => self::POSITION_SCHEMA,
+    ];
+
     /**
      * The keywords that say what kind of value this is, and what is inside it. A declaration states
      * its shape whole, so the ones it leaves out no longer hold — an `additionalProperties` from a
@@ -29,12 +76,15 @@ final class SchemaKeywords
         'nullable',
         'items',
         'prefixItems',
+        'additionalItems',
         'contains',
+        'unevaluatedItems',
         'properties',
         'required',
         'additionalProperties',
         'patternProperties',
         'propertyNames',
+        'unevaluatedProperties',
         'dependentRequired',
         'dependentSchemas',
         'allOf',
@@ -65,6 +115,9 @@ final class SchemaKeywords
         'pattern' => ['string'],
         'contentEncoding' => ['string'],
         'contentMediaType' => ['string'],
+        // A subschema, but one describing the string's DECODED content rather than the string — so it
+        // is type-bound like its two siblings above, not a shape claim about the value carrying it.
+        'contentSchema' => ['string'],
         'multipleOf' => ['integer', 'number'],
         'maximum' => ['integer', 'number'],
         'exclusiveMaximum' => ['integer', 'number'],
@@ -89,6 +142,9 @@ final class SchemaKeywords
         '$id',
         '$anchor',
         '$defs',
+        // Draft-07's spelling of `$defs`. A store of subschemas says nothing about the value that
+        // carries it, so neither is retracted by a declared shape.
+        'definitions',
         'title',
         'description',
         'default',
@@ -163,6 +219,43 @@ final class SchemaKeywords
         }
 
         return $out;
+    }
+
+    /**
+     * The subschema position `$keyword` occupies, or null where it carries no subschema at all.
+     * One of the `POSITION_*` constants.
+     */
+    public static function positionOf(string $keyword): ?string
+    {
+        return self::SUBSCHEMA_POSITIONS[$keyword] ?? null;
+    }
+
+    /**
+     * Every keyword whose JSON value is an OBJECT — so every keyword at which an empty PHP array is
+     * the empty object rather than the empty list. That is all of them bar the list-valued
+     * applicators, whose `[]` genuinely is a list.
+     *
+     * @return list<string>
+     */
+    public static function objectValued(): array
+    {
+        return array_keys(array_filter(
+            self::SUBSCHEMA_POSITIONS,
+            static fn (string $position): bool => $position !== self::POSITION_SCHEMA_LIST,
+        ));
+    }
+
+    /**
+     * Every keyword sitting at `$position`.
+     *
+     * @return list<string>
+     */
+    public static function at(string $position): array
+    {
+        return array_keys(array_filter(
+            self::SUBSCHEMA_POSITIONS,
+            static fn (string $candidate): bool => $candidate === $position,
+        ));
     }
 
     /**

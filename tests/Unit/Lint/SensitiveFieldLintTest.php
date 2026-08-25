@@ -177,6 +177,20 @@ it('silences a leaked value by pointer via the safelist', function (): void {
     expect(lintFindings(schemaWithExample('AKIAIOSFODNN7EXAMPLE'), $options))->toBe([]);
 });
 
+it('names the hide for each side, since the two are not interchangeable', function (): void {
+    // `#[Hidden]` is output-only, so at a request body it is the attribute that provably leaves the
+    // finding standing — and a property already carrying it is exactly the shape this lint catches.
+    // The help says which attribute removes the field from which side; the value branch names neither,
+    // because an example is replaced rather than hidden.
+    $name = lintFindings(schemaWith('password'))[0];
+    $value = lintFindings(schemaWithExample('-----BEGIN PRIVATE KEY-----MIIB'))[0];
+
+    expect($name->help)->toContain('#[Hidden]')
+        ->and($name->help)->toContain('#[HiddenFromRequest]')
+        ->and($value->help)->not->toContain('#[Hidden]')
+        ->and($value->help)->toContain('placeholder');
+});
+
 it('reads a name that IS a heuristic apart from one that merely contains it', function (string $name, ?string $exact, ?string $contains): void {
     $options = new SensitiveFieldLintOptions;
 

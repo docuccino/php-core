@@ -114,6 +114,24 @@ it('never hands a public API consumer a type marked @internal', function (): voi
     expect($leaks)->toBe([]);
 });
 
+it('names the Laravel adapter nowhere in its source, prose and diagnostics included', function (): void {
+    // The arch rules above read `use` statements, so an adapter class named inside a STRING is invisible
+    // to them — which is how a core diagnostic came to tell its reader to call one. Core states the
+    // action; the framework it is running under is what names the class that performs it.
+    $files = (array) glob(__DIR__.'/../../src/{,*/,*/*/,*/*/*/}*.php', GLOB_BRACE);
+    $named = [];
+
+    foreach ($files as $file) {
+        if (preg_match('/Docuccino\\\\{1,2}Laravel/', (string) file_get_contents((string) $file)) === 1) {
+            $named[] = basename((string) $file);
+        }
+    }
+
+    // A glob that stopped matching would make this a scan of nothing, and pass forever.
+    expect(count($files))->toBeGreaterThanOrEqual(200)
+        ->and($named)->toBe([]);
+});
+
 it('imports no PHPStan namespace but the standalone phpdoc parser', function (): void {
     // `PHPStan\PhpDocParser\` is the small parsing library core's type grammar is built on — production
     // safe, and shipped by every generator in this space. The analyser itself stays banned.

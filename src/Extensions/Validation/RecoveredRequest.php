@@ -9,6 +9,7 @@ use Docuccino\Core\Draft\OperationDraft;
 use Docuccino\Core\Extensions\Context\RouteContext;
 use Docuccino\Core\Extensions\Schema\DeclarationFiles;
 use Docuccino\Core\Extensions\Schema\MockHints;
+use Docuccino\Core\Extensions\Schema\PropertyAnnotations;
 use Docuccino\Core\Extensions\Schema\SchemaIdentity;
 use Docuccino\Core\Patch\Contribution;
 use Docuccino\Core\Support\Fqcn;
@@ -71,9 +72,10 @@ final class RecoveredRequest
 
         $context->recordDependencyFiles(DeclarationFiles::of($sourceClass));
 
-        [$schema, $diagnostics] = MockHints::apply($result->schema, $sourceClass);
+        [$schema, $diagnostics] = PropertyAnnotations::apply($result->schema, $sourceClass);
+        [$schema, $hintDiagnostics] = MockHints::apply($schema, $sourceClass);
 
-        foreach ($diagnostics as $diagnostic) {
+        foreach ([...$diagnostics, ...$hintDiagnostics] as $diagnostic) {
             $context->components->addDiagnostic($diagnostic);
         }
 

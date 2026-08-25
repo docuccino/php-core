@@ -8,6 +8,7 @@ use Docuccino\Core\Contract\ContractIndex;
 use Docuccino\Core\Contract\Pointer;
 use Docuccino\Core\Contract\Refs;
 use Docuccino\Core\Contract\SchemaCheck;
+use Docuccino\Core\Draft\SchemaKeywords;
 use Docuccino\Core\Provenance\ClassNames;
 use Docuccino\Core\Provenance\MessagePaths;
 use Docuccino\Core\Provenance\RootRelativeSourcePathResolver;
@@ -24,7 +25,10 @@ use Throwable;
  *
  * Component schemas are audited once by name rather than once per `$ref` that reaches them, and the
  * walk descends only through JSON Schema keywords — so `content.examples` (a map of Example Objects)
- * and a schema's own `examples` (a list of instances) are never confused for one another.
+ * and a schema's own `examples` (a list of instances) are never confused for one another. WHICH
+ * keywords those are comes from {@see SchemaKeywords}, not from a list here: three hand lists stood
+ * here and their single-subschema one was short by five, so an example inside an `if`/`then`/`else`
+ * went unaudited with the whole suite green.
  *
  * **One site can never cost the audit the rest.** The validator parses each subject as it reaches it,
  * and a schema it will not parse throws rather than failing — so a single unreadable keyword would
@@ -33,13 +37,6 @@ use Throwable;
  */
 final class ExampleAudit
 {
-    /** The keywords whose values are themselves schemas, keyed by how the child sits under them. */
-    private const array SCHEMA_MAPS = ['properties', 'patternProperties', '$defs', 'dependentSchemas'];
-
-    private const array SCHEMA_LISTS = ['prefixItems', 'allOf', 'anyOf', 'oneOf'];
-
-    private const array SCHEMA_SINGLES = ['items', 'not', 'additionalProperties', 'contains', 'propertyNames'];
-
     private readonly SchemaCheck $schema;
 
     private readonly MessagePaths $messagePaths;
@@ -281,7 +278,7 @@ final class ExampleAudit
             }
         }
 
-        foreach (self::SCHEMA_MAPS as $keyword) {
+        foreach (SchemaKeywords::at(SchemaKeywords::POSITION_SCHEMA_MAP) as $keyword) {
             $children = $node[$keyword] ?? null;
             if (! is_array($children)) {
                 continue;
@@ -297,7 +294,7 @@ final class ExampleAudit
             }
         }
 
-        foreach (self::SCHEMA_LISTS as $keyword) {
+        foreach (SchemaKeywords::at(SchemaKeywords::POSITION_SCHEMA_LIST) as $keyword) {
             $children = $node[$keyword] ?? null;
             if (! is_array($children)) {
                 continue;
@@ -310,7 +307,8 @@ final class ExampleAudit
             }
         }
 
-        foreach (self::SCHEMA_SINGLES as $keyword) {
+        // A boolean schema carries no example, so `is_array` is the whole guard a single position needs.
+        foreach (SchemaKeywords::at(SchemaKeywords::POSITION_SCHEMA) as $keyword) {
             if (is_array($node[$keyword] ?? null)) {
                 foreach ($this->inSchema([...$segments, $keyword]) as $site) {
                     $sites[] = $site;

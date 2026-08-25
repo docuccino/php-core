@@ -26,15 +26,41 @@ use Docuccino\Core\Support\Hydrate;
  * introduced, stay breaking on BOTH sides: each is safe for a pure reader, but a schema's
  * `request` flag can under-state its audience (a shared component serves both directions), and a
  * downgrade there green-lights a change that rejects a writer's previously valid value.
+ *
+ * A subschema may be a BOOLEAN, which is where the classification above stops being enough: `true` is
+ * the empty schema and reads as one, but `false` is spelled by no set of keywords, so it is compared as
+ * itself ({@see compareSubschema()}) and arriving is breaking on both sides — the tightest narrowing the
+ * language has (docs/design/uir-and-extensions.md §1 "The empty-object invariant").
+ *
+ * Three positions are descended into: `properties`, `items` and `additionalProperties`, which are the
+ * object and array contract a generated client types against, and which share a polarity — narrowing
+ * the subschema narrows the schema carrying it, so one classification serves all three. The
+ * composition and conditional keywords are deliberately not read here and are their own piece of work:
+ * their polarity DIFFERS by keyword, so reusing this classification would report the direction
+ * backwards. Widening the subschema under `not` narrows the parent; a branch added to `anyOf` widens
+ * where the same branch added to `allOf` narrows; and pairing list members needs an identity rule, or
+ * reordering `oneOf` reads as rewriting every branch. A differ that is silent there is worse than one
+ * that speaks, but not as bad as one that speaks and is wrong.
  */
 final class SchemaComparator
 {
+    /**
+     * Two Schema Objects at one position. `mixed`, because a Schema Object may be a BOOLEAN at every
+     * position OpenAPI puts one — a media type's `schema` as much as an `items` inside it.
+     *
+     * @return list<Change>
+     */
+    public function compare(mixed $old, mixed $new, string $path, string $id, bool $request): array
+    {
+        return $this->compareSubschema($old, $new, $path, $id, $request);
+    }
+
     /**
      * @param  array<string, mixed>  $old
      * @param  array<string, mixed>  $new
      * @return list<Change>
      */
-    public function compare(array $old, array $new, string $path, string $id, bool $request): array
+    private function compareKeywords(array $old, array $new, string $path, string $id, bool $request): array
     {
         $changes = [];
 
@@ -45,8 +71,39 @@ final class SchemaComparator
         $this->compareRequired($old, $new, $path, $id, $request, $changes);
         $this->compareProperties($old, $new, $path, $id, $request, $changes);
         $this->compareItems($old, $new, $path, $id, $request, $changes);
+        $this->compareAdditionalProperties($old, $new, $path, $id, $request, $changes);
 
         return $changes;
+    }
+
+    /**
+     * Two subschemas at one position, either of which may be a boolean. A boolean IS a schema, and at
+     * these positions it is the most load-bearing value there is: `true` is the empty schema and
+     * normalises to one, so every comparison above reads it correctly, while `false` is satisfied by
+     * nothing and is the one value compared as itself.
+     *
+     * An ABSENT subschema reads as the empty one, because that is what it means at all three positions
+     * — no `items` constrains no element, and `additionalProperties` defaults to `true`. So is a value
+     * that is no schema at all, which is the widening the canonicaliser publishes for it.
+     *
+     * @return list<Change>
+     */
+    private function compareSubschema(mixed $old, mixed $new, string $path, string $id, bool $request): array
+    {
+        $wasNothing = $old === false;
+        $isNothing = $new === false;
+
+        if ($wasNothing === $isNothing) {
+            // Two schemas that admit nothing are the same schema, whatever else either says.
+            return $isNothing ? [] : $this->compareKeywords(self::asSchema($old), self::asSchema($new), $path, $id, $request);
+        }
+
+        // Breaking on BOTH sides when it arrives: a request now rejects every value a writer used to
+        // send, and a response can no longer carry the value a reader was reading. Going is the exact
+        // inverse — nothing was valid, now something is — and widens like any dropped constraint.
+        return [$isNothing
+            ? $this->change(ChangeKind::Changed, $id, $path, true, 'schema.always-invalid-added', null, null, null)
+            : $this->change(ChangeKind::Changed, $id, $path, false, 'schema.always-invalid-removed', null, null, null)];
     }
 
     /**
@@ -207,8 +264,23 @@ final class SchemaComparator
 
         foreach ($names as $name) {
             $propPath = $path.'.properties.'.$name;
+            $oldProperty = $oldProps[$name] ?? null;
+            $newProperty = $newProps[$name] ?? null;
 
-            if (! isset($newProps[$name])) {
+            // A property declared `false` is FORBIDDEN, not declared — so it appearing or disappearing
+            // is a constraint changing rather than a property changing, and never the `property-added`
+            // a consumer can start reading. Reported as the narrowing it is, at either end.
+            if ($oldProperty === false || $newProperty === false) {
+                foreach ($this->compareSubschema($oldProperty, $newProperty, $propPath, $id, $request) as $child) {
+                    $changes[] = $child;
+                }
+
+                continue;
+            }
+
+            // `array_key_exists`, not `isset`: a property declared null publishes as the empty schema,
+            // and reading it as a missing member reported the property removed when it was still there.
+            if (! array_key_exists($name, $newProps)) {
                 // Losing a response property breaks whoever read it; on a request the client
                 // just stops sending it.
                 $changes[] = $this->change(ChangeKind::Removed, $id, $propPath, ! $request, 'schema.property-removed', null, null, null);
@@ -216,13 +288,13 @@ final class SchemaComparator
                 continue;
             }
 
-            if (! isset($oldProps[$name])) {
+            if (! array_key_exists($name, $oldProps)) {
                 $changes[] = $this->change(ChangeKind::Added, $id, $propPath, false, 'schema.property-added', null, null, null);
 
                 continue;
             }
 
-            foreach ($this->compare($oldProps[$name], $newProps[$name], $propPath, $id, $request) as $child) {
+            foreach ($this->compareSubschema($oldProperty, $newProperty, $propPath, $id, $request) as $child) {
                 $changes[] = $child;
             }
         }
@@ -235,13 +307,30 @@ final class SchemaComparator
      */
     private function compareItems(array $old, array $new, string $path, string $id, bool $request, array &$changes): void
     {
-        $oldItems = $old['items'] ?? null;
-        $newItems = $new['items'] ?? null;
+        if (! array_key_exists('items', $old) && ! array_key_exists('items', $new)) {
+            return;
+        }
 
-        if (is_array($oldItems) && is_array($newItems)) {
-            foreach ($this->compare(Arr::stringKeyed($oldItems), Arr::stringKeyed($newItems), $path.'.items', $id, $request) as $child) {
-                $changes[] = $child;
-            }
+        foreach ($this->compareSubschema($old['items'] ?? null, $new['items'] ?? null, $path.'.items', $id, $request) as $child) {
+            $changes[] = $child;
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $old
+     * @param  array<string, mixed>  $new
+     * @param  list<Change>  $changes
+     */
+    private function compareAdditionalProperties(array $old, array $new, string $path, string $id, bool $request, array &$changes): void
+    {
+        if (! array_key_exists('additionalProperties', $old) && ! array_key_exists('additionalProperties', $new)) {
+            return;
+        }
+
+        $child = $path.'.additionalProperties';
+
+        foreach ($this->compareSubschema($old['additionalProperties'] ?? null, $new['additionalProperties'] ?? null, $child, $id, $request) as $change) {
+            $changes[] = $change;
         }
     }
 
@@ -275,25 +364,31 @@ final class SchemaComparator
     }
 
     /**
+     * The declared properties, each RAW: what a member is worth is {@see compareSubschema()}'s question,
+     * and a reader that keeps only the members it recognises as maps drops the rest — a comparison that
+     * never sees a member reports it added or removed, which is how a property declared `false` read as
+     * a property that had gone.
+     *
      * @param  array<string, mixed>  $schema
-     * @return array<string, array<string, mixed>>
+     * @return array<string, mixed>
      */
     private static function properties(array $schema): array
     {
-        $properties = $schema['properties'] ?? null;
+        // Through `mapOrNull`, not `is_array`: `properties: {}` — no declared properties, which is what
+        // an object of unknown shape publishes — arrives as a stdClass from any faithful read of an
+        // artifact, and a null here would have every property read as added.
+        return Hydrate::mapOrNull($schema['properties'] ?? null) ?? [];
+    }
 
-        if (! is_array($properties)) {
-            return [];
-        }
-
-        $out = [];
-        foreach ($properties as $name => $value) {
-            if (is_array($value)) {
-                $out[(string) $name] = Arr::stringKeyed($value);
-            }
-        }
-
-        return $out;
+    /**
+     * One subschema as the keyword map the comparisons want. `true`, an absent member and anything that
+     * is no schema at all are the empty schema, which is what each of them means and publishes.
+     *
+     * @return array<string, mixed>
+     */
+    private static function asSchema(mixed $value): array
+    {
+        return Hydrate::mapOrNull($value) ?? [];
     }
 
     /**

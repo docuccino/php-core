@@ -190,7 +190,9 @@ it('finds nothing in a body the recorder already cleaned', function (): void {
 it('leaves an empty object an empty object', function (): void {
     [$body, $pointers] = (new ExampleRedaction)->apply(['meta' => (object) []]);
 
-    expect($body['meta'])->toEqual((object) [])
+    // A walk that rebuilds every map must hand back a `{}` and not the `[]` a PHP array shares with it.
+    expect($body['meta'])->toBeInstanceOf(stdClass::class)
+        ->and(json_encode($body))->toBe('{"meta":{}}')
         ->and($pointers)->toBe([]);
 });
 

@@ -9,6 +9,7 @@ use Docuccino\Core\Canonical\CanonicalJsonSerializer;
 use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
 use Docuccino\Core\Document\UirDocument;
+use Docuccino\Core\Draft\SchemaKeywords;
 use Docuccino\Core\Support\Arr;
 
 /**
@@ -17,21 +18,26 @@ use Docuccino\Core\Support\Arr;
  * already gone and this emitter only has to answer 3.0's own restrictions — chiefly its schema
  * dialect, a draft-4-shaped subset of JSON Schema 2020-12.
  *
- * Document level: `webhooks`, `components.pathItems`, `info.summary` and `mutualTLS` security
- * schemes have no 3.0 home; `info.license.identifier` becomes an SPDX URL when there is no `url`.
- * Schema level: nullable type-arrays become `nullable: true`, `const` becomes a single-value `enum`,
- * schema `examples` become `example`, numeric exclusive bounds become the boolean form, `$ref`
- * siblings hoist into an `allOf` wrapper, and {@see UNSUPPORTED_SCHEMA_KEYWORDS} is dropped.
- * Reference level: a Reference Object's own `summary` or `description` — 3.1's way for a reference to
- * reword what it points at — comes off, since 3.0 defines neither and ignores what stands beside a
- * `$ref` ({@see isReference()} for the positions where that is what a `$ref` means).
+ * What it drops and what it rewrites, member by member, is the reference table on the site's first-export
+ * page; the two internal facts are that an operation documenting no `responses` gains a placeholder
+ * ({@see UNDESCRIBED_RESPONSE}, since 3.0 requires the member 3.1 made optional), and that which members
+ * carry subschemas at all is read off {@see SchemaKeywords} rather than listed again here.
  *
- * Every step that changes what a consumer reads is reported into an {@see EmitReport} naming the JSON
- * pointer it happened at, so a 3.0 export states what it could not carry instead of quietly shipping a
- * weaker contract: Warning where a contract is lost, Info where it survives in another shape. That is why
- * `downlevel.ref-siblings` covers both answers to one question at a `$ref` — a schema's siblings moving
- * into an `allOf` losslessly, and a reference's prose coming off in favour of the wording the component
- * it points at publishes — and the message says which happened.
+ * The walk is positional throughout ({@see member()}): what a node IS follows from where it sits, never
+ * from how its key is spelled. `responses.default` is a Response Object whose key reads like a schema
+ * keyword, a component may be named `example`, and a path item is one because a path-item map holds it.
+ * The rule runs the other way too — a key means something only where it is a fixed field, so a Link
+ * Object's `parameters` and a Security Requirement Object's members are read as what the application
+ * wrote however they are spelled.
+ *
+ * Every step that changes what a consumer reads goes into an {@see EmitReport} at the JSON pointer it
+ * happened at, Warning where a contract is lost and Info where it survives in another shape. Hence one
+ * code, `downlevel.ref-siblings`, for both answers at a `$ref` — a schema's siblings moving into an
+ * `allOf`, and a reference's own prose coming off — with the message saying which.
+ *
+ * @phpstan-type Position self::FIELDS|self::PATH_ITEM|self::NAMES|self::PATH_ITEMS|self::CALLBACKS|self::LINKS|self::LINK|self::SCHEMA|self::SCHEMA_MAP
+ * @phpstan-type Removed array{pathItems: array<string, mixed>, securitySchemes: list<string>, inlining: list<string>}
+ * @phpstan-type PathItemChain array{item: array<string, mixed>|null, chain: list<string>, cycle: bool}
  *
  * @internal
  */
@@ -42,14 +48,22 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
 
     private const string SPDX_BASE = 'https://spdx.org/licenses/';
 
-    /** 2020-12 schema keywords 3.0 cannot express at all: dropped, each with a note naming it. */
+    /**
+     * 2020-12 schema keywords 3.0 cannot express at all: dropped, each with a note naming it. 3.0's
+     * Schema Object is CLOSED — every member bar `^x-` is enumerated — so a keyword absent both from
+     * 3.0 and from this list fails 3.0's own gate whatever value it carries. A guard holds the two
+     * against the vendored meta-schema rather than against anybody's memory of the spec.
+     */
     public const array UNSUPPORTED_SCHEMA_KEYWORDS = [
         '$anchor',
         '$defs',
         '$id',
         '$schema',
+        'additionalItems',
         'contains',
         'contentMediaType',
+        'contentSchema',
+        'definitions',
         'dependentRequired',
         'dependentSchemas',
         'else',
@@ -67,14 +81,94 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
     /** Annotations with no consumer-visible meaning — dropped without a note. */
     public const array SILENT_SCHEMA_KEYWORDS = ['$comment'];
 
-    /** Keywords whose value is another schema. */
-    private const array SUBSCHEMA_KEYWORDS = ['items', 'not', 'additionalProperties'];
+    /**
+     * The keywords 3.0's Schema Object does not define and this emitter answers for anyway, so their
+     * absence from 3.0 is no reason to drop them: {@see downlevelConst()}, {@see downlevelExamples()}
+     * and {@see downlevelContentEncoding()} rewrite the first three, and a lone `$ref` is a Reference
+     * Object rather than a Schema Object ({@see hoistRefSiblings()} moves anything standing beside it).
+     * Stated for the guard that reads 3.0's closed member set — nothing here branches on it.
+     */
+    public const array HANDLED_SCHEMA_KEYWORDS = ['$ref', 'const', 'contentEncoding', 'examples'];
 
-    /** Keywords whose value is a list of schemas. */
-    private const array SUBSCHEMA_LIST_KEYWORDS = ['allOf', 'anyOf', 'oneOf'];
+    /** The one position 3.0 spells with a boolean, exactly as draft-4 did ({@see subschema()}). */
+    private const string BOOLEAN_SCHEMA_KEYWORD = 'additionalProperties';
 
-    /** Members whose value is user data the schema walk must not descend into. */
-    private const array OPAQUE_MEMBERS = ['const', 'default', 'enum', 'example', 'examples'];
+    /**
+     * Fixed fields whose value is an arbitrary JSON value the document carries rather than more document:
+     * a Media Type, Parameter or Header Object's `example`, and an Example Object's `value`. Read only at
+     * a fixed-field position — a response, a header or a component may be NAMED `example`, and that name
+     * describes nothing about what it holds.
+     */
+    private const array USER_DATA_FIELDS = ['example', 'value'];
+
+    /**
+     * A Link Object's two fixed fields whose value is the application's rather than more document: its
+     * `parameters` is `Map[string, Any | {expression}]` and its `requestBody` is `Any`, so a Link's
+     * `parameters.schema` is no schema and its `parameters.paths` holds no path items. This cannot be said
+     * by name alone, which is why a Link has a position of its own: `parameters` at an Operation IS a list
+     * of Parameter Objects and `requestBody` there IS a Request Body Object, both carrying schemas 3.0 has
+     * to convert.
+     */
+    private const array LINK_USER_DATA_FIELDS = ['parameters', 'requestBody'];
+
+    /**
+     * Fixed fields whose value is a map keyed by names the application chose — a status code, a media
+     * type, a component name — and whose members are ordinary objects. `paths`, `callbacks` and `links`
+     * are maps too and are listed separately, because what their members ARE is the thing the walk has to
+     * know.
+     */
+    private const array NAMED_MAP_FIELDS = [
+        'content',
+        'encoding',
+        'examples',
+        'headers',
+        'responses',
+        'scopes',
+        'variables',
+    ];
+
+    /** An OpenAPI object, read by its fixed field names. */
+    private const string FIELDS = 'fields';
+
+    /** A Path Item Object — fixed fields too, but `summary` and `description` are 3.0's own here. */
+    private const string PATH_ITEM = 'path-item';
+
+    /** A map keyed by application-chosen names, whose members are ordinary objects. */
+    private const string NAMES = 'names';
+
+    /** A map whose members are Path Items: `paths`, and a Callback Object's expression map. */
+    private const string PATH_ITEMS = 'path-items';
+
+    /** A map whose members are Callback Objects, each of them a map of Path Items. */
+    private const string CALLBACKS = 'callbacks';
+
+    /** A map whose members are Link Objects: a Response Object's `links`, and `components.links`. */
+    private const string LINKS = 'links';
+
+    /** A Link Object — an ordinary object but for {@see LINK_USER_DATA_FIELDS}. */
+    private const string LINK = 'link';
+
+    /** A Schema Object. */
+    private const string SCHEMA = 'schema';
+
+    /** A map whose members are Schema Objects. */
+    private const string SCHEMA_MAP = 'schema-map';
+
+    /** What a `$ref` to a shared path item starts with; 3.0 has nowhere for the member it names. */
+    private const string SHARED_PATH_ITEM_REF = '#/components/pathItems/';
+
+    /**
+     * The 3.0 Path Item Object's operation members. `query` and `additionalOperations` are 3.2-only and
+     * the 3.1 downlevel has already dropped them by the time this emitter runs.
+     */
+    private const array OPERATION_MEMBERS = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'];
+
+    /**
+     * What the placeholder `default` response says. Addressed to whoever reads the API rather than to
+     * whoever built it: it states what the document does not say and claims nothing about a status, a
+     * media type or a body, since claiming any of those would be inventing a contract.
+     */
+    private const string UNDESCRIBED_RESPONSE = "This operation's responses are not described, so no status code or body is guaranteed.";
 
     public function __construct(
         private OpenApi31DownlevelEmitter $oas31 = new OpenApi31DownlevelEmitter,
@@ -122,10 +216,10 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
 
         $array = $this->downlevelInfo($array, $diagnostics);
         $array = $this->dropWebhooks($array, $diagnostics);
-        $array = $this->downlevelComponents($array, $diagnostics);
+        [$array, $removed] = $this->downlevelComponents($array, $diagnostics);
 
         /** @var array<string, mixed> $walked */
-        $walked = $this->walk($array, '#', $diagnostics);
+        $walked = $this->walk($array, '#', self::FIELDS, $removed, $diagnostics);
 
         return $walked;
     }
@@ -231,41 +325,48 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
     }
 
     /**
+     * The two buckets 3.0 cannot keep, and what the walk owes each: a `$ref` naming a shared path item has
+     * to be answered where it stands ({@see pathItemMap()}), and a requirement naming a dropped scheme has
+     * to go with it.
+     *
      * @param  array<string, mixed>  $array
      * @param  list<Diagnostic>  $diagnostics
-     * @return array<string, mixed>
+     * @return array{array<string, mixed>, Removed}
      */
     private function downlevelComponents(array $array, array &$diagnostics): array
     {
+        $removed = ['pathItems' => [], 'securitySchemes' => [], 'inlining' => []];
+
         if (! is_array($array['components'] ?? null)) {
-            return $array;
+            return [$array, $removed];
         }
 
         $components = Arr::stringKeyed($array['components']);
 
         if (isset($components['pathItems'])) {
+            $shared = $components['pathItems'];
+            $removed['pathItems'] = is_array($shared) ? Arr::stringKeyed($shared) : [];
             unset($components['pathItems']);
+
+            // Info, not a warning: the bucket goes, and nothing a consumer reads goes with it. A path item
+            // something references is inlined at each use site, and one nothing references describes no
+            // path, so 3.0 loses the shared spelling rather than the contract.
             $diagnostics[] = new Diagnostic(
-                severity: Severity::Warning,
+                severity: Severity::Info,
                 code: 'downlevel.component-path-items',
-                message: 'Dropped `components.pathItems` (#/components/pathItems), which OpenAPI 3.0 does not define.',
-                help: 'Inline the path item at each use site if 3.0 consumers need it.',
+                message: 'Dropped `components.pathItems` (#/components/pathItems), which OpenAPI 3.0 does not define; each path item a `$ref` names is inlined where it stands.',
             );
         }
 
-        $dropped = [];
         if (is_array($components['securitySchemes'] ?? null)) {
             [$schemes, $dropped] = $this->downlevelSecuritySchemes(Arr::stringKeyed($components['securitySchemes']), $diagnostics);
             $components['securitySchemes'] = $schemes;
+            $removed['securitySchemes'] = $dropped;
         }
 
         $array['components'] = $components;
 
-        if ($dropped === []) {
-            return $array;
-        }
-
-        return Arr::stringKeyed($this->dropSecurityRequirements($array, $dropped));
+        return [$array, $removed];
     }
 
     /**
@@ -297,63 +398,54 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
     }
 
     /**
-     * Requirements naming a dropped scheme would dangle, so they go with it. An emptied requirement
+     * Requirements naming a dropped scheme would dangle, so the name goes with it. An emptied requirement
      * is removed rather than left as `{}` — that would read as "no security required".
      *
-     * @param  array<mixed, mixed>  $node
+     * @param  array<mixed, mixed>  $security
      * @param  list<string>  $dropped
-     * @return array<mixed, mixed>
+     * @return list<mixed>
      */
-    private function dropSecurityRequirements(array $node, array $dropped): array
+    private static function withoutDroppedSchemes(array $security, array $dropped): array
     {
-        foreach ($node as $key => $value) {
-            $key = (string) $key;
+        $requirements = [];
 
-            if (! is_array($value) || str_starts_with($key, 'x-') || in_array($key, self::OPAQUE_MEMBERS, true)) {
-                continue;
+        foreach ($security as $requirement) {
+            $requirement = is_array($requirement) ? array_diff_key($requirement, array_flip($dropped)) : $requirement;
+
+            if ($requirement !== []) {
+                $requirements[] = $requirement;
             }
-
-            if ($key === 'security') {
-                $requirements = [];
-                foreach ($value as $requirement) {
-                    $requirement = is_array($requirement) ? array_diff_key($requirement, array_flip($dropped)) : $requirement;
-
-                    if ($requirement !== []) {
-                        $requirements[] = $requirement;
-                    }
-                }
-
-                if ($requirements === []) {
-                    unset($node[$key]);
-
-                    continue;
-                }
-
-                $node[$key] = $requirements;
-
-                continue;
-            }
-
-            $node[$key] = $this->dropSecurityRequirements($value, $dropped);
         }
 
-        return $node;
+        return $requirements;
     }
 
     /**
-     * Generic descent looking for schema positions: a `schema` member anywhere, and every entry of
-     * `components.schemas`. User data (`example`, `default`, …) and `x-*` members pass untouched.
+     * Descent over the whole document. `$kind` says what THIS node is and {@see member()} says what each
+     * of its members is, so every decision below — a schema position, a path item, user data to hand back
+     * untouched — follows from position alone.
      *
+     * @param  Position  $kind
+     * @param  Removed  $removed
      * @param  list<Diagnostic>  $diagnostics
      */
-    private function walk(mixed $node, string $pointer, array &$diagnostics): mixed
+    private function walk(mixed $node, string $pointer, string $kind, array $removed, array &$diagnostics): mixed
     {
         if (! is_array($node)) {
             return $node;
         }
 
         $list = array_is_list($node);
-        if (! $list && is_string($node['$ref'] ?? null) && self::isReference($pointer)) {
+
+        if ($kind === self::PATH_ITEMS && ! $list) {
+            return $this->pathItemMap(Arr::stringKeyed($node), $pointer, $removed, $diagnostics);
+        }
+
+        // A Path Item's `summary` and `description` are 3.0 fixed fields of its own, so a `$ref` stands
+        // legally beside them there and nowhere else; everywhere else a `$ref` is a Reference Object.
+        if (! $list && $kind === self::PATH_ITEM) {
+            $node = $this->completeResponses(Arr::stringKeyed($node), $pointer, $diagnostics);
+        } elseif (! $list && is_string($node['$ref'] ?? null)) {
             $node = $this->dropRefProse(Arr::stringKeyed($node), $pointer, $diagnostics);
         }
 
@@ -363,11 +455,31 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
             $key = (string) $key;
             $child = self::pointer($pointer, $key);
 
-            $out[$key] = match (true) {
-                str_starts_with($key, 'x-'), in_array($key, self::OPAQUE_MEMBERS, true) => $value,
-                $key === 'schema' && is_array($value) => $this->schema(Arr::stringKeyed($value), $child, $diagnostics),
-                $key === 'schemas' && $pointer === '#/components' && is_array($value) => $this->schemaMap($value, $child, $diagnostics),
-                default => $this->walk($value, $child, $diagnostics),
+            // `security` is a fixed field of the document and of an Operation Object; a component may be
+            // NAMED `security` without being one, so the parent's kind is what admits it. A Security
+            // Requirement Object is `Map[scheme name, list<scope>]` — application-chosen keys over scope
+            // strings, no document anywhere in it — so the walk stops here whatever a scheme is called.
+            if ($kind === self::FIELDS && $key === 'security' && is_array($value)) {
+                $requirements = $removed['securitySchemes'] === []
+                    ? array_values($value)
+                    : self::withoutDroppedSchemes($value, $removed['securitySchemes']);
+
+                // Emptied by the scheme drop, not written empty: `security: []` is the document saying no
+                // security is required, and it stays ({@see withoutDroppedSchemes()}).
+                if ($requirements !== [] || $removed['securitySchemes'] === []) {
+                    $out[$key] = $requirements;
+                }
+
+                continue;
+            }
+
+            $member = $list ? self::FIELDS : self::member($kind, $key, $pointer);
+
+            $out[$key] = match ($member) {
+                null => $value,
+                self::SCHEMA => $this->subschema($value, $child, $diagnostics),
+                self::SCHEMA_MAP => is_array($value) ? $this->schemaMap($value, $child, $diagnostics) : $value,
+                default => $this->walk($value, $child, $member, $removed, $diagnostics),
             };
         }
 
@@ -375,18 +487,219 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
     }
 
     /**
-     * Whether a `$ref` at this position is a Reference Object — where 3.0 defines nothing beside the
-     * `$ref` — rather than a Path Item, whose `summary` and `description` are 3.0 fixed fields of its own
-     * that a `$ref` stands legally beside. Path items are what `paths` maps, and what the expression map
-     * of a Callbacks Object maps; `components.pathItems` and `webhooks` are gone by the time this runs.
+     * What one member of a node is — the whole positional rule, in one place. Inside a map the application
+     * named, every member is an object whatever its key is spelled; only at a fixed-field position does a
+     * key name anything at all. A Link Object is an ordinary object at that position bar two fields whose
+     * value is the application's ({@see LINK_USER_DATA_FIELDS}).
+     *
+     * @param  Position  $kind
+     * @return Position|null null where the member is user data the walk must not descend into
      */
-    private static function isReference(string $pointer): bool
+    private static function member(string $kind, string $key, string $pointer): ?string
     {
-        $tokens = explode('/', $pointer);
-        $depth = count($tokens);
+        if (str_starts_with($key, 'x-')) {
+            return null;
+        }
 
-        return ! ($depth === 3 && $tokens[1] === 'paths')
-            && ! ($depth >= 4 && $tokens[$depth - 3] === 'callbacks');
+        return match ($kind) {
+            self::NAMES => self::FIELDS,
+            self::PATH_ITEMS => self::PATH_ITEM,
+            self::CALLBACKS => self::PATH_ITEMS,
+            self::LINKS => self::LINK,
+            self::LINK => in_array($key, self::LINK_USER_DATA_FIELDS, true) ? null : self::field($key, $pointer),
+            self::FIELDS, self::PATH_ITEM => self::field($key, $pointer),
+            default => self::FIELDS,
+        };
+    }
+
+    /**
+     * One fixed field of an OpenAPI object. `components` is worth spelling out: its members are the
+     * buckets, so those keys ARE fixed, and three of them hold something other than plain objects.
+     * `pathItems` is not a fourth: the bucket is gone before the walk starts ({@see downlevelComponents()}).
+     *
+     * @return Position|null
+     */
+    private static function field(string $key, string $pointer): ?string
+    {
+        if ($pointer === '#/components') {
+            return match ($key) {
+                'schemas' => self::SCHEMA_MAP,
+                'callbacks' => self::CALLBACKS,
+                'links' => self::LINKS,
+                default => self::NAMES,
+            };
+        }
+
+        return match (true) {
+            in_array($key, self::USER_DATA_FIELDS, true) => null,
+            $key === 'schema' => self::SCHEMA,
+            $key === 'paths' => self::PATH_ITEMS,
+            $key === 'callbacks' => self::CALLBACKS,
+            $key === 'links' => self::LINKS,
+            in_array($key, self::NAMED_MAP_FIELDS, true) => self::NAMES,
+            default => self::FIELDS,
+        };
+    }
+
+    /**
+     * A map of Path Items — `paths`, or the expression map of a Callback Object. 3.0 has no
+     * `components.pathItems` for a `$ref` here to reach, so what one names is inlined where it stands,
+     * which costs a 3.0 reader nothing but the shared spelling. A `$ref` that resolves to nothing has
+     * nothing to inline, and publishing it would point a consumer at a member this emitter removed, so
+     * the path goes with a warning naming both halves.
+     *
+     * @param  array<string, mixed>  $map
+     * @param  Removed  $removed
+     * @param  list<Diagnostic>  $diagnostics
+     * @return array<string, mixed>
+     */
+    private function pathItemMap(array $map, string $pointer, array $removed, array &$diagnostics): array
+    {
+        $out = [];
+
+        foreach ($map as $key => $item) {
+            $key = (string) $key;
+            $child = self::pointer($pointer, $key);
+
+            if (str_starts_with($key, 'x-') || ! is_array($item)) {
+                $out[$key] = $item;
+
+                continue;
+            }
+
+            $item = Arr::stringKeyed($item);
+            $ref = self::sharedPathItem($item);
+
+            if ($ref === null) {
+                $out[$key] = $this->walk($item, $child, self::PATH_ITEM, $removed, $diagnostics);
+
+                continue;
+            }
+
+            $resolved = self::inlinePathItem($item, $removed['pathItems'], $removed['inlining']);
+            // The first hop is the `$ref` that got us here, so a chain is never really empty.
+            $hops = $resolved['chain'] === [] ? [$ref] : $resolved['chain'];
+            $chain = self::chain($hops);
+
+            if ($resolved['item'] === null) {
+                // Two causes, and one of them used to be reported as the other: a chain that closes on
+                // itself never reaches a path item either, but the document DOES define what it names,
+                // so telling the author to define it sends them to fix something that is already there.
+                $diagnostics[] = $resolved['cycle']
+                    ? new Diagnostic(
+                        severity: Severity::Warning,
+                        code: 'downlevel.path-item-unresolved',
+                        message: sprintf(
+                            'Dropped the path item at %s, whose `$ref` chain %s returns to `%s` and so reaches no path item: OpenAPI 3.0 has no `components.pathItems`, and there was nothing to inline in its place.',
+                            $child,
+                            $chain,
+                            $hops[count($hops) - 1],
+                        ),
+                        help: 'Break the cycle: one of those shared path items has to describe the path rather than point at another, so 3.0 consumers keep the endpoint.',
+                    )
+                    : new Diagnostic(
+                        severity: Severity::Warning,
+                        code: 'downlevel.path-item-unresolved',
+                        message: sprintf(
+                            'Dropped the path item at %s, whose `$ref` chain %s ends at a shared path item this document does not define: OpenAPI 3.0 has no `components.pathItems`, and there was nothing to inline in its place.',
+                            $child,
+                            $chain,
+                        ),
+                        help: 'Define the shared path item, or write the path out where it is used, so 3.0 consumers keep the endpoint.',
+                    );
+
+                continue;
+            }
+
+            $item = $resolved['item'];
+
+            $diagnostics[] = new Diagnostic(
+                severity: Severity::Info,
+                code: 'downlevel.path-item-ref',
+                message: sprintf(
+                    'Inlined the shared path item %s at %s; OpenAPI 3.0 has no `components.pathItems` for a path item to reference.',
+                    $chain,
+                    $child,
+                ),
+            );
+
+            // A path item cannot be inlined into itself, so every name on the chain stays OPEN while its
+            // body is walked: a `$ref` back to one from a callback within is the cycle above rather than
+            // a loop. Open, not removed — a sibling path referencing the same name still resolves, and a
+            // name that is merely out of reach would otherwise read as a name nothing defines.
+            $inner = $removed;
+            $inner['inlining'] = [...$inner['inlining'], ...$hops];
+
+            $out[$key] = $this->walk($item, $child, self::PATH_ITEM, $inner, $diagnostics);
+        }
+
+        return $out;
+    }
+
+    /**
+     * The component name a path item's `$ref` reaches for, or null where it points anywhere else — an
+     * external document, or a position 3.0 keeps a `$ref` to.
+     *
+     * @param  array<mixed, mixed>  $item
+     */
+    private static function sharedPathItem(array $item): ?string
+    {
+        $ref = $item['$ref'] ?? null;
+
+        if (! is_string($ref) || ! str_starts_with($ref, self::SHARED_PATH_ITEM_REF)) {
+            return null;
+        }
+
+        $token = substr($ref, strlen(self::SHARED_PATH_ITEM_REF));
+
+        return $token === '' || str_contains($token, '/') ? null : str_replace(['~1', '~0'], ['/', '~'], $token);
+    }
+
+    /**
+     * The path item a `$ref` chain resolves to, with the referencing item's own members kept over the
+     * shared ones — which is how 3.1 reads a `summary` or `description` beside such a `$ref`.
+     *
+     * `chain` is every hop it took, ending at the one that failed, so a caller can name where a chain
+     * stopped rather than where it started. Two ways it stops: a hop names nothing this document
+     * defines, or it names one already open — a name on $inlining, which the caller keeps while it
+     * walks that name's body, or one this chain has followed itself.
+     *
+     * @param  array<string, mixed>  $item
+     * @param  array<string, mixed>  $shared
+     * @param  list<string>  $inlining
+     * @return PathItemChain
+     */
+    private static function inlinePathItem(array $item, array $shared, array $inlining): array
+    {
+        $names = [];
+
+        for ($name = self::sharedPathItem($item); $name !== null; $name = self::sharedPathItem($item)) {
+            if (in_array($name, $names, true) || in_array($name, $inlining, true)) {
+                return ['item' => null, 'chain' => [...$names, $name], 'cycle' => true];
+            }
+
+            $target = $shared[$name] ?? null;
+
+            if (! is_array($target)) {
+                return ['item' => null, 'chain' => [...$names, $name], 'cycle' => false];
+            }
+
+            $names[] = $name;
+            unset($item['$ref']);
+            $item += Arr::stringKeyed($target);
+        }
+
+        return ['item' => $item, 'chain' => $names, 'cycle' => false];
+    }
+
+    /**
+     * A `$ref` chain as a reader sees it: one name, or every hop it took, in the order taken.
+     *
+     * @param  non-empty-list<string>  $names
+     */
+    private static function chain(array $names): string
+    {
+        return '`'.implode('` → `', $names).'`';
     }
 
     /**
@@ -425,6 +738,61 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
         return $node;
     }
 
+    /**
+     * A path item's operations, each carrying the `responses` 3.0 requires. 3.1 and 3.2 accept an
+     * operation with none — a deferred handler, a handler that threw while it was being read — but 3.0
+     * makes the member REQUIRED and its map `minProperties: 1`, so what would otherwise be an invalid
+     * Operation Object gains a `default` response with a description and nothing else: an honest degraded
+     * answer rather than an invented status, media type or schema.
+     *
+     * Repeated inline rather than componentized. There is no body to share, so a `$ref` would cost the
+     * reader a hop and every generated client a type name, both for one sentence saying nothing.
+     *
+     * @param  array<string, mixed>  $item
+     * @param  list<Diagnostic>  $diagnostics
+     * @return array<string, mixed>
+     */
+    private function completeResponses(array $item, string $pointer, array &$diagnostics): array
+    {
+        foreach (self::OPERATION_MEMBERS as $method) {
+            $operation = $item[$method] ?? null;
+
+            if (! is_array($operation) || (array_key_exists('responses', $operation) && $operation['responses'] !== [])) {
+                continue;
+            }
+
+            $operation['responses'] = ['default' => ['description' => self::UNDESCRIBED_RESPONSE]];
+            $item[$method] = $operation;
+
+            $diagnostics[] = new Diagnostic(
+                severity: Severity::Info,
+                code: 'downlevel.empty-responses',
+                message: sprintf(
+                    'Added a placeholder `default` response to the operation at %s, which documents none; OpenAPI 3.0 requires every operation to declare at least one.',
+                    self::pointer($pointer, $method),
+                ),
+                routeSignature: self::routeSignature($pointer, $method),
+                help: 'Name what the endpoint returns — a #[Response] attribute, a return docblock, or an overlay — so the artifact carries the real shape rather than a placeholder.',
+            );
+        }
+
+        return $item;
+    }
+
+    /**
+     * `GET /api/ping` for a path item under `paths`, so a note lands beside that route's other
+     * diagnostics; null for a callback's path item, whose key is a runtime expression rather than a route.
+     * The message names the JSON pointer either way.
+     */
+    private static function routeSignature(string $pointer, string $method): ?string
+    {
+        $tokens = explode('/', $pointer);
+
+        return count($tokens) === 3 && $tokens[1] === 'paths'
+            ? strtoupper($method).' '.str_replace(['~1', '~0'], ['/', '~'], $tokens[2])
+            : null;
+    }
+
     /** A child JSON Pointer, with the RFC 6901 escapes a path template needs. */
     private static function pointer(string $parent, string $token): string
     {
@@ -442,9 +810,54 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
 
         foreach ($map as $name => $schema) {
             $name = (string) $name;
-            $out[$name] = is_array($schema)
-                ? $this->schema(Arr::stringKeyed($schema), self::pointer($pointer, $name), $diagnostics)
-                : $schema;
+            $out[$name] = $this->subschema($schema, self::pointer($pointer, $name), $diagnostics);
+        }
+
+        return $out;
+    }
+
+    /**
+     * ONE subschema, wherever it sits. A boolean is a schema in 2020-12 and 3.0's draft-4-shaped Schema
+     * Object is an object at every position but {@see BOOLEAN_SCHEMA_KEYWORD} — so it is rewritten into
+     * the 3.0 spelling of the SAME constraint rather than passed through invalid or dropped: `true` is
+     * the empty schema, and `false` is the schema nothing satisfies, which 3.0 writes as `{not: {}}`.
+     * Both are exact, which is why dropping the keyword — the other answer available — is the worse one:
+     * `items: false` says the array must be empty, and a document that stops saying so is not vaguer,
+     * it is wrong.
+     *
+     * @param  list<Diagnostic>  $diagnostics
+     */
+    private function subschema(mixed $value, string $pointer, array &$diagnostics): mixed
+    {
+        if (is_bool($value)) {
+            $diagnostics[] = new Diagnostic(
+                severity: Severity::Info,
+                code: 'downlevel.boolean-subschema',
+                message: sprintf(
+                    'Rewrote the boolean schema `%s` at %s as `%s`, which is how OpenAPI 3.0 says the same thing.',
+                    $value ? 'true' : 'false',
+                    $pointer,
+                    $value ? '{}' : '{"not": {}}',
+                ),
+            );
+
+            return $value ? [] : ['not' => []];
+        }
+
+        return is_array($value) ? $this->schema(Arr::stringKeyed($value), $pointer, $diagnostics) : $value;
+    }
+
+    /**
+     * @param  array<mixed, mixed>  $list
+     * @param  list<Diagnostic>  $diagnostics
+     * @return list<mixed>
+     */
+    private function subschemaList(array $list, string $pointer, array &$diagnostics): array
+    {
+        $out = [];
+
+        foreach (array_values($list) as $index => $branch) {
+            $out[] = $this->subschema($branch, $pointer.'/'.$index, $diagnostics);
         }
 
         return $out;
@@ -792,32 +1205,22 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
      */
     private function recurse(array $schema, string $pointer, array &$diagnostics): array
     {
-        foreach (self::SUBSCHEMA_KEYWORDS as $keyword) {
-            $subschema = $schema[$keyword] ?? null;
-            if (is_array($subschema)) {
-                $schema[$keyword] = $this->schema(Arr::stringKeyed($subschema), $pointer.'/'.$keyword, $diagnostics);
-            }
-        }
+        foreach ($schema as $key => $value) {
+            $keyword = (string) $key;
 
-        foreach (self::SUBSCHEMA_LIST_KEYWORDS as $keyword) {
-            $list = $schema[$keyword] ?? null;
-            if (! is_array($list)) {
+            // The one boolean 3.0 takes as written, so nothing to convert and nothing to report.
+            if ($keyword === self::BOOLEAN_SCHEMA_KEYWORD && is_bool($value)) {
                 continue;
             }
 
-            $branches = [];
-            foreach (array_values($list) as $index => $branch) {
-                $branches[] = is_array($branch)
-                    ? $this->schema(Arr::stringKeyed($branch), $pointer.'/'.$keyword.'/'.$index, $diagnostics)
-                    : $branch;
-            }
+            $child = $pointer.'/'.$keyword;
 
-            $schema[$keyword] = $branches;
-        }
-
-        $properties = $schema['properties'] ?? null;
-        if (is_array($properties)) {
-            $schema['properties'] = $this->schemaMap($properties, $pointer.'/properties', $diagnostics);
+            $schema[$keyword] = match (SchemaKeywords::positionOf($keyword)) {
+                SchemaKeywords::POSITION_SCHEMA => $this->subschema($value, $child, $diagnostics),
+                SchemaKeywords::POSITION_SCHEMA_MAP => is_array($value) ? $this->schemaMap($value, $child, $diagnostics) : $value,
+                SchemaKeywords::POSITION_SCHEMA_LIST => is_array($value) ? $this->subschemaList($value, $child, $diagnostics) : $value,
+                default => $value,
+            };
         }
 
         return $schema;

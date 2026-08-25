@@ -56,7 +56,7 @@ final readonly class RecordedExampleAudit implements DocumentTransformer
                     'No response recordings were found in %s, so the document publishes none.',
                     $context->config->recordingsDir() ?? $store->directory,
                 ),
-                help: 'Record some by registering Docuccino\\Laravel\\Testing\\ApiContract::record() in your test bootstrap and running the suite, or drop examples.recordings from the document config.',
+                help: 'Record some by running your suite with the recorder registered, or drop examples.recordings from the document config.',
             ));
 
             return;

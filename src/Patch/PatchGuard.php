@@ -7,6 +7,7 @@ namespace Docuccino\Core\Patch;
 use Docuccino\Core\Provenance\OverrodeEntry;
 use Docuccino\Core\Provenance\Provenance;
 use Docuccino\Core\Provenance\ProvenanceRecord;
+use Docuccino\Core\Support\JsonValue;
 
 /**
  * Field-level precedence arbiter — every scalar write on a draft node goes through one guard, which
@@ -55,7 +56,10 @@ final class PatchGuard
         if (! $by->outranks($state->winner)) {
             // A shadow that discards the value that won anyway is two producers agreeing, and there is
             // nothing there to have lost — recording it would bury the shadows that did lose something.
-            if ($value !== $state->value) {
+            // By value, never `!==`: on an object that is instance identity, and a JSON object a PHP
+            // array cannot hold — `{}`, `{"0":"a","1":"b"}` — is minted fresh per producer, so two of
+            // them writing the same one would each record a phantom entry ({@see JsonValue::same}).
+            if (! JsonValue::same($value, $state->value)) {
                 $state->overrode[] = new OverrodeEntry(
                     field: $field,
                     value: $this->exportValue($value),

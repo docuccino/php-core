@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Docuccino\Core\Contract\ContractIndex;
 use Docuccino\Core\Contract\Examples\ExampleAudit;
+use Docuccino\Core\Draft\SchemaKeywords;
 
 it('passes a document whose examples all satisfy the schema beside them', function (): void {
     $report = (new ExampleAudit(contractIndex()))->run();
@@ -113,6 +114,35 @@ it('audits a component once, however many operations reference it', function ():
         ->and($report->findings[0]->label)->toBe('components/schemas/Invoice');
 });
 
+/**
+ * One case per keyword that carries a subschema, built from the table rather than listed. A hand
+ * dataset stood here naming seven of them, while the audit's own hand list was short by five — so the
+ * dataset agreed with the walk about exactly the keywords both had forgotten.
+ *
+ * @return array<string, array{0: array<string, mixed>, 1: string}>
+ */
+function exampleAuditSubschemaPositions(): array
+{
+    $lying = ['type' => 'string', 'example' => 1];
+    $at = '/components/schemas/Problem/';
+
+    $cases = [];
+
+    foreach (SchemaKeywords::at(SchemaKeywords::POSITION_SCHEMA) as $keyword) {
+        $cases[$keyword] = [[$keyword => $lying], $at.$keyword.'/example'];
+    }
+
+    foreach (SchemaKeywords::at(SchemaKeywords::POSITION_SCHEMA_MAP) as $keyword) {
+        $cases[$keyword] = [[$keyword => ['Inner' => $lying]], $at.$keyword.'/Inner/example'];
+    }
+
+    foreach (SchemaKeywords::at(SchemaKeywords::POSITION_SCHEMA_LIST) as $keyword) {
+        $cases[$keyword] = [[$keyword => [$lying]], $at.$keyword.'/0/example'];
+    }
+
+    return $cases;
+}
+
 it('descends through every schema keyword that holds schemas', function (array $schema, string $pointer): void {
     $report = (new ExampleAudit(contractIndex(static function (array $document) use ($schema): array {
         $document['components']['schemas']['Problem'] = $schema;
@@ -121,36 +151,20 @@ it('descends through every schema keyword that holds schemas', function (array $
     })))->run();
 
     expect(array_map(static fn ($f): string => $f->pointer, $report->findings))->toBe([$pointer]);
-})->with([
-    'properties' => [
-        ['properties' => ['a' => ['type' => 'string', 'example' => 1]]],
-        '/components/schemas/Problem/properties/a/example',
-    ],
-    'items' => [
-        ['type' => 'array', 'items' => ['type' => 'string', 'example' => 1]],
-        '/components/schemas/Problem/items/example',
-    ],
-    'allOf' => [
-        ['allOf' => [['type' => 'string', 'example' => 1]]],
-        '/components/schemas/Problem/allOf/0/example',
-    ],
-    'oneOf' => [
-        ['oneOf' => [['type' => 'string'], ['type' => 'integer', 'example' => 'x']]],
-        '/components/schemas/Problem/oneOf/1/example',
-    ],
-    'additionalProperties' => [
-        ['additionalProperties' => ['type' => 'string', 'example' => 1]],
-        '/components/schemas/Problem/additionalProperties/example',
-    ],
-    '$defs' => [
-        ['$defs' => ['Inner' => ['type' => 'string', 'example' => 1]]],
-        '/components/schemas/Problem/$defs/Inner/example',
-    ],
-    'patternProperties' => [
-        ['patternProperties' => ['^a' => ['type' => 'string', 'example' => 1]]],
-        '/components/schemas/Problem/patternProperties/^a/example',
-    ],
-]);
+})->with(exampleAuditSubschemaPositions());
+
+it('builds a case for every subschema-carrying keyword the table names', function (): void {
+    // Anti-vacuity for the dataset above: a generator that stopped seeing a position would quietly
+    // stop proving the walk reaches it, which is exactly how five went unaudited.
+    $cases = exampleAuditSubschemaPositions();
+
+    expect($cases)->toHaveCount(21)
+        ->and(array_keys($cases))->toContain('if', 'then', 'else', 'unevaluatedItems', 'unevaluatedProperties')
+        ->and(array_keys($cases))->toContain('properties', 'items', 'allOf', '$defs', 'contentSchema', 'definitions')
+        // `dependentRequired` carries string lists rather than schemas, so it is the one positioned
+        // keyword with no case — and the only one.
+        ->and(array_keys($cases))->not->toContain('dependentRequired');
+});
 
 it('never follows a $ref while descending, so a recursive schema terminates', function (): void {
     $report = (new ExampleAudit(contractIndex()))->run();

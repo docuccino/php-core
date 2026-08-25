@@ -21,6 +21,7 @@ use Docuccino\Core\Inference\ThrownException;
 use Docuccino\Core\Inference\TraceReport;
 use Docuccino\Core\Inference\TraceVisitor;
 use Docuccino\Core\Inference\TypeEngine;
+use Docuccino\Core\Provenance\ClassNames;
 use Docuccino\Core\Provenance\Source;
 use Docuccino\Core\Provenance\SourcePathResolver;
 
@@ -304,6 +305,12 @@ final class RouteContext
     /**
      * A provenance {@see Source} pointing at the action itself — the reflection target for
      * attribute-produced contributions, and a fallback for reflection-derived inference.
+     *
+     * BOTH halves are relativised, and the symbol is composed here rather than taken from
+     * {@see ActionRef::symbol()}, because that is an identity key: it falls back to the FILE where the
+     * action has no class, so an ordinary closure route names one absolutely — and this `symbol` is
+     * published, beside the `file` that has always been relativised and into every diagnostic that
+     * carries this source.
      */
     public function actionSource(): ?Source
     {
@@ -312,8 +319,12 @@ final class RouteContext
         }
 
         $line = $this->actionRef->line > 0 ? $this->actionRef->line : null;
+        $file = $this->pathResolver->relative($this->actionRef->file);
+        $class = $this->actionRef->class;
 
-        return new Source($this->pathResolver->relative($this->actionRef->file), $line, $this->actionRef->symbol());
+        $declaring = $class === null ? $file : (new ClassNames($this->pathResolver))->ofName($class);
+
+        return new Source($file, $line, $declaring.'::'.$this->actionRef->method);
     }
 
     /**

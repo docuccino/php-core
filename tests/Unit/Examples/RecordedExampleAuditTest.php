@@ -64,7 +64,10 @@ it('says a configured directory holds nothing yet, once', function (): void {
     expect($findings)->toHaveCount(1)
         ->and($findings[0]->severity)->toBe(Severity::Info)
         ->and($findings[0]->code)->toBe('examples.recordings-empty')
-        ->and($findings[0]->help)->toContain('ApiContract::record()');
+        // The action, not the adapter class that performs it: core says what to do, and the framework
+        // it is running under is what names the recorder.
+        ->and($findings[0]->help)->toContain('running your suite with the recorder registered')
+        ->and($findings[0]->help)->not->toContain('Docuccino\\Laravel');
 });
 
 it('reports a file that is not a recording it can read', function (string $contents): void {

@@ -6,6 +6,7 @@ use Docuccino\Core\Canonical\Canonicalizer;
 use Docuccino\Core\Canonical\CanonicalJsonSerializer;
 use Docuccino\Core\Emit\UirEmitter;
 use Docuccino\Core\Extensions\Schema\EnumDecoration;
+use Docuccino\Core\Support\JsonValue;
 
 /**
  * Reverses the key order of every map (associative array) at every depth while leaving
@@ -234,11 +235,12 @@ it('keeps an object-valued member a JSON object even when its keys are a 0..n se
 });
 
 /**
- * `x-enumDescriptions` is keyed by enum value, so a `0,1,2` backing run makes it a PHP list — which is
- * exactly the shape it comes back as once a fragment has been through JSON. A warm build has to say
- * what a cold one says, bytes and identities both, so the object is restored here.
+ * An `x-*` member is somebody else's vocabulary, and only they know whether a given one is a map or a
+ * list. `x-enumDescriptions` is keyed by enum value and `x-enum-descriptions` is index-parallel, so the
+ * two spell the same prose as an object and as a list — and nothing here decides which: both pass
+ * through in the shape they arrived in.
  */
-it('restores the object shape of an object-valued x-* member a JSON round trip flattened', function (): void {
+it('passes an x-* member through in whatever shape it arrived in', function (): void {
     $doc = [
         'openapi' => '3.2.0',
         'uir' => '1.0.0',
@@ -249,7 +251,7 @@ it('restores the object shape of an object-valued x-* member a JSON round trip f
                 'Tier' => [
                     'type' => 'integer',
                     'enum' => [0, 1],
-                    'x-enumDescriptions' => ['Free.', 'Paid.'],
+                    'x-enumDescriptions' => (object) ['0' => 'Free.', '1' => 'Paid.'],
                     'x-enum-descriptions' => ['Free.', 'Paid.'],
                 ],
             ],
@@ -259,17 +261,17 @@ it('restores the object shape of an object-valued x-* member a JSON round trip f
     $json = (new CanonicalJsonSerializer)->serialize($this->canonicalizer->canonicalize($doc));
 
     expect($json)->toContain('"x-enumDescriptions": {')
-        // The index-parallel array is an array by contract and stays one.
         ->and($json)->toContain('"x-enum-descriptions": [')
         ->and(json_decode($json, true)['components']['schemas']['Tier']['x-enumDescriptions'])
         ->toBe(['0' => 'Free.', '1' => 'Paid.']);
 });
 
 /**
- * The property the restore exists for, stated as bytes: a document built by the producer, and the same
- * document after the trip through JSON a warm fragment takes, emit identically. Nothing here reaches for
- * the extension by name — it starts at {@see EnumDecoration}, whose map for a contiguous zero-based
- * int-backed enum is the shape that motivated the exception in the first place.
+ * Why nothing here has to name that extension: a document built by the producer, and the same document
+ * after the trip through JSON a warm fragment takes, emit identically — because the READER preserves the
+ * shape, not the canonicaliser. Nothing below reaches for the extension by name; it starts at
+ * {@see EnumDecoration}, whose map for a contiguous zero-based int-backed enum is the one shape a PHP
+ * array cannot carry.
  */
 it('emits a producer-built object-valued extension and its JSON round trip as the same bytes', function (): void {
     $decorated = EnumDecoration::apply(
@@ -289,9 +291,38 @@ it('emits a producer-built object-valued extension and its JSON round trip as th
         'paths' => [],
         'components' => ['schemas' => ['Tier' => $decorated]],
     ];
-    // What a warm fragment hands back: assoc arrays, the object flattened to a list on the way.
-    $warm = json_decode((string) json_encode($cold), true, flags: JSON_THROW_ON_ERROR);
 
-    expect($warm['components']['schemas']['Tier']['x-enumDescriptions'])->toBeList()
+    // What a warm fragment hands back — and what a committed artifact hands a diff, and what the viewer
+    // re-emits: one reader, and it keeps the object an object.
+    /** @var array<string, mixed> $warm */
+    $warm = JsonValue::decode((string) json_encode($cold));
+
+    expect($warm['components']['schemas']['Tier']['x-enumDescriptions'])->toBeInstanceOf(stdClass::class)
         ->and($this->emitter->emitArray($warm))->toBe($this->emitter->emitArray($cold));
 });
+
+/**
+ * The claim that let the canonicaliser stop naming `x-enumDescriptions`: every spelling of an
+ * enum-value-keyed map survives the reader. The two a PHP array cannot hold come back as objects; every
+ * other spelling is an assoc array that writes back as the object it was, so there is nothing to restore.
+ */
+it('reads every spelling of an enum-value-keyed map back as an object', function (string $spelling): void {
+    $document = [
+        'openapi' => '3.2.0',
+        'uir' => '1.0.0',
+        'info' => ['version' => '1.0.0', 'title' => 'T'],
+        'paths' => [],
+        'components' => ['schemas' => ['Tier' => ['type' => 'string', 'x-enumDescriptions' => JsonValue::decode($spelling)]]],
+    ];
+
+    $json = (new CanonicalJsonSerializer)->serialize($this->canonicalizer->canonicalize($document));
+
+    expect($json)->toContain('"x-enumDescriptions": '.($spelling === '{}' ? '{}' : '{'))
+        ->and($json)->not->toContain('"x-enumDescriptions": [');
+})->with([
+    'empty' => ['{}'],
+    'zero-based run' => ['{"0":"Free.","1":"Paid."}'],
+    'one-based run' => ['{"1":"Free.","2":"Paid."}'],
+    'sparse indexes' => ['{"0":"Free.","2":"Paid."}'],
+    'words' => ['{"draft":"Not yet.","live":"Serving."}'],
+]);

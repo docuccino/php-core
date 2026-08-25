@@ -14,6 +14,7 @@ use Docuccino\Core\Document\UirDocument;
 use Docuccino\Core\Emit\EmitOptions;
 use Docuccino\Core\Emit\OpenApi32Emitter;
 use Docuccino\Core\Identity\IdentityGenerator;
+use Docuccino\Core\Support\JsonValue;
 
 /**
  * @param  array<string, mixed>  $old
@@ -134,6 +135,38 @@ it('reports no API churn for an emitted artifact against the document it came fr
 
     expect(array_keys(changesByCode($changeset)))->toBe(['page.added'])
         ->and($changeset->pairing)->toBe(Pairing::Structural);
+});
+
+/**
+ * `{}` is the schema an un-inferrable property gets, and a faithful read of a committed artifact hands
+ * it over as the stdClass it was written as. The property walk tested `is_array()`, so it did not
+ * degrade on one — it DROPPED the member, and then reported it added against a document that had it.
+ */
+it('reads a {} property schema as the empty schema it is, not as a missing property', function (): void {
+    $document = static fn (mixed $displayName): array => [
+        'uir' => '1.0.0',
+        'openapi' => '3.2.0',
+        'info' => ['title' => 'T', 'version' => '1.0.0'],
+        'paths' => [],
+        'components' => ['schemas' => ['Widget' => [
+            'type' => 'object',
+            'properties' => ['id' => ['type' => 'integer'], 'display_name' => $displayName],
+        ]]],
+    ];
+
+    // The artifact's spelling on the left, the live draft's on the right. One document, both ways.
+    expect(diffOf($document(JsonValue::decode('{}')), $document([]))->changes)->toBe([])
+        ->and(diffOf($document([]), $document(JsonValue::decode('{}')))->changes)->toBe([]);
+
+    // …and the property is genuinely being compared, not merely skipped on both sides: dropping it is
+    // still a removal, and constraining it is still a change.
+    $without = $document([]);
+    unset($without['components']['schemas']['Widget']['properties']['display_name']);
+
+    expect(array_keys(changesByCode(diffOf($document(JsonValue::decode('{}')), $without))))
+        ->toBe(['schema.property-removed'])
+        ->and(array_keys(changesByCode(diffOf($document(JsonValue::decode('{}')), $document(['type' => 'string'])))))
+        ->not->toBe([]);
 });
 
 it('still finds a real change through structural pairing', function (): void {

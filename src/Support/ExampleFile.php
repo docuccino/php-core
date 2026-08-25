@@ -19,6 +19,10 @@ use Symfony\Component\Yaml\Yaml;
  * as a cache dependency either way — a file that isn't there yet must still rebuild the route when it
  * appears.
  *
+ * The JSON is read by {@see JsonValue}, the same reader an inline `@example` literal goes through, so
+ * the two spellings of one example cannot disagree about it. YAML has no way to say `{}` the parser's
+ * arrays keep apart, so an empty mapping in a `.yaml` file is a list either way.
+ *
  * A file that parses is not yet a file that publishes: YAML spells values JSON has no form for, so the
  * decoded value is held to what the canonical writer will take before it is handed back.
  *
@@ -66,7 +70,7 @@ final readonly class ExampleFile
 
         try {
             $value = $extension === 'json'
-                ? json_decode($contents, true, 512, JSON_THROW_ON_ERROR)
+                ? JsonValue::decode($contents)
                 : Yaml::parse($contents);
         } catch (JsonException|ParseException $exception) {
             return new self($resolved, null, self::INVALID, PlainText::of($exception->getMessage()));

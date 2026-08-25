@@ -6,6 +6,7 @@ namespace Docuccino\Core\Emit;
 
 use Docuccino\Core\Canonical\Canonicalizer;
 use Docuccino\Core\Canonical\CanonicalJsonSerializer;
+use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Document\NodeIdentity;
 use Docuccino\Core\Document\UirDocument;
 
@@ -17,7 +18,8 @@ use Docuccino\Core\Document\UirDocument;
  * live in standard fields.
  *
  * Output flows through the shared canonical serializer, so 3.2 emission is byte-deterministic and,
- * with default options, round-trips losslessly against the x-docuccino-stripped UIR.
+ * with default options, round-trips losslessly against the x-docuccino-stripped UIR — bar the one
+ * member the UIR carries more loosely than any OpenAPI version accepts ({@see ServerVariables}).
  *
  * @internal
  */
@@ -36,17 +38,27 @@ final readonly class OpenApi32Emitter implements ReportingEmitter
 
     public function emit(UirDocument $document, EmitOptions $options = new EmitOptions): string
     {
-        $canonical = $this->canonicalizer->canonicalize($this->toOpenApiArray($document, $options));
-
-        return $options->yaml
-            ? $this->yaml->serialize($canonical)
-            : $this->serializer->serialize($canonical);
+        return $this->emitWithReport($document, $options)->output;
     }
 
-    /** 3.2 is the UIR's own OAS version, so nothing is downlevelled and the report is always empty. */
+    /**
+     * 3.2 is the UIR's own OAS version, so nothing is downlevelled. What it can still report is a
+     * document member no OpenAPI version accepts as written — {@see ServerVariables} is the only one.
+     */
     public function emitWithReport(UirDocument $document, EmitOptions $options = new EmitOptions): EmitResult
     {
-        return new EmitResult($this->emit($document, $options), new EmitReport);
+        /** @var list<Diagnostic> $diagnostics */
+        $diagnostics = [];
+
+        $canonical = $this->canonicalizer->canonicalize(
+            ServerVariables::complete($this->toOpenApiArray($document, $options), $diagnostics),
+        );
+
+        $output = $options->yaml
+            ? $this->yaml->serialize($canonical)
+            : $this->serializer->serialize($canonical);
+
+        return new EmitResult($output, new EmitReport($diagnostics));
     }
 
     /**

@@ -23,7 +23,7 @@ final readonly class Parameter
         public ?string $description = null,
         public ?bool $required = null,
         public ?bool $deprecated = null,
-        public ?SchemaObject $schema = null,
+        public SchemaObject|bool|null $schema = null,
         public ?NodeExtension $docuccino = null,
         public array $rest = [],
     ) {}
@@ -38,7 +38,7 @@ final readonly class Parameter
         $description = Hydrate::stringOrNull($data['description'] ?? null);
         $required = Hydrate::boolOrNull($data['required'] ?? null);
         $deprecated = Hydrate::boolOrNull($data['deprecated'] ?? null);
-        $schema = Hydrate::objectOrNull($data['schema'] ?? null, SchemaObject::fromArray(...));
+        $schema = Hydrate::schemaOrNull($data['schema'] ?? null, SchemaObject::fromArray(...));
         $docuccino = Hydrate::objectOrNull($data['x-docuccino'] ?? null, NodeExtension::fromArray(...));
 
         unset($data['name'], $data['in'], $data['description'], $data['required'], $data['deprecated'], $data['schema'], $data['x-docuccino']);
@@ -87,7 +87,7 @@ final readonly class Parameter
         }
 
         if ($this->schema !== null) {
-            $out['schema'] = $this->schema->toArray();
+            $out['schema'] = is_bool($this->schema) ? $this->schema : $this->schema->toArray();
         }
 
         return $out + $this->rest;

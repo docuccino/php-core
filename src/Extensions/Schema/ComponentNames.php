@@ -70,13 +70,20 @@ final class ComponentNames
      * claim proposing one climbs past it, and the name counts as contested so the move is reported
      * rather than silent.
      *
+     * Every caller collects those names from the KEYS of a published bucket, and PHP hands back an int
+     * for a numeric-string array key — so `'404'` arrives as `404` and every strict comparison against
+     * it silently fails while every `isset()` lookup coerces and succeeds. That split is what let a
+     * pre-published `404` and a claim asking for `404` both publish, the second under the first-come
+     * `_2` tail this class exists to refuse. Normalising here rather than at each call site is the
+     * point: this class owns the guarantee, and a caller cannot lose it by forgetting a cast.
+     *
+     * @param  list<array-key>  $taken
      * @param  array<string, Claim>  $claims
-     * @param  list<string>  $taken
      * @return array{array<string, string>, array<string, list<string>>}
      */
     public static function mint(array $claims, array $taken = []): array
     {
-        return self::settle($claims, $taken);
+        return self::settle($claims, array_map(strval(...), $taken));
     }
 
     /**
@@ -282,9 +289,25 @@ final class ComponentNames
     }
 
     /**
+     * The character class in words, for a diagnostic telling an author why the name they wrote was
+     * refused. It lives beside the pattern it restates for the same reason the pattern lives here and
+     * nowhere else — a second copy of the sentence drifts from the rule exactly as a second copy of
+     * the pattern would. Every site that reports a refused name draws from here;
+     * {@see ComponentRegistry::LEGAL_NAME_HELP} is the same string for an extension author, who
+     * cannot see this class. Internal, as everything on this class is: the extension author's view of
+     * it is the public one.
+     */
+    public const string LEGAL_NAME_HELP = 'A component key is letters, digits, ".", "_" and "-" only. A reason phrase as one word — "NotFound", "TooManyRequests" — is what reads best as a generated client\'s type.';
+
+    /**
      * Whether a name is already one a `$ref` can carry — the question {@see sanitize()} answers by
      * force. The character class lives here and nowhere else: a second copy of it is how a name this
      * class would rewrite comes to be accepted somewhere upstream.
+     *
+     * What it guarantees, beyond the OAS component-key grammar it implements: `/` and `~` cannot
+     * survive it, so a name is safe to concatenate into a `#/components/…` pointer without escaping.
+     * Callers that build a `$ref` by concatenation depend on that and have no guard of their own, so
+     * `ComponentNamesTest` asserts the two together rather than leaving the coupling implicit.
      */
     public static function isLegal(string $name): bool
     {

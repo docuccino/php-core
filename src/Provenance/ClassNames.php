@@ -25,17 +25,29 @@ final readonly class ClassNames
 
     public function of(object $subject): string
     {
-        $class = $subject::class;
-        $declaredAt = strpos($class, "\0");
+        return $this->ofName($subject::class);
+    }
 
-        if ($declaredAt === false) {
-            return $class;
-        }
+    /** The same for a name already in hand — a `class-string` a mapper was handed rather than an instance. */
+    public function ofName(string $class): string
+    {
+        return $this->inText($class);
+    }
 
-        $where = substr($class, $declaredAt + 1);
+    /**
+     * The same rewrite wherever the marker turns up EMBEDDED in a sentence — a `TypeError` naming the
+     * anonymous class it was given, say. {@see MessagePaths} comes here first for that reason: the path
+     * inside the marker is one it would relativise anyway, and the NUL byte and the counter beside it
+     * are not something a path grammar can reach.
+     */
+    public function inText(string $text): string
+    {
+        $rewritten = preg_replace_callback(
+            '/\0(?<file>.+?):(?<line>\d+)\$[0-9a-f]+/',
+            fn (array $match): string => ' declared in '.$this->paths->relative($match['file']).':'.$match['line'],
+            $text,
+        );
 
-        return substr($class, 0, $declaredAt)
-            .' declared in '
-            .$this->paths->relative(preg_replace('/\$[0-9a-f]+$/', '', $where) ?? $where);
+        return $rewritten ?? $text;
     }
 }

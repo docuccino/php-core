@@ -6,6 +6,7 @@ namespace Docuccino\Core\Extensions\Schema;
 
 use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
+use Docuccino\Core\Support\JsonValue;
 use JsonException;
 use stdClass;
 
@@ -25,9 +26,11 @@ use stdClass;
  * most specific first, so `integer|null` reads `7` as a number and `null` as null. Where the schema
  * states no type of its own the text stands exactly as written: a `$ref` or an `anyOf` may well accept
  * it, nothing here can tell, and the example audit that runs over the finished document is what holds
- * that case to its schema. The one literal that gets no reading despite a declared type is an empty
- * JSON object, because `{}` and `[]` decode to the same PHP array and publishing it would contradict
- * the `type: object` beside it at the next step.
+ * that case to its schema.
+ *
+ * An object literal is classified off an OBJECT-decode and then read by {@see JsonValue}, the reader the
+ * `#[Example(file:)]` and recorded-body paths also go through — one literal, one reading, however it
+ * reached the build.
  */
 final class TypedExample
 {
@@ -136,9 +139,8 @@ final class TypedExample
     }
 
     /**
-     * A JSON literal, classified on an object-decode — `{}` and `[]` are the same PHP array once
-     * decoded associatively, so only the object form tells a list from a map — and published on an
-     * associative one, which is the shape every emitter downstream expects.
+     * A JSON literal, classified and published off ONE object-decode — the only decode that tells a list
+     * from a map, so re-decoding associatively to publish would throw that reading away again.
      *
      * @return array{mixed}|null
      */
@@ -151,14 +153,11 @@ final class TypedExample
             return null;
         }
 
-        if ($wantList ? ! is_array($shape) : ! ($shape instanceof stdClass && (array) $shape !== [])) {
+        if ($wantList ? ! is_array($shape) : ! $shape instanceof stdClass) {
             return null;
         }
 
-        /** @var mixed $value */
-        $value = json_decode($text, true);
-
-        return [$value];
+        return [JsonValue::normalize($shape)];
     }
 
     /**

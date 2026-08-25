@@ -15,6 +15,17 @@
     }
   ],
   "paths": {
+    "/shared": {
+      "summary": "A path item OpenAPI 3.0 has no components.pathItems to reference",
+      "get": {
+        "operationId": "shared.get",
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
     "/things": {
       "post": {
         "operationId": "things.store",
@@ -95,10 +106,91 @@
                       "kind": "widget",
                       "schema": "a user value keyed like a schema position"
                     }
+                  },
+                  "two": {
+                    "$ref": "#/components/examples/examples"
+                  }
+                }
+              }
+            },
+            "links": {
+              "audit": {
+                "$ref": "#/components/links/parameters"
+              },
+              "self": {
+                "description": "The thing this request created",
+                "operationId": "things.show",
+                "parameters": {
+                  "path.id": "$response.body#/id",
+                  "schema": "a link parameter keyed like a schema position"
+                },
+                "requestBody": {
+                  "$ref": "#/components/schemas/Thing",
+                  "description": "Kept, because a Link's requestBody is user data",
+                  "summary": "A body member spelled like a reference's own wording"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/example"
+          },
+          "default": {
+            "description": "An unexpected error",
+            "headers": {
+              "default": {
+                "description": "A header named like a fixed field",
+                "schema": {
+                  "type": "string",
+                  "nullable": true
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "minimum": 3,
+                      "exclusiveMinimum": true
+                    },
+                    "kind": {
+                      "enum": [
+                        "error"
+                      ]
+                    }
+                  },
+                  "nullable": true
+                }
+              }
+            }
+          }
+        },
+        "callbacks": {
+          "onCreated": {
+            "{$request.body#/callbackUrl}": {
+              "post": {
+                "operationId": "things.created.callback",
+                "responses": {
+                  "default": {
+                    "description": "This operation's responses are not described, so no status code or body is guaranteed."
                   }
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/things/deferred": {
+      "get": {
+        "operationId": "things.deferred",
+        "summary": "An operation whose responses the build could not recover",
+        "responses": {
+          "default": {
+            "description": "This operation's responses are not described, so no status code or body is guaranteed."
           }
         }
       }
@@ -196,11 +288,65 @@
         }
       }
     },
+    "responses": {
+      "default": {
+        "description": "A component named like a fixed field",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "unavailable"
+              ],
+              "nullable": true
+            }
+          }
+        }
+      },
+      "example": {
+        "description": "A component named like a member whose value is user data",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "exclusiveMinimum": true
+            }
+          }
+        }
+      }
+    },
+    "examples": {
+      "examples": {
+        "summary": "An example in the bucket that really is one",
+        "value": {
+          "kind": "widget"
+        }
+      }
+    },
+    "headers": {
+      "enum": {
+        "description": "A component named like a schema keyword",
+        "schema": {
+          "type": "boolean",
+          "nullable": true
+        }
+      }
+    },
     "securitySchemes": {
       "apiKey": {
         "in": "header",
         "name": "X-Api-Key",
         "type": "apiKey"
+      }
+    },
+    "links": {
+      "parameters": {
+        "description": "A link component named like a fixed field of the object it is",
+        "operationId": "things.audit",
+        "parameters": {
+          "paths": "a link parameter keyed like a path-item map"
+        }
       }
     }
   }

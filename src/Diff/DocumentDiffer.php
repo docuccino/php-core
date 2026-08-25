@@ -111,8 +111,9 @@ final class DocumentDiffer
 
         $components = $document->components;
         if ($components !== null) {
-            foreach ($components->schemas as $schema) {
-                $algo = self::algoVersionOf(self::schemaId($schema->toArray()));
+            foreach ($components->schemaValues() as $schema) {
+                // A boolean schema carries no `x-docuccino`, so it names no algorithm version.
+                $algo = is_array($schema) ? self::algoVersionOf(self::schemaId($schema)) : null;
                 if ($algo !== null) {
                     return $algo;
                 }
@@ -264,8 +265,11 @@ final class DocumentDiffer
 
         $this->scalarChange($changes, ChangeTarget::Parameter, $id, $paramPath, 'parameter.description-changed', 'description', $old->description, $new->description);
 
-        $oldSchema = $old->schema?->toArray() ?? [];
-        $newSchema = $new->schema?->toArray() ?? [];
+        // A boolean travels to the comparator as itself: `false` is the one schema value compared as
+        // itself, and flattening it to `[]` reads "nothing is valid" as "anything is". An ABSENT schema
+        // is the empty one, which is what `true` means anyway.
+        $oldSchema = is_bool($old->schema) ? $old->schema : $old->schema?->toArray() ?? [];
+        $newSchema = is_bool($new->schema) ? $new->schema : $new->schema?->toArray() ?? [];
 
         foreach ($this->schemas->compare($oldSchema, $newSchema, $paramPath.' schema', $id, request: true) as $change) {
             $changes[] = $change;
@@ -685,7 +689,7 @@ final class DocumentDiffer
     }
 
     /**
-     * @return list<array{0: ?string, 1: string, 2: string, 3: array{name: string, schema: array<string, mixed>}}>
+     * @return list<array{0: ?string, 1: string, 2: string, 3: array{name: string, schema: array<string, mixed>|bool}}>
      */
     private function componentSchemaEntries(UirDocument $document, Pairing $pairing): array
     {
@@ -696,10 +700,9 @@ final class DocumentDiffer
             return $out;
         }
 
-        foreach ($components->schemas as $name => $schema) {
-            $data = $schema->toArray();
+        foreach ($components->schemaValues() as $name => $data) {
             $out[] = [
-                $pairing === Pairing::Identity ? self::schemaId($data) : null,
+                $pairing === Pairing::Identity && is_array($data) ? self::schemaId($data) : null,
                 'name:'.$name,
                 self::fingerprint($data),
                 ['name' => (string) $name, 'schema' => $data],
@@ -750,11 +753,14 @@ final class DocumentDiffer
      * dropped: the id is already in the key, and provenance travels with it — a node whose only delta is
      * where it came from is not a changed node.
      *
-     * @param  array<string, mixed>  $node
+     * `mixed`, because a `components.schemas` member may be a BOOLEAN, and `false` has to fingerprint
+     * apart from `true` and from every object — it is a schema, and the one that admits nothing.
      */
-    private static function fingerprint(array $node): string
+    private static function fingerprint(mixed $node): string
     {
-        unset($node['x-docuccino'], $node[NodeIdentity::FLAT_KEY], $node['provenance']);
+        if (is_array($node)) {
+            unset($node['x-docuccino'], $node[NodeIdentity::FLAT_KEY], $node['provenance']);
+        }
 
         return substr(hash('sha256', Json::stable($node)), 0, 16);
     }
@@ -768,8 +774,13 @@ final class DocumentDiffer
     }
 
     /**
+     * The schema each media type declares, RAW: a boolean is a legal Schema Object at this slot and the
+     * one whose meaning a reader cannot afford to lose, so what it is worth is {@see SchemaComparator}'s
+     * question. Keeping only the arrays dropped the member, and a comparison that never sees a member
+     * reports the media type itself removed.
+     *
      * @param  array<string, mixed>|null  $content
-     * @return array<string, array<string, mixed>>
+     * @return array<string, mixed>
      */
     private static function contentSchemas(?array $content): array
     {
@@ -779,8 +790,8 @@ final class DocumentDiffer
 
         $out = [];
         foreach ($content as $media => $entry) {
-            if (is_array($entry) && isset($entry['schema']) && is_array($entry['schema'])) {
-                $out[(string) $media] = Arr::stringKeyed($entry['schema']);
+            if (is_array($entry) && array_key_exists('schema', $entry)) {
+                $out[(string) $media] = is_array($entry['schema']) ? Arr::stringKeyed($entry['schema']) : $entry['schema'];
             }
         }
 
@@ -788,7 +799,7 @@ final class DocumentDiffer
     }
 
     /**
-     * @return array<string, array<string, mixed>>
+     * @return array<string, mixed>
      */
     private static function requestBodySchemas(Operation $op): array
     {

@@ -7,7 +7,7 @@ use Docuccino\Core\Canonical\CanonicalJsonSerializer;
 use Docuccino\Core\Document\UirDocument;
 use Docuccino\Core\Emit\EmitOptions;
 use Docuccino\Core\Emit\OpenApi32Emitter;
-use Symfony\Component\Yaml\Yaml;
+use Docuccino\Core\Tests\Support\EmittedDocument;
 
 beforeEach(function (): void {
     $this->emitter = new OpenApi32Emitter;
@@ -74,8 +74,12 @@ it('emits YAML that carries the same structure as the JSON', function (): void {
     expect($yaml)->toContain('openapi: 3.2.0');
     expect($yaml)->not->toContain('x-docuccino');
 
-    $decoded = Yaml::parse($yaml);
-    $json = json_decode($this->emitter->emit($document), true);
-
-    expect($decoded)->toEqual($json);
+    // Both sides read WITHOUT collapsing map and sequence, which is the one claim this test's name makes
+    // and the one it could not check: `Yaml::parse()` answers a PHP array for a mapping and for a
+    // sequence, and so does an associative `json_decode`, so `paths: {}` against `paths: []` was equal on
+    // both sides at once ({@see EmittedDocument}).
+    expect(EmittedDocument::differences(
+        json_decode($this->emitter->emit($document), flags: JSON_THROW_ON_ERROR),
+        EmittedDocument::parseYaml($yaml),
+    ))->toBe([]);
 });

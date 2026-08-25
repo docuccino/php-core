@@ -58,6 +58,26 @@ it('says in advance what it would refuse, so a reader can name where the value c
     'null' => [null, null],
 ]);
 
+it('refuses a value nested past its depth bound rather than overflowing the stack', function (): void {
+    // Unbounded recursion here is a stack overflow — SIGSEGV with no message, no partial output and
+    // nothing to catch. The bound turns that into the one failure a caller can be told about.
+    $deep = 'leaf';
+    for ($i = 0; $i < 200; $i++) {
+        $deep = ['k' => $deep];
+    }
+
+    expect($this->serializer->rejects($deep))->toBe('Value nests more than 128 levels deep');
+
+    // What the goldens actually reach is 17 levels, so the bound is headroom rather than a ceiling any
+    // real document approaches. A list nests the same way an object does.
+    $wide = 'leaf';
+    for ($i = 0; $i < 120; $i++) {
+        $wide = [$wide];
+    }
+
+    expect($this->serializer->rejects($wide))->toBeNull();
+});
+
 it('encodes floats identically regardless of the serialize_precision ini', function (): void {
     $value = ['a' => 0.1, 'b' => 1.5, 'c' => 1e-7, 'd' => 10.0, 'e' => 1.0 / 3.0];
 

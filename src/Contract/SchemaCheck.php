@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Contract;
 
+use Docuccino\Core\Draft\SchemaKeywords;
 use Opis\JsonSchema\Errors\ErrorFormatter;
 use Opis\JsonSchema\Errors\ValidationError;
 use Opis\JsonSchema\Validator as OpisValidator;
@@ -20,7 +21,7 @@ use stdClass;
  *
  * Subjects arrive from wherever the caller had them — an artifact somebody hand-edited, a draft nothing
  * canonicalised — so an object-valued keyword holding an empty array is repaired on the way in
- * ({@see OBJECT_KEYWORDS}) rather than handed to a validator that would throw over it.
+ * ({@see SchemaKeywords::objectValued()}) rather than handed to a validator that would throw over it.
  *
  * @internal
  */
@@ -32,37 +33,6 @@ final class SchemaCheck
     private const string DIALECT = 'https://json-schema.org/draft/2020-12/schema';
 
     private const string COMPONENT_PREFIX = '#/components/schemas/';
-
-    /**
-     * The schema keywords whose value is a JSON OBJECT — one subschema, or a map of them. An empty PHP
-     * array at one of these IS the empty schema (or the empty map): a document assembled as arrays
-     * cannot tell `{}` from `[]`, and a caller may hand us one that was never canonicalised. Coercing
-     * is not a guess — a list is not a legal value for any of them — and the alternative is a validator
-     * exception where a free-form map would have validated.
-     *
-     * Only where a schema keyword MEANS this, never blanket: the same name inside a `const` or an
-     * `example` is instance data, where a list is exactly what it says ({@see INSTANCE_KEYWORDS}).
-     *
-     * @var list<string>
-     */
-    private const array OBJECT_KEYWORDS = [
-        'additionalItems',
-        'additionalProperties',
-        'contains',
-        'dependentRequired',
-        'dependentSchemas',
-        '$defs',
-        'else',
-        'if',
-        'items',
-        'not',
-        'patternProperties',
-        'properties',
-        'propertyNames',
-        'then',
-        'unevaluatedItems',
-        'unevaluatedProperties',
-    ];
 
     /**
      * The keywords whose value is an INSTANCE rather than a schema. Below one of these every name is
@@ -192,7 +162,11 @@ final class SchemaCheck
         $copy = new stdClass;
 
         foreach (get_object_vars($node) as $member => $value) {
-            if (! $inData && $value === [] && in_array($member, self::OBJECT_KEYWORDS, true)) {
+            // An empty array at an object-valued keyword IS the empty schema (or the empty map), and
+            // coercing is not a guess — a list is not a legal value for any of them. Only where the
+            // keyword MEANS a schema, never blanket: the same name inside a `const` or an `example`
+            // is instance data, where a list is exactly what it says ({@see INSTANCE_KEYWORDS}).
+            if (! $inData && $value === [] && in_array($member, SchemaKeywords::objectValued(), true)) {
                 $copy->{$member} = new stdClass;
 
                 continue;

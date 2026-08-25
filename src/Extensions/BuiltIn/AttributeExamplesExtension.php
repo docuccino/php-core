@@ -13,7 +13,9 @@ use Docuccino\Core\Extensions\Context\RouteContext;
 use Docuccino\Core\Extensions\Contracts\OperationExtension;
 use Docuccino\Core\Extensions\Contracts\OperationPhase;
 use Docuccino\Core\Patch\Contribution;
+use Docuccino\Core\Support\ConfinedPath;
 use Docuccino\Core\Support\ExampleFile;
+use Docuccino\Core\Support\PlainText;
 
 /**
  * Applies `#[Example]`. An unnamed declaration pins the singular `example`; named ones build the
@@ -338,11 +340,15 @@ final class AttributeExamplesExtension implements OperationExtension
             return $read->value;
         }
 
+        // The path is the author's own text on its way into a published message, so it is escaped
+        // before it is quoted — a NUL byte is exactly what gets one refused below.
+        $quoted = PlainText::of($path);
+
         if ($read->error === ExampleFile::ESCAPED) {
             $this->report($context, Severity::Error, 'example-file.escapes-base-path', sprintf(
-                '#[Example] file "%s" escapes the application base path and was rejected.',
-                $path,
-            ), 'Point `file:` at a path inside the application, written relative to its root.');
+                '#[Example] file "%s" does not name a path inside the application and was rejected.',
+                $quoted,
+            ), ConfinedPath::FILE_ESCAPED_HELP);
 
             return null;
         }
@@ -350,15 +356,15 @@ final class AttributeExamplesExtension implements OperationExtension
         if ($read->error === ExampleFile::MISSING) {
             $this->report($context, Severity::Warning, 'example-file.missing', sprintf(
                 '#[Example] file "%s" could not be read; the example was not documented.',
-                $path,
-            ), 'Create the file, or correct the path — it is read relative to the application root.');
+                $quoted,
+            ), ConfinedPath::FILE_MISSING_HELP);
 
             return null;
         }
 
         $this->report($context, Severity::Warning, 'example-file.invalid', sprintf(
             '#[Example] file "%s" did not read as an example (%s); the example was not documented.',
-            $path,
+            $quoted,
             $read->ok() ? 'it decodes to null' : $read->detail,
         ), 'Examples are read from .json, .yaml and .yml files; the file has to parse, and to hold something.');
 

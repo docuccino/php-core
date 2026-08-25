@@ -85,8 +85,9 @@ final class IdentityOverlap
 
         $components = $document->components;
         if ($components !== null) {
-            foreach ($components->schemas as $schema) {
-                $id = NodeIdentity::inArray($schema->toArray());
+            foreach ($components->schemaValues() as $schema) {
+                // A boolean schema has no `x-docuccino` to carry an id, so it overlaps with nothing.
+                $id = is_array($schema) ? NodeIdentity::inArray($schema) : null;
                 if ($id !== null) {
                     $schemas[$id] = true;
                 }

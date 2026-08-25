@@ -35,6 +35,13 @@ final class ResponseDraft
      */
     public const COMPONENT = 'component';
 
+    /**
+     * Frozen beside {@see COMPONENT} when the standing claim names the WHOLE response — every
+     * representation the status answers with — rather than the one body its claimer built. Public for the
+     * same reason: the shared-error hoist reads it back off the finished document.
+     */
+    public const COMPONENT_NAMES_RESPONSE = 'componentNamesResponse';
+
     private readonly PatchGuard $guard;
 
     /**
@@ -91,6 +98,9 @@ final class ResponseDraft
     /** Tracks the winning {@see claimComponentName()} write, so it turns over with the name it belongs to. */
     private bool $componentIsStatusDefault = false;
 
+    /** The other half of that write ({@see COMPONENT_NAMES_RESPONSE}), turning over with it. */
+    private bool $componentNamesResponse = false;
+
     public function __construct(
         public readonly string $status,
     ) {
@@ -124,13 +134,15 @@ final class ResponseDraft
      * above it, so a name a `$ref` cannot point at never reaches the document — whether or not the
      * shared-error hoist, which is the only thing that would have refused it, is switched on.
      *
-     * `$isStatusDefault` is how a producer says the name is the one it derives from the status rather
-     * than one anything named — the difference between "nobody has named this body" and "this body is
-     * called that". Only the writer knows it: a later reader comparing the value against the default
-     * table cannot tell a deliberate `#[ErrorComponent("NotFound")]` on a 404 from the default it
-     * happens to spell.
+     * Both flags are statements only the WRITER can make, which is why they travel with the write rather
+     * than being computed back off the finished response. `$isStatusDefault`: the name is the one derived
+     * from the status, not one anything chose — a reader cannot tell a deliberate
+     * `#[ErrorComponent("NotFound")]` on a 404 from the default it happens to spell. `$namesResponse`:
+     * the name describes every representation the status answers with, which is what lets the hoist take
+     * it to a response stating several ({@see COMPONENT_NAMES_RESPONSE}, and the design doc's
+     * "Shared error components" for why a producer can never say it).
      */
-    public function claimComponentName(?string $name, Contribution $by, bool $isStatusDefault = false): PatchResult
+    public function claimComponentName(?string $name, Contribution $by, bool $isStatusDefault = false, bool $namesResponse = false): PatchResult
     {
         $result = $this->guard->apply(
             self::COMPONENT,
@@ -140,6 +152,7 @@ final class ResponseDraft
 
         if ($result === PatchResult::Accepted) {
             $this->componentIsStatusDefault = $isStatusDefault;
+            $this->componentNamesResponse = $namesResponse;
         }
 
         return $result;
@@ -155,6 +168,12 @@ final class ResponseDraft
     public function componentClaimIsStatusDefault(): bool
     {
         return $this->componentIsStatusDefault;
+    }
+
+    /** Whether the standing claim names the whole response ({@see COMPONENT_NAMES_RESPONSE}). */
+    public function componentClaimNamesResponse(): bool
+    {
+        return $this->componentNamesResponse;
     }
 
     public function content(string $mediaType): SchemaDraft
@@ -183,7 +202,7 @@ final class ResponseDraft
     {
         foreach ($other->guard->contributions() as $field => $write) {
             if ($field === self::COMPONENT) {
-                $this->claimComponentName(Hydrate::stringOrNull($write['value']), $write['by'], $other->componentIsStatusDefault);
+                $this->claimComponentName(Hydrate::stringOrNull($write['value']), $write['by'], $other->componentIsStatusDefault, $other->componentNamesResponse);
 
                 continue;
             }
@@ -447,7 +466,8 @@ final class ResponseDraft
         $docuccino = new NodeExtension(
             id: $this->id,
             provenance: $this->guard->provenance(),
-            rest: $component === null ? [] : ['facts' => [self::COMPONENT => $component]],
+            rest: $component === null ? [] : ['facts' => [self::COMPONENT => $component]
+                + ($this->componentNamesResponse ? [self::COMPONENT_NAMES_RESPONSE => true] : [])],
         );
 
         return new ResponseObject(

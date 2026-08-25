@@ -13,7 +13,7 @@ it('reads an object as an array the drafts and emitters can carry', function ():
 });
 
 it('keeps an empty object an empty object', function (): void {
-    expect(RecordedBody::decode('{"meta":{}}'))->toEqual(['meta' => (object) []]);
+    expect(json_encode(RecordedBody::decode('{"meta":{}}')))->toBe('{"meta":{}}');
 });
 
 it('keeps an object whose member names look like indexes an object', function (): void {

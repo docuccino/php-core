@@ -39,15 +39,15 @@ paths:
             maximum: 100
             minimum: 1
       responses:
-        200:
+        '200':
           description: 'Paginated list of forms'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/PaginatedFormData'
-        401:
+        '401':
           $ref: '#/components/responses/ProblemUnauthenticated'
-        422:
+        '422':
           $ref: '#/components/responses/ProblemValidation'
 components:
   schemas:

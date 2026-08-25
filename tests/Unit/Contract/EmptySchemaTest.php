@@ -7,7 +7,7 @@ use Docuccino\Core\Canonical\CanonicalJsonSerializer;
 use Docuccino\Core\Contract\ContractIndex;
 use Docuccino\Core\Contract\Examples\ExampleAudit;
 use Docuccino\Core\Contract\Examples\ExampleReport;
-use Docuccino\Core\Contract\SchemaCheck;
+use Docuccino\Core\Draft\SchemaKeywords;
 
 /*
  * The empty-array-versus-empty-object hazard, in the one place it decides whether a build lives. A UIR
@@ -19,16 +19,14 @@ use Docuccino\Core\Contract\SchemaCheck;
  */
 
 /**
- * The keywords SchemaCheck repairs, read off its own list rather than copied beside it.
+ * The keywords whose value is a JSON object, read off the one table that says so rather than
+ * copied beside it — the canonicalizer, the structural hash and SchemaCheck all answer to it.
  *
  * @return list<string>
  */
 function objectValuedKeywords(): array
 {
-    /** @var list<string> $keywords */
-    $keywords = (new ReflectionClass(SchemaCheck::class))->getConstant('OBJECT_KEYWORDS');
-
-    return $keywords;
+    return SchemaKeywords::objectValued();
 }
 
 /** One example sitting beside a schema whose `$keyword` holds an empty array. */
@@ -116,14 +114,51 @@ it('still refuses a keyword holding a real list, which no reading makes a schema
  * the artifact can contain — that is the conservative direction — but never less, or a document we
  * published ourselves would be one the validator refuses.
  */
-it('publishes an empty object at every schema keyword the canonicalizer owns, and reads every one back', function (string $keyword): void {
-    $canonical = (new Canonicalizer)->canonicalize([
-        'components' => ['schemas' => ['Subject' => [$keyword => []]]],
-    ]);
+it('publishes an empty object at every object-valued schema keyword, and reads every one back', function (): void {
+    $keywords = objectValuedKeywords();
 
-    expect((new CanonicalJsonSerializer)->serialize($canonical))->toContain('"'.$keyword.'": {}')
-        ->and(objectValuedKeywords())->toContain($keyword);
-})->with([
-    '$defs', 'additionalProperties', 'contains', 'dependentRequired', 'dependentSchemas', 'else', 'if',
-    'items', 'not', 'patternProperties', 'properties', 'propertyNames', 'then',
-]);
+    // Anti-vacuity, and the reason this reads the table instead of listing: a hand dataset here was
+    // short by three keywords for as long as it existed, and every assertion below still passed.
+    expect(count($keywords))->toBeGreaterThan(10)
+        ->and($keywords)->toContain('additionalProperties', 'unevaluatedProperties', 'unevaluatedItems', 'additionalItems')
+        // 2020-12's `contentSchema`, and the draft-07 spellings an overlay may legitimately carry.
+        ->and($keywords)->toContain('contentSchema', 'definitions');
+
+    $serializer = new CanonicalJsonSerializer;
+
+    $published = [];
+    foreach ($keywords as $keyword) {
+        $canonical = (new Canonicalizer)->canonicalize([
+            'components' => ['schemas' => ['Subject' => [$keyword => []]]],
+        ]);
+
+        $published[$keyword] = str_contains($serializer->serialize($canonical), '"'.$keyword.'": {}');
+    }
+
+    expect(array_keys(array_filter($published, static fn (bool $ok): bool => ! $ok)))->toBe([]);
+});
+
+it('orders every object-valued keyword rather than leaving it to sort with the data', function (): void {
+    // The shape is derived, so a keyword missing from the order still publishes an object — this is
+    // the half that goes stale silently, and only a scan of the list itself can see it.
+    $ordered = canonicalizerSchemaOrder();
+
+    // A source scan that stopped matching would turn this into a test of nothing, so a floor and the
+    // names it must find rather than the exact count, which no legitimate addition should have to edit.
+    expect(count($ordered))->toBeGreaterThan(50)
+        ->and($ordered)->toContain('$ref', 'type', 'properties', 'additionalProperties', 'items');
+
+    expect(array_values(array_diff(objectValuedKeywords(), $ordered)))->toBe([]);
+});
+
+it('still publishes an object for a positioned keyword no ordering names', function (): void {
+    // What the guard above protects rather than provides. The order list is the one thing about a
+    // keyword still stated by hand, so the shape does not depend on it: a keyword the table knows
+    // and the ordering has not caught up with loses its place in the member run and nothing else.
+    $residual = new ReflectionMethod(Canonicalizer::class, 'schemaResidual');
+
+    expect($residual->invoke(new Canonicalizer, 'unevaluatedProperties', []))->toBeInstanceOf(stdClass::class)
+        ->and($residual->invoke(new Canonicalizer, 'properties', []))->toBeInstanceOf(stdClass::class)
+        // …and a member with no position at all is still data, sorted like any other unknown.
+        ->and($residual->invoke(new Canonicalizer, 'propertyDependencies', []))->toBe([]);
+});

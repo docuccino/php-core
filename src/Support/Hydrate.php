@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Support;
 
+use stdClass;
+
 /**
  * Hydration helpers for the JSON boundary. Decoded UIR/OAS data is `array<mixed, mixed>`; these
  * coerce members to the narrow shapes the document model expects, dropping anything malformed.
@@ -48,6 +50,25 @@ final class Hydrate
     public static function map(mixed $value): array
     {
         return is_array($value) ? Arr::stringKeyed($value) : [];
+    }
+
+    /**
+     * A STRUCTURAL map however it was spelled — an array, or the {@see stdClass} that `{}` and an
+     * index-keyed object arrive as. Null when the value is not a map at all.
+     *
+     * A reader at such a position that tests `is_array()` alone does not degrade, it DROPS the node,
+     * after which a comparison that never sees a member reports it added. Why the two spellings exist
+     * to be reconciled: docs/design/uir-and-extensions.md §1 "The empty-object invariant".
+     *
+     * @return array<string, mixed>|null
+     */
+    public static function mapOrNull(mixed $value): ?array
+    {
+        if ($value instanceof stdClass) {
+            return Arr::stringKeyed(get_object_vars($value));
+        }
+
+        return is_array($value) ? Arr::stringKeyed($value) : null;
     }
 
     /**
@@ -236,5 +257,58 @@ final class Hydrate
     public static function objectOrNull(mixed $value, callable $factory): mixed
     {
         return is_array($value) ? $factory(Arr::stringKeyed($value)) : null;
+    }
+
+    /**
+     * The value at a SCHEMA SLOT — where a Schema Object hangs off something that is not one: a
+     * parameter's `schema`, a header's, a media type's, every `components.schemas` member. A boolean is a
+     * schema at such a slot exactly as it is at a subschema position, and the load-bearing value there,
+     * so it survives as itself; anything that is no schema at all widens to the empty one, which is
+     * vague and true where dropping the slot publishes a document that says something else.
+     *
+     * {@see objectOrNull()} cannot serve here: it answers `null` for all three, and at a schema slot
+     * that is not a degradation but a LOST MEMBER — `schema: false` ("no value is valid") republished
+     * with no `schema` at all ("any value is"). Design doc §1 "The empty-object invariant" for why the
+     * position rather than the value answers.
+     *
+     * @template T
+     *
+     * @param  callable(array<string, mixed>): T  $factory
+     * @return T|bool|null
+     */
+    public static function schemaOrNull(mixed $value, callable $factory): mixed
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        return is_bool($value) ? $value : $factory(self::mapOrNull($value) ?? []);
+    }
+
+    /**
+     * A name → Schema Object map, each member read as a schema slot {@see schemaOrNull()}.
+     *
+     * Nothing is dropped, not even a member that is no schema at all: these members are what `$ref`
+     * names, so a vanished one leaves every reference to it dangling — a document every validator
+     * accepts and every client generator breaks on. Widening keeps the name and tells the truth about
+     * it. (A schema slot on an OBJECT may still be absent, since nothing can point at it.)
+     *
+     * @template T
+     *
+     * @param  callable(array<string, mixed>): T  $factory
+     * @return array<string, T|bool>
+     */
+    public static function schemaMap(mixed $value, callable $factory): array
+    {
+        if (! is_array($value)) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($value as $key => $item) {
+            $out[(string) $key] = is_bool($item) ? $item : $factory(self::mapOrNull($item) ?? []);
+        }
+
+        return $out;
     }
 }

@@ -7,7 +7,9 @@ namespace Docuccino\Core\Extensions\BuiltIn;
 use Docuccino\Core\Extensions\Contracts\SchemaContext;
 use Docuccino\Core\Extensions\Contracts\TypeToSchema;
 use Docuccino\Core\Extensions\Schema\ComponentHoist;
+use Docuccino\Core\Extensions\Schema\DocumentedExamples;
 use Docuccino\Core\Extensions\Schema\MockHints;
+use Docuccino\Core\Extensions\Schema\PropertyAnnotations;
 use Docuccino\Core\Extensions\Schema\SchemaIdentity;
 use Docuccino\Core\Extensions\Schema\SchemaResult;
 use Docuccino\Core\Inference\ClassRef;
@@ -82,6 +84,11 @@ final class ClassTypeToSchema implements TypeToSchema
             if ($required !== []) {
                 $object['required'] = $required;
             }
+
+            // Docblock prose (30) then the attributes (40) — the same order the `description` above is
+            // written in, so an author who writes both gets the attribute.
+            $object = DocumentedExamples::applyTo($context, $object, $fqcn, $metadata->properties);
+            $object = PropertyAnnotations::applyTo($context, $object, $fqcn);
 
             return MockHints::applyTo($context, $object, $fqcn);
         });

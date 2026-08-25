@@ -42,3 +42,20 @@ it('rejects a symlink that tunnels out of the base', function (): void {
     @unlink($outside);
     @rmdir($base);
 });
+
+it('refuses a path no filesystem can hold rather than raising on it', function (string $case, ?string $resolved): void {
+    // PHP lets an author write a NUL byte by accident — a stray escape in a double-quoted attribute
+    // argument — and every function that would answer for one (realpath, file_get_contents, is_dir)
+    // raises a ValueError instead. A security control whose failure mode is a throw costs its caller
+    // more than the thing it guarded: the nearest catch above the readers is per-route, so one stray
+    // escape took the whole route and reported a PHP-internals string naming no attribute and no
+    // remedy. It is refused here, as the same outcome a traversal gets, and nothing is read either way.
+    expect($resolved)->toBeNull();
+})->with([
+    ['a NUL in the relative path', ConfinedPath::resolve('/app', "docs/a.json\0.txt")],
+    ['a NUL alone', ConfinedPath::resolve('/app', "\0")],
+    ['a NUL in the base', ConfinedPath::resolve("/app\0", 'docs/a.json')],
+    ['a NUL in a relative configured dir', ConfinedPath::configuredDir('/app', "content\0/x")],
+    // The absolute branch takes a configured directory verbatim, so it never reached resolve() at all.
+    ['a NUL in an absolute configured dir', ConfinedPath::configuredDir('/app', "/srv/content\0/x")],
+]);

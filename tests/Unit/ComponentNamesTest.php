@@ -142,6 +142,28 @@ it('sanitizes a name down to the characters a $ref may carry', function (string 
     'nothing left is still a name' => ['<>', 'Schema'],
 ]);
 
+it('refuses every character a $ref could not carry into a JSON pointer', function (string $hostile): void {
+    // `SharedErrorResponses` and the registry build a `$ref` by concatenating a name onto
+    // `#/components/schemas/` with no escaping, which is safe ONLY because `/` and `~` — the two
+    // characters RFC 6901 gives meaning to — cannot survive sanitize(). That coupling is load-bearing
+    // and otherwise unguarded, so it is asserted here beside the charset it depends on.
+    expect(ComponentNames::isLegal($hostile))->toBeFalse();
+})->with([
+    'pointer separator' => ['a/b'],
+    'pointer escape' => ['a~b'],
+    'both at once' => ['~0/~1'],
+    'empty' => [''],
+    'whitespace' => ['a b'],
+    'only whitespace' => ['   '],
+    'fragment' => ['a#b'],
+    'percent' => ['a%2Fb'],
+    'quote' => ['a"b'],
+    'newline' => ["a\nb"],
+    'nul' => ["a\0b"],
+    'non-ascii' => ['Café'],
+    'emoji' => ['📄'],
+]);
+
 it('rewrites references through a rename map, and only in the bucket named', function (): void {
     $node = [
         'a' => ['$ref' => '#/components/schemas/Old'],
@@ -163,4 +185,44 @@ it('rewrites references through a rename map, and only in the bucket named', fun
 it('rekeys a bucket through a rename map, leaving unnamed entries where they are', function (): void {
     expect(ComponentNames::rekey(['Old' => 1, 'Kept' => 2], ['Old' => 'New']))->toBe(['New' => 1, 'Kept' => 2])
         ->and(ComponentNames::rekey(['Old' => 1], []))->toBe(['Old' => 1]);
+});
+
+/*
+ * A component name PHP reads as a number. Every caller collects `$taken` from the keys of a published
+ * bucket, and `foreach ($bucket as $name => …)` hands back `int(404)` for the key `'404'` — so the
+ * ladder's strict `in_array` missed the incumbent while `award()`'s `isset()` coerced and hit it. The
+ * claim never climbed, never counted as contested, and took the first-come `_2` tail instead: `404` and
+ * `404_2` published side by side, silently. These pin a numeric name behaving like any other.
+ */
+
+it('sends a claim up the ladder when a numeric name is already taken, just as it does a worded one', function (): void {
+    // The keys a caller actually collects: PHP has already turned '404' into int(404) by this point.
+    $taken = array_keys(['404' => ['type' => 'object']]);
+
+    [$names, $contests] = ComponentNames::mint(['body' => claim('404', null, '{"type":"string"}')], $taken);
+
+    expect($names['body'])->not->toBe('404_2')
+        ->and($names['body'])->toStartWith('404_')
+        ->and($contests)->toHaveKey('404');
+});
+
+it('reads an int-keyed taken list and a string-keyed one identically', function (): void {
+    // Normalising is the boundary's job, so the two spellings a caller might hand it agree. If they
+    // ever disagree again, the guard and the minter have gone back to reading different types.
+    $claims = ['body' => claim('404', null, '{"type":"string"}')];
+
+    expect(ComponentNames::mint($claims, [404]))->toEqual(ComponentNames::mint($claims, ['404']));
+});
+
+it('never mints a first-come counter for a numeric name, whatever contests it', function (): void {
+    // `Foo_2` is the anti-pattern: deterministic per build, and it still reassigns meaning when an
+    // unrelated route arrives. A numeric base reaches the same content-derived rung a worded one does.
+    [$names] = ComponentNames::mint([
+        'a' => claim('404', null, '{"type":"string"}'),
+        'b' => claim('404', null, '{"type":"integer"}'),
+    ], array_keys(['404' => ['type' => 'object']]));
+
+    expect(array_values($names))->not->toContain('404')
+        ->and(array_values($names))->not->toContain('404_2')
+        ->and(array_unique(array_values($names)))->toHaveCount(2);
 });

@@ -15,7 +15,7 @@ use Docuccino\Core\Support\Hydrate;
 final readonly class Components
 {
     /**
-     * @param  array<string, SchemaObject>  $schemas
+     * @param  array<string, SchemaObject|bool>  $schemas
      * @param  array<string, ResponseObject>  $responses
      * @param  array<string, Parameter>  $parameters
      * @param  array<string, mixed>  $rest
@@ -32,7 +32,7 @@ final readonly class Components
      */
     public static function fromArray(array $data): self
     {
-        $schemas = Hydrate::mapOf($data['schemas'] ?? null, SchemaObject::fromArray(...));
+        $schemas = Hydrate::schemaMap($data['schemas'] ?? null, SchemaObject::fromArray(...));
         $responses = Hydrate::mapOf($data['responses'] ?? null, ResponseObject::fromArray(...));
         $parameters = Hydrate::mapOf($data['parameters'] ?? null, Parameter::fromArray(...));
 
@@ -56,7 +56,7 @@ final readonly class Components
         if ($this->schemas !== []) {
             $schemas = [];
             foreach ($this->schemas as $name => $schema) {
-                $schemas[$name] = $schema->toArray();
+                $schemas[$name] = is_bool($schema) ? $schema : $schema->toArray();
             }
             $out['schemas'] = $schemas;
         }
@@ -78,6 +78,25 @@ final readonly class Components
         }
 
         return $out + $this->rest;
+    }
+
+    /**
+     * The schemas as written, a boolean member as itself. Readers that walk this bucket want the Schema
+     * Object rather than the wrapper, and a boolean IS one here — so they each say what a boolean means
+     * to them (it carries no identity, and it references nothing) instead of a shared answer deciding
+     * for them.
+     *
+     * @return array<string, array<string, mixed>|bool>
+     */
+    public function schemaValues(): array
+    {
+        $out = [];
+
+        foreach ($this->schemas as $name => $schema) {
+            $out[$name] = is_bool($schema) ? $schema : $schema->toArray();
+        }
+
+        return $out;
     }
 
     public function isEmpty(): bool

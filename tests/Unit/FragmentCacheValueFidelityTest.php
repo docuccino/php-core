@@ -8,9 +8,10 @@ use Docuccino\Core\Pipeline\OperationFragment;
 
 /**
  * A restored fragment has to hold the values the build put into it, and JSON is the storage. PHP's
- * defaults are lossy about floats in two ways: a whole one loses its fraction and reads back an int,
- * and the rest are formatted to whatever `serialize_precision` the host is set to. Either way a warm
- * build says something a cold one does not.
+ * defaults are lossy in two directions. On the way OUT a whole float loses its fraction and reads back
+ * an int, and the rest are formatted to whatever `serialize_precision` the host is set to. On the way
+ * IN an associative decode collapses `{}` to `[]`, and the map an author keyed `"0"`, `"1"` to a list.
+ * Either way a warm build says something a cold one does not.
  */
 
 /**
@@ -72,3 +73,27 @@ it('restores a float whatever serialize_precision the host is set to', function 
     // document a different number from the cold one.
     'nine significant digits' => ['9'],
 ]);
+
+it('restores an empty object as an object, not as the empty list it shares a PHP value with', function (): void {
+    // `{}` is what a free-form map's example most often is, and an associative decode read it back as
+    // `[]`: the warm build published `"example": []` beside `type: object`, hashed the document off
+    // those bytes, and had the example lint report a mismatch the cold build never saw.
+    $restored = fidelityRoundTrip(['type' => 'object', 'example' => new stdClass]);
+
+    expect($restored['example'])->toBeInstanceOf(stdClass::class)
+        ->and(json_encode($restored))->toBe('{"type":"object","example":{}}');
+});
+
+it('restores an object whose member names look like indexes as an object', function (): void {
+    // The same collapse one step further on: PHP re-reads `"0"` as the integer 0, so an id-keyed map
+    // came back as a list — which is what `x-enumDescriptions` is restored at canonicalisation for.
+    $restored = fidelityRoundTrip(['example' => (object) ['0' => 'draft', '1' => 'published']]);
+
+    expect(json_encode($restored))->toBe('{"example":{"0":"draft","1":"published"}}');
+});
+
+it('restores a nested empty object, since an example is a whole value and not just its top level', function (): void {
+    $restored = fidelityRoundTrip(['example' => ['meta' => new stdClass, 'tags' => []]]);
+
+    expect(json_encode($restored))->toBe('{"example":{"meta":{},"tags":[]}}');
+});

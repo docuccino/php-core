@@ -46,8 +46,10 @@ final readonly class SchemaReachability
     public static function schemaArrays(UirDocument $document): array
     {
         $schemas = [];
-        foreach ($document->components->schemas ?? [] as $name => $schema) {
-            $schemas[(string) $name] = $schema->toArray();
+        foreach ($document->components?->schemaValues() ?? [] as $name => $schema) {
+            // A boolean schema holds no strings, so it reaches nothing — and it keeps its NAME here, or a
+            // `$ref` pointing at it would read as naming a schema this document does not declare.
+            $schemas[(string) $name] = is_array($schema) ? $schema : [];
         }
 
         return $schemas;

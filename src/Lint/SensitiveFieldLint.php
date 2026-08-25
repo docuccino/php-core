@@ -59,7 +59,7 @@ final class SensitiveFieldLint implements DocumentTransformer
                     : sprintf('Property "%s" (%s) looks like %s and may leak sensitive data.', $finding['name'], $finding['pointer'], $finding['label']),
                 help: $finding['value']
                     ? 'Replace the example with a placeholder or, if it is genuinely public, safelist the pointer under lint.leakage.allow.'
-                    : 'Hide it (e.g. #[Hidden] / omit it from the resource) or, if intentional, safelist it under lint.leakage.allow.',
+                    : 'Take the field out of the shape that publishes it — #[Hidden] removes a property from response schemas, #[HiddenFromRequest] from a request body — or, if intentional, safelist it under lint.leakage.allow.',
             ));
         }
     }

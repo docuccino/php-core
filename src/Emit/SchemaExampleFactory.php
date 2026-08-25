@@ -6,6 +6,7 @@ namespace Docuccino\Core\Emit;
 
 use Docuccino\Core\Support\Arr;
 use Docuccino\Core\Support\FormatSamples;
+use Docuccino\Core\Support\JsonValue;
 use stdClass;
 
 /**
@@ -17,8 +18,9 @@ use stdClass;
  * because JSON object order is not an authored fact, while `enum` and `oneOf` pick their first entry,
  * because a list's order IS authored and every other reader of the document shows the same branch.
  *
- * An empty object comes back as {@see stdClass}, not `[]`. The value is serialised into a JSON string
- * for the collection, and an empty PHP array would render as `[]` — a body that lies about its shape.
+ * An empty object comes back as a {@see stdClass}, not `[]` ({@see JsonValue} for that convention). The
+ * value is serialised into a JSON string for the collection, and an empty PHP array would render as
+ * `[]` — a body that lies about its shape.
  *
  * @internal
  */

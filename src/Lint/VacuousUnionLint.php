@@ -13,10 +13,10 @@ use Docuccino\Core\Extensions\Ordering\ExtensionOrder;
 use Docuccino\Core\Extensions\Ordering\Priorities;
 
 /**
- * Flags an `anyOf` whose empty `{}` branch accepts anything, so the typed branches beside it add no
- * constraint — an honest widening that quietly erased the shape a consumer would otherwise validate
- * against. The shape itself is kept: the typed branch still tells a reader what the value usually is,
- * and dropping it would lose that.
+ * Flags an `anyOf` whose unconstrained branch — `{}`, or the `true` that means the same thing —
+ * accepts anything, so the typed branches beside it add no constraint: an honest widening that quietly
+ * erased the shape a consumer would otherwise validate against. The shape itself is kept: the typed
+ * branch still tells a reader what the value usually is, and dropping it would lose that.
  *
  * Diagnostics only, and pinned to run last so what it reads is what will be emitted.
  *
@@ -52,8 +52,8 @@ final class VacuousUnionLint implements DocumentTransformer
                     code: 'lint.vacuous-union',
                     message: sprintf(
                         $union['allEmpty']
-                            ? '%s publishes an anyOf (at %s) whose every branch is an unconstrained {}, so the value validates as anything.'
-                            : '%s publishes an anyOf (at %s) with an unconstrained {} branch, so its typed branches add no constraint — the value validates as anything.',
+                            ? '%s publishes an anyOf (at %s) whose every branch is unconstrained, so the value validates as anything.'
+                            : '%s publishes an anyOf (at %s) with an unconstrained branch, so its typed branches add no constraint — the value validates as anything.',
                         $operation->signature,
                         $union['pointer'],
                     ),
@@ -82,8 +82,7 @@ final class VacuousUnionLint implements DocumentTransformer
 
         $anyOf = $node['anyOf'] ?? null;
         if (is_array($anyOf) && array_is_list($anyOf) && count($anyOf) > 1) {
-            $branches = array_filter($anyOf, 'is_array');
-            $empty = array_filter($branches, self::isUnconstrained(...));
+            $empty = array_filter($anyOf, self::isUnconstrained(...));
 
             if ($empty !== []) {
                 $found[] = ['pointer' => $pointer.'/anyOf', 'allEmpty' => count($empty) === count($anyOf)];
@@ -109,10 +108,20 @@ final class VacuousUnionLint implements DocumentTransformer
      * — deliberately counts as CONSTRAINED: it says something a reader acts on, and treating it as
      * empty would spend the channel on unions nobody widened.
      *
-     * @param  array<array-key, mixed>  $branch
+     * `true` is the empty schema spelled short, so it is the most vacuous branch there is — reading
+     * only the object spelling would let `anyOf: [true, {type: string}]` past unflagged. `false` is
+     * its opposite and constrains everything, which is never what this rule is about.
      */
-    private static function isUnconstrained(array $branch): bool
+    private static function isUnconstrained(mixed $branch): bool
     {
+        if (is_bool($branch)) {
+            return $branch;
+        }
+
+        if (! is_array($branch)) {
+            return false;
+        }
+
         foreach (array_keys($branch) as $key) {
             if (! str_starts_with((string) $key, 'x-')) {
                 return false;

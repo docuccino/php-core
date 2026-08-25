@@ -182,7 +182,8 @@ it('honours #[SchemaName] and #[SchemaId] on a plain class the fallback mapper h
 
 it('honours #[Hidden] on a plain class the fallback mapper handles', function (): void {
     // A plain DTO reaches no integration mapper, so the fallback is the only place `#[Hidden]` can be
-    // read — and the lint that tells authors to "Hide it (e.g. #[Hidden])" points them straight at it.
+    // read — and the leakage lint, which tells authors `#[Hidden]` removes a property from a response
+    // schema, points them straight at it.
     // Both forms: the property's own attribute, and the class-level deny-list naming a property.
     $fqcn = HiddenPropertyNode::class;
     $engine = new StubTypeEngine(classes: [

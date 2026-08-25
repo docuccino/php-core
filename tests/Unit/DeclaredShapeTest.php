@@ -211,22 +211,131 @@ it('leaves a keyword it cannot read exactly where it found it', function (string
         ->toBe(['type' => 'object', $keyword => true]);
 })->with([
     'a vendor extension' => ['x-internal'],
-    'a keyword from a later vocabulary' => ['unevaluatedProperties'],
+    'a keyword from a later vocabulary' => ['propertyDependencies'],
 ]);
 
 it('classifies every schema keyword the canonicalizer orders', function (): void {
     // The classification is the thing that goes stale — a hand list already did — so it is checked
     // against the canonicalizer's own schema keyword set rather than against a second copy of itself.
-    $source = (string) file_get_contents(__DIR__.'/../../src/Canonical/Canonicalizer.php');
-    $body = preg_split('/private function canonicalizeSchema/', $source)[1] ?? '';
-    $body = preg_split('/\n    \}/', $body)[0] ?? '';
+    $keywords = canonicalizerSchemaOrder();
 
-    preg_match_all("/'([^']+)' =>/", $body, $matches);
-    $keywords = $matches[1];
-
-    // A scan that stopped matching would turn this into a test of nothing.
-    expect($keywords)->toHaveCount(52)
-        ->toContain('$ref', 'type', 'properties', 'additionalProperties', 'items', 'description');
+    // A source scan that stopped matching would turn this into a test of nothing, so a floor and the
+    // names it must find. Not the exact count: adding a keyword to the order is not what this guards.
+    expect($keywords)->toHaveCount(count(array_unique($keywords)))
+        ->and(count($keywords))->toBeGreaterThan(50)
+        ->and($keywords)->toContain('$ref', 'type', 'properties', 'additionalProperties', 'items', 'description');
 
     expect(array_values(array_diff($keywords, array_keys(SchemaKeywords::classification()))))->toBe([]);
+});
+
+it('classifies every keyword it gives a subschema position', function (): void {
+    // The two halves of the same table: a keyword whose value is a subschema describes the value's
+    // shape by definition, so one knowing a keyword the other does not is the list going stale.
+    foreach ([
+        SchemaKeywords::POSITION_SCHEMA,
+        SchemaKeywords::POSITION_SCHEMA_MAP,
+        SchemaKeywords::POSITION_SCHEMA_LIST,
+        SchemaKeywords::POSITION_STRING_LIST_MAP,
+    ] as $position) {
+        expect(SchemaKeywords::at($position))->not->toBeEmpty();
+    }
+
+    $positioned = [
+        ...SchemaKeywords::objectValued(),
+        ...SchemaKeywords::at(SchemaKeywords::POSITION_SCHEMA_LIST),
+    ];
+
+    expect(count($positioned))->toBeGreaterThan(20);
+
+    // The three positioned keywords that describe something OTHER than the value carrying them, and so
+    // are not shape claims about it: two subschema stores, and the decoded content of a string.
+    $exceptions = ['$defs' => 'annotation', 'definitions' => 'annotation', 'contentSchema' => 'refinement'];
+
+    foreach ($positioned as $keyword) {
+        expect(SchemaKeywords::classification())->toHaveKey($keyword)
+            ->and(SchemaKeywords::classification()[$keyword])->toBe($exceptions[$keyword] ?? 'shape');
+    }
+});
+
+/*
+ * The guard on the one shape of this defect a guard can catch: a stale SECOND copy of the set. Nine have
+ * shipped — three in the example audit, two in the 3.0 downlevel, three in the canonicalizer, one in the
+ * structural hash. So a constant anywhere in the packages naming three or more of these keywords is
+ * either one of the copies below — each stated for a reason that is not "which keywords carry
+ * subschemas" — or a copy nobody has retired yet. The wider class is not copies at all and is described
+ * in docs/design/uir-and-extensions.md §1 "The empty-object invariant".
+ */
+it('keeps the subschema keyword set in one place, so no reader can carry a stale copy', function (): void {
+    $sanctioned = [
+        // The table itself, and the classification that is the other half of it.
+        'core/src/Draft/SchemaKeywords.php::SUBSCHEMA_POSITIONS',
+        'core/src/Draft/SchemaKeywords.php::SHAPE',
+        // The member ORDER, which is a normative choice rather than a fact about the keyword. Held
+        // against the table by the two guards above.
+        'core/src/Canonical/Canonicalizer.php::SCHEMA_ORDER',
+        // What OpenAPI 3.0 does not define, which is a fact about 3.0 and not about a position. Held
+        // against the vendored 3.0 meta-schema by OpenApi30DownlevelTest.
+        'core/src/Emit/OpenApi30DownlevelEmitter.php::UNSUPPORTED_SCHEMA_KEYWORDS',
+    ];
+
+    $positioned = [
+        ...SchemaKeywords::objectValued(),
+        ...SchemaKeywords::at(SchemaKeywords::POSITION_SCHEMA_LIST),
+    ];
+
+    $root = dirname(__DIR__, 4).'/php/';
+    $found = [];
+
+    foreach (['core', 'attributes', 'laravel', 'inference-phpstan'] as $package) {
+        $directory = new RecursiveDirectoryIterator($root.$package.'/src');
+
+        foreach (new RecursiveIteratorIterator($directory) as $file) {
+            if (! $file instanceof SplFileInfo || $file->getExtension() !== 'php') {
+                continue;
+            }
+
+            $source = (string) file_get_contents($file->getPathname());
+
+            // Split on the declaration and read each chunk up to its own closing bracket, so a
+            // one-line constant cannot swallow the multi-line one after it.
+            foreach (array_slice(preg_split('/const array /', $source) ?: [], 1) as $chunk) {
+                if (preg_match('/^([A-Za-z_]+) = \[/', $chunk, $declared) !== 1) {
+                    continue;
+                }
+
+                $body = preg_split('/\];/', $chunk)[0] ?? '';
+                preg_match_all("/'([^']+)'/", $body, $strings);
+
+                if (count(array_unique(array_intersect($strings[1], $positioned))) < 3) {
+                    continue;
+                }
+
+                $found[] = $package.'/src/'.str_replace($root.$package.'/src/', '', $file->getPathname()).'::'.$declared[1];
+            }
+        }
+    }
+
+    sort($found);
+    sort($sanctioned);
+
+    // Both directions: a new copy fails, and so does a scan that stopped seeing the sanctioned ones.
+    expect($found)->toBe($sanctioned);
+});
+
+it('gives draft-07 dependencies no position, because one position cannot describe it', function (): void {
+    // Its members are EITHER a subschema or a list of property names, decided by the member's own
+    // value — so no single position is right, and it is left as data rather than rewritten on a guess.
+    expect(SchemaKeywords::positionOf('dependencies'))->toBeNull()
+        ->and(SchemaKeywords::positionOf('dependentSchemas'))->toBe(SchemaKeywords::POSITION_SCHEMA_MAP)
+        ->and(SchemaKeywords::positionOf('dependentRequired'))->toBe(SchemaKeywords::POSITION_STRING_LIST_MAP)
+        // And so it is never retracted either: we do not retract what we cannot read.
+        ->and(SchemaKeywords::isSuperseded('dependencies', ['type' => 'object']))->toBeFalse();
+});
+
+it('supersedes a contentSchema only where the declared type is no longer a string', function (): void {
+    // It carries a subschema and is still type-bound, exactly like the two `content*` keywords beside
+    // it: a declared `string` keeps it, anything else leaves it describing nothing.
+    expect(SchemaKeywords::isSuperseded('contentSchema', ['type' => 'string']))->toBeFalse()
+        ->and(SchemaKeywords::isSuperseded('contentSchema', ['type' => 'object']))->toBeTrue()
+        ->and(SchemaKeywords::isSuperseded('definitions', ['type' => 'object']))->toBeFalse();
 });

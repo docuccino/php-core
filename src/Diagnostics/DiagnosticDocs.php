@@ -48,6 +48,7 @@ final class DiagnosticDocs
         'rate-limit' => 'package-integrations',
         'route' => 'routes-operations-and-names',
         'route-binding' => 'routes-operations-and-names',
+        'server' => 'servers',
         'spatie-data' => 'package-integrations',
         'tags' => 'routes-operations-and-names',
         'validation' => 'responses-recovered-from-your-code',

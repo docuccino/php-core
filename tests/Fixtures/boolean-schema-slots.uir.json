@@ -1,0 +1,120 @@
+{
+  "$schema": "https://spec.docuccino.app/uir/1.0/schema.json",
+  "uir": "1.0.0",
+  "openapi": "3.2.0",
+  "jsonSchemaDialect": "https://spec.openapis.org/oas/3.2/dialect/base",
+  "info": {
+    "title": "Vault API",
+    "version": "1.0.0",
+    "description": "A boolean at every slot a Schema Object hangs off something that is not one."
+  },
+  "paths": {
+    "/api/v1/vault": {
+      "post": {
+        "x-docuccino": {
+          "id": "op:v1:aaaaaaaaaaaaaaaa"
+        },
+        "operationId": "vault.store",
+        "summary": "Seal a value",
+        "parameters": [
+          {
+            "name": "locked",
+            "in": "query",
+            "description": "Accepts nothing: the slot is closed.",
+            "schema": false
+          },
+          {
+            "name": "loose",
+            "in": "query",
+            "description": "Accepts anything.",
+            "schema": true
+          },
+          {
+            "name": "sealed",
+            "in": "query",
+            "description": "A reference to a component that is itself a boolean.",
+            "schema": { "$ref": "#/components/schemas/Forbidden" }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": false
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "x-docuccino": {
+              "id": "res:v1:bbbbbbbbbbbbbbbb"
+            },
+            "description": "Sealed",
+            "headers": {
+              "X-Vault-Seal": {
+                "description": "Carries no value a client may rely on.",
+                "schema": false
+              }
+            }
+          },
+          "200": {
+            "x-docuccino": {
+              "id": "res:v1:cccccccccccccccc"
+            },
+            "description": "A body no value satisfies",
+            "content": {
+              "application/json": {
+                "schema": false
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Forbidden": false,
+      "Anything": true,
+      "Receipt": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "seal": { "$ref": "#/components/schemas/Anything" }
+        }
+      }
+    },
+    "parameters": {
+      "LockedQuery": {
+        "name": "lockedComponent",
+        "in": "query",
+        "schema": false
+      }
+    },
+    "headers": {
+      "X-Locked": {
+        "description": "A reusable header whose value is closed.",
+        "schema": false
+      }
+    },
+    "requestBodies": {
+      "LockedBody": {
+        "content": {
+          "application/json": {
+            "schema": false
+          }
+        }
+      }
+    }
+  },
+  "x-docuccino": {
+    "document": {
+      "id": "doc:default",
+      "configHash": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "generator": {
+      "name": "docuccino/core",
+      "version": "1.0.0",
+      "specVersion": "1.0.0"
+    }
+  }
+}

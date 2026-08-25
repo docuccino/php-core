@@ -623,6 +623,13 @@ final class ComponentRegistry
     }
 
     /**
+     * The rule {@see isLegalName()} is the predicate for, in words a refused author can act on: the
+     * extension author's view of {@see ComponentNames::LEGAL_NAME_HELP}, which is internal. An alias
+     * rather than a restatement, so the sentence cannot drift from the character class it describes.
+     */
+    public const string LEGAL_NAME_HELP = ComponentNames::LEGAL_NAME_HELP;
+
+    /**
      * Whether a name is one a `$ref` could carry. The character class lives in
      * {@see ComponentNames::isLegal()} and nowhere else; this is the extension author's view of it, on
      * the same object as the diagnostic channel — so a producer handed a name by the application can tell

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Canonical;
 
+use Docuccino\Core\Support\Json;
+use Docuccino\Core\Support\JsonValue;
 use JsonException;
 use RuntimeException;
 use stdClass;
@@ -20,6 +22,15 @@ use stdClass;
 final class CanonicalJsonSerializer
 {
     private const string INDENT = '  ';
+
+    /**
+     * How deep the descent goes before it refuses — the bound {@see Json} and {@see JsonValue} carry, and
+     * far under the 512 {@see JsonValue::decode()} reads at. Recursion with no bound is a stack overflow,
+     * which is SIGSEGV with no message rather than an exception: no partial output, no diagnostic, nothing
+     * to catch. Every author-controlled reader caps its own input already, so this is the writer refusing
+     * in the one way it can be told about instead of the one it cannot.
+     */
+    private const int MAX_DEPTH = 128;
 
     private const int ENCODE_FLAGS = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR;
 
@@ -47,6 +58,10 @@ final class CanonicalJsonSerializer
 
     private function encode(mixed $value, int $depth): string
     {
+        if ($depth >= self::MAX_DEPTH && (is_array($value) || $value instanceof stdClass)) {
+            throw new RuntimeException(sprintf('Value nests more than %d levels deep.', self::MAX_DEPTH));
+        }
+
         return match (true) {
             $value === null => 'null',
             is_bool($value) => $value ? 'true' : 'false',

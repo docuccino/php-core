@@ -148,3 +148,20 @@ it('decodes a scalar and a list as readily as an object', function (mixed $expec
     'a list' => [[1, 2, 3], '[1, 2, 3]'],
     'false' => [false, 'false'],
 ]);
+
+it('reads a JSON file the way an inline literal is read, object-ness and all', function (string $contents, string $expected): void {
+    // One example has two spellings — `@example {…}` and `#[Example(file: 'x.json')]` — and they used to
+    // be read by different code: the inline one kept `{}` an object and the file one flattened it to
+    // `[]`, so the same bytes published two different examples depending on where an author put them.
+    file_put_contents($this->base.'/example.json', $contents);
+
+    $read = ExampleFile::read($this->base, 'example.json');
+
+    expect($read->ok())->toBeTrue()
+        ->and(json_encode($read->value))->toBe($expected);
+})->with([
+    'an empty object' => ['{}', '{}'],
+    'an empty object inside one' => ['{"meta": {}, "tags": []}', '{"meta":{},"tags":[]}'],
+    'an id-keyed object an array cannot carry' => ['{"0": "Widget", "1": "Cog"}', '{"0":"Widget","1":"Cog"}'],
+    'a named object, which an array carries' => ['{"id": 1}', '{"id":1}'],
+]);

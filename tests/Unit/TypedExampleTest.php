@@ -47,6 +47,7 @@ it('reads a literal as every type a schema can declare', function (string $type,
     'array nested' => ['array', '[{"id": 1}]', [['id' => 1]]],
     'object' => ['object', '{"id": 1, "name": "Cog"}', ['id' => 1, 'name' => 'Cog']],
     'object nested' => ['object', '{"a": {"b": [1]}}', ['a' => ['b' => [1]]]],
+    'object padded' => ['object', "  {\"id\": 1}\t", ['id' => 1]],
 
     // Null.
     'null' => ['null', 'null', null],
@@ -79,11 +80,71 @@ it('reads nothing at all where the text is not the type', function (string $type
     'malformed JSON on an array' => ['array', '["a",'],
     'prose on an object' => ['object', 'the widget'],
     'an array literal on an object' => ['object', '[1, 2]'],
+    'an empty array literal on an object' => ['object', '[]'],
     'malformed JSON on an object' => ['object', '{"id":'],
-    // `{}` and `[]` are one PHP array once decoded, so publishing it would contradict `type: object`.
-    'an empty object literal on an object' => ['object', '{}'],
     'anything but null on null' => ['null', 'nothing'],
 ]);
+
+/*
+ * `{}` and `[]` decode to the same PHP array, and an empty object literal was refused for it — so a
+ * valid example was dropped and a diagnostic said `{}` "does not read as object". Both halves matter:
+ * it has to READ, and what it reads has to still be an object by the time something publishes it.
+ * The four rows below are the whole empty/non-empty × object/array matrix.
+ */
+it('reads every empty and non-empty literal against every collection type it can sit beside', function (
+    string $type,
+    string $text,
+    string $expected,
+): void {
+    $read = TypedExample::of($text, $type);
+
+    if ($expected === 'refused') {
+        expect($read)->toBeNull();
+
+        return;
+    }
+
+    expect($read)->not->toBeNull();
+
+    // The published shape, spelled as the JSON it will become — the only thing a consumer ever sees, and
+    // where `[]` for `{}` is the defect. `json_encode` is the same reading `CanonicalJsonSerializer`
+    // makes: an empty array writes `[]`, an empty `stdClass` writes `{}`.
+    expect(json_encode($read[0]))->toBe($expected);
+})->with([
+    'an empty object literal on an object publishes an object' => ['object', '{}', '{}'],
+    'a non-empty object literal on an object publishes an object' => ['object', '{"a": 1}', '{"a":1}'],
+    'an empty array literal on an array publishes an array' => ['array', '[]', '[]'],
+    'a non-empty array literal on an array publishes an array' => ['array', '[1]', '[1]'],
+
+    // Crossed over, both refuse rather than publishing the other collection kind.
+    'an empty object literal on an array is refused' => ['array', '{}', 'refused'],
+    'a non-empty object literal on an array is refused' => ['array', '{"a": 1}', 'refused'],
+    'an empty array literal on an object is refused' => ['object', '[]', 'refused'],
+    'a non-empty array literal on an object is refused' => ['object', '[1]', 'refused'],
+]);
+
+it('keeps an empty object nested inside a literal an object too', function (): void {
+    // The reading is recursive or it only fixes the top level: a map whose VALUE is `{}` publishes an
+    // empty object there as well, and an empty list beside it stays a list.
+    $read = TypedExample::of('{"settings": {}, "tags": [], "name": "cog"}', 'object');
+
+    expect($read)->not->toBeNull()
+        ->and(json_encode($read[0]))->toBe('{"settings":{},"tags":[],"name":"cog"}');
+
+    // And inside a list, which decodes down the other branch.
+    $list = TypedExample::of('[{}, [], {"a": {}}]', 'array');
+
+    expect($list)->not->toBeNull()
+        ->and(json_encode($list[0]))->toBe('[{},[],{"a":{}}]');
+});
+
+it('reads an empty object literal where a union admits an object', function (): void {
+    // A nullable free-form map is `['object', 'null']`, and `{}` there is an object rather than the null.
+    $read = TypedExample::of('{}', ['object', 'null']);
+
+    expect($read)->not->toBeNull()
+        ->and(json_encode($read[0]))->toBe('{}');
+});
 
 it('reads a union most specific first, so the reading is a function of the type set', function (mixed $type, string $text, mixed $expected): void {
     // Never a function of the order the members were met: both spellings of the same set read alike.
@@ -190,3 +251,30 @@ it('spells a union and an unknown type in the message the same way it reads them
     'no type it knows' => [null, 'a value this schema can carry'],
     'a type nobody knows' => ['widget', 'a value this schema can carry'],
 ]);
+
+it('publishes an id-keyed object literal as the object it was written as', function (string $text, string $expected): void {
+    // A PHP array cannot represent an object whose member names re-key to a `0..n-1` run: those come
+    // back out as a JSON LIST, and an id-keyed map published as `["Widget","Cog"]` beside `type: object`
+    // is the same lie `{}` as `[]` was. Every other numeric spelling an array carries perfectly well.
+    $read = TypedExample::of($text, 'object');
+
+    expect($read)->not->toBeNull()
+        ->and(json_encode($read[0]))->toBe($expected);
+})->with([
+    'zero-based and contiguous, the one shape an array cannot carry' => [
+        '{"0": "Widget", "1": "Cog"}',
+        '{"0":"Widget","1":"Cog"}',
+    ],
+    'one-based, which an array carries as a map' => [
+        '{"1": "Widget", "2": "Cog"}',
+        '{"1":"Widget","2":"Cog"}',
+    ],
+    'sparse' => ['{"3": "Widget", "9": "Cog"}', '{"3":"Widget","9":"Cog"}'],
+    'nested inside a named member' => ['{"by_id": {"0": "Widget"}}', '{"by_id":{"0":"Widget"}}'],
+]);
+
+it('still reads a genuine list as a list beside an id-keyed object', function (): void {
+    // The other half: `type: array` must not start taking objects just because they look like lists.
+    expect(TypedExample::of('{"0": "a"}', 'array'))->toBeNull()
+        ->and(json_encode(TypedExample::of('["a"]', 'array')[0] ?? null))->toBe('["a"]');
+});

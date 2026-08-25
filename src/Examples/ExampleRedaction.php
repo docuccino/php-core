@@ -110,7 +110,11 @@ final readonly class ExampleRedaction
                 $out[$name] = $this->walk($child, $childPointer, $childTainted, $childNamed, $pointers, $replace, $depth + 1);
             }
 
-            return $map ? (object) $out : ($list ? array_values($out) : $out);
+            if ($map) {
+                return (object) $out;
+            }
+
+            return $list ? array_values($out) : $out;
         }
 
         if (! is_string($value)) {
