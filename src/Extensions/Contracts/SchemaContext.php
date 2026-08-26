@@ -24,6 +24,16 @@ interface SchemaContext
     public function convert(DType $type): array;
 
     /**
+     * Convert one member of a composite that occupies the SAME document position as the composite
+     * itself — a union branch, an intersection member, a morph variant. Root-ness ({@see atRoot()})
+     * carries through, so a mapper deciding a response-root envelope still sees the root under a
+     * union; {@see convert()} descends into a nested position and would hide it.
+     *
+     * @return array<string, mixed>
+     */
+    public function convertMember(DType $member): array;
+
+    /**
      * Hoist a named schema into `components.schemas` — deduping structurally-equal registrations,
      * suffixing genuine collisions — and return a `{"$ref": …}` to it. `$schemaId` pins the
      * component's diff identity when known (an FQCN).
@@ -46,9 +56,20 @@ interface SchemaContext
     public function engine(): TypeEngine;
 
     /**
-     * Recursion depth of the running conversion: 1 at the top-level type (a response/parameter root),
-     * deeper for each nested type. Read it if your output depends on being at the root — Laravel
-     * resource `data` wrapping applies to the top-level resource only, for instance.
+     * Whether the schema being built occupies the response or parameter ROOT — the position the whole
+     * conversion started from. Read it when your output depends on being at the root: Laravel resource
+     * `data` wrapping applies to the top-level resource only, for instance.
+     *
+     * This is a POSITION, not a recursion count, and the two part company: a union branch is one level
+     * deeper than its union and stands in the very same place, so a root `UserResource|null` is at the
+     * root on both arms. Never spell this as `depth() === 1`.
+     */
+    public function atRoot(): bool;
+
+    /**
+     * Recursion depth of the running conversion: 1 at the top-level type, deeper for each conversion
+     * nested inside it, union branches and intersection members included. For root-ness use
+     * {@see atRoot()} — a composite's member is deeper than the root and still AT it.
      */
     public function depth(): int;
 

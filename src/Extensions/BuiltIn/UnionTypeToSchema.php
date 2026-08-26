@@ -42,7 +42,7 @@ final class UnionTypeToSchema implements TypeToSchema
         }
 
         return new SchemaResult(SchemaUnion::of(
-            array_map(static fn (DType $member): array => $context->convert($member), $nonNull),
+            array_map(static fn (DType $member): array => $context->convertMember($member), $nonNull),
             $hasNull,
             $context->representation()->nullable,
         ));

@@ -3,15 +3,18 @@
 declare(strict_types=1);
 
 use Docuccino\Core\Extensions\BuiltIn\DefaultTypeMappers;
+use Docuccino\Core\Extensions\Contracts\SchemaContext;
 use Docuccino\Core\Extensions\Contracts\TypeToSchema;
 use Docuccino\Core\Extensions\Schema\ComponentRegistry;
 use Docuccino\Core\Extensions\Schema\SchemaConverter;
+use Docuccino\Core\Extensions\Schema\SchemaResult;
 use Docuccino\Core\Inference\ClassMetadata;
 use Docuccino\Core\Inference\DType\ArrayShapeField;
 use Docuccino\Core\Inference\DType\ArrayShapeT;
 use Docuccino\Core\Inference\DType\ClassT;
 use Docuccino\Core\Inference\DType\DType;
 use Docuccino\Core\Inference\DType\EnumT;
+use Docuccino\Core\Inference\DType\IntersectionT;
 use Docuccino\Core\Inference\DType\ListT;
 use Docuccino\Core\Inference\DType\LiteralT;
 use Docuccino\Core\Inference\DType\MapT;
@@ -245,4 +248,36 @@ it('lowers confidence when a type is unresolvable', function (): void {
 
     expect($converter->toSchema(new UnknownT('mixed'))->confidence)->toBe(0.1)
         ->and($converter->toSchema(ScalarT::string())->confidence)->toBe(1.0);
+});
+
+it('carries the root position through the built-in composites, so a root-sensitive mapper still sees it', function (): void {
+    // The core half of the response-root envelope invariant: `anyOf`/`allOf` compose AT a position, so
+    // their arms are converted as members of it. A mapper deciding a root envelope — Laravel's resource
+    // `data` wrap, spatie's `data.wrap` — is otherwise blind under a union.
+    $envelope = new class implements TypeToSchema
+    {
+        public function supports(DType $type): bool
+        {
+            return $type instanceof ScalarT;
+        }
+
+        public function toSchema(DType $type, SchemaContext $context): ?SchemaResult
+        {
+            return new SchemaResult($context->atRoot() ? ['wrapped' => true] : ['nested' => true]);
+        }
+    };
+
+    $convert = static fn (DType $type): array => (new SchemaConverter(
+        [$envelope, ...DefaultTypeMappers::all()],
+        new StubTypeEngine,
+        new ComponentRegistry,
+    ))->toSchema($type)->schema;
+
+    expect($convert(UnionT::of([ScalarT::string(), ScalarT::int()])))
+        ->toBe(['anyOf' => [['wrapped' => true], ['wrapped' => true]]])
+        ->and($convert(new IntersectionT([ScalarT::string(), ScalarT::int()])))
+        ->toBe(['allOf' => [['wrapped' => true], ['wrapped' => true]]])
+        // A composite one position down is not the root, and neither are its arms.
+        ->and($convert(new ListT(UnionT::of([ScalarT::string(), ScalarT::int()]))))
+        ->toBe(['type' => 'array', 'items' => ['anyOf' => [['nested' => true], ['nested' => true]]]]);
 });

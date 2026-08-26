@@ -32,6 +32,13 @@ final class SchemaConverter implements TypeSchemaConverter
     private int $depth = 0;
 
     /**
+     * Document-POSITION depth: 1 at the root, deeper only where a conversion moved to a nested place.
+     * A composite's member ({@see convertMember()}) is deeper than its composite and in the same place,
+     * so this is what root-ness is read off rather than {@see $depth}.
+     */
+    private int $position = 0;
+
+    /**
      * @param  list<TypeToSchema>  $mappers
      */
     public function __construct(
@@ -50,6 +57,7 @@ final class SchemaConverter implements TypeSchemaConverter
     {
         $this->confidence = 1.0;
         $this->depth = 0;
+        $this->position = 0;
         $schema = $this->convert($type);
 
         return new SchemaResult($schema, $this->confidence);
@@ -57,15 +65,26 @@ final class SchemaConverter implements TypeSchemaConverter
 
     public function convert(DType $type): array
     {
+        $this->position++;
+
+        try {
+            return $this->convertMember($type);
+        } finally {
+            $this->position--;
+        }
+    }
+
+    public function convertMember(DType $member): array
+    {
         $this->depth++;
 
         try {
             foreach ($this->mappers as $mapper) {
-                if (! $mapper->supports($type)) {
+                if (! $mapper->supports($member)) {
                     continue;
                 }
 
-                $result = $mapper->toSchema($type, $this);
+                $result = $mapper->toSchema($member, $this);
                 if ($result !== null) {
                     $this->lowerConfidence($result->confidence);
 
@@ -80,6 +99,11 @@ final class SchemaConverter implements TypeSchemaConverter
         } finally {
             $this->depth--;
         }
+    }
+
+    public function atRoot(): bool
+    {
+        return $this->position === 1;
     }
 
     public function depth(): int

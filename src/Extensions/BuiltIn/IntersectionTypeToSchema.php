@@ -28,7 +28,7 @@ final class IntersectionTypeToSchema implements TypeToSchema
 
         return new SchemaResult([
             'allOf' => array_map(
-                static fn (DType $member): array => $context->convert($member),
+                static fn (DType $member): array => $context->convertMember($member),
                 $type->members,
             ),
         ]);
