@@ -71,7 +71,7 @@ it('reports every property declaration it could not publish', function (): void 
     $node = AnnotatedNode::class;
 
     expect(array_map(static fn (Diagnostic $d): string => $d->code.': '.$d->message, $diagnostics))->toBe([
-        'attribute.property-unsupported: The #[Description(file: …)] on '.$node.'::$filed says something a property schema cannot hold — a property\'s description is read from the attribute itself; it was ignored.',
+        'attribute.property-unsupported: The #[Description(file: …)] on '.$node.'::$filed says something a schema cannot hold — a property\'s description is read from the attribute itself; it was ignored.',
         'attribute.description-unusable: The #[Description] on '.$node.'::$undescribed carries neither `text:` nor `file:`; the description was not documented.',
         'attribute.description-unusable: The #[Description] on '.$node.'::$overdescribed carries both `text:` and `file:`; the description was not documented.',
         'attribute.example-unusable: An #[Example] on '.$node.'::$valueless carries no value — give it a `value:`; it was not documented.',

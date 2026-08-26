@@ -109,7 +109,7 @@ final class PropertyAnnotations
 
         $description = self::first($property, Description::class);
         if ($description !== null) {
-            $text = self::describedText($description, $site, $diagnostics);
+            $text = DescribedText::of($description, $site, "a property's description", $diagnostics);
             if ($text !== null) {
                 $schema['description'] = $text;
             }
@@ -121,40 +121,6 @@ final class PropertyAnnotations
         }
 
         return $schema;
-    }
-
-    /**
-     * The prose a property's `#[Description]` states. `file:` is an operation-level form only — a
-     * schema mapper has no application root to resolve a path against — so it is reported rather than
-     * read, and a declaration carrying both or neither is the same malformed declaration it is
-     * anywhere else.
-     *
-     * @param  list<Diagnostic>  $diagnostics
-     */
-    private static function describedText(Description $description, string $site, array &$diagnostics): ?string
-    {
-        if (($description->text === null) === ($description->file === null)) {
-            $diagnostics[] = new Diagnostic(
-                severity: Severity::Warning,
-                code: 'attribute.description-unusable',
-                message: sprintf(
-                    'The #[Description] on %s carries %s; the description was not documented.',
-                    $site,
-                    $description->text === null ? 'neither `text:` nor `file:`' : 'both `text:` and `file:`',
-                ),
-                help: 'One of `text:` (inline prose) or `file:` (a markdown file under the application root) per declaration.',
-            );
-
-            return null;
-        }
-
-        if ($description->file !== null) {
-            $diagnostics[] = self::unsupported('#[Description(file: …)]', $site, 'a property\'s description is read from the attribute itself', 'Write the prose inline as `text:`, or put the `file:` declaration on the action instead.');
-
-            return null;
-        }
-
-        return $description->text;
     }
 
     /**
