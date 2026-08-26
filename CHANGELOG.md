@@ -7,6 +7,16 @@ User-facing changes to `docuccino/core` — features, fixes, performance work an
 taken from the commit messages scoped `core`. Entries begin after v0.1.2; older history is in
 the [repository](https://github.com/docuccino/docuccino) git log.
 
+## v0.10.3
+
+### Features
+
+- let a class describe the schema it publishes ([#247](https://github.com/docuccino/docuccino/pull/247))
+
+### Bug fixes
+
+- publish an input DTO's own prose on the request side ([#245](https://github.com/docuccino/docuccino/pull/245))
+
 ## v0.10.1
 
 ### Bug fixes
