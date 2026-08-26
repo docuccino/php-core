@@ -37,7 +37,7 @@ it('warns on each sensitive property-name shape with its label and pointer', fun
     expect($findings[0]->severity)->toBe(Severity::Warning)
         ->and($findings[0]->code)->toBe('lint.data-leakage')
         ->and($findings[0]->message)->toContain($label)
-        ->and($findings[0]->message)->toContain('#/components/schemas/Model/properties/'.$name);
+        ->and($findings[0]->message)->toContain('/components/schemas/Model/properties/'.$name);
 })->with([
     'password' => ['password', 'a password'],
     'passwd' => ['passwd', 'a password'],
@@ -62,13 +62,28 @@ it('does not warn on ordinary property names', function (string $name): void {
     expect(lintFindings(schemaWith($name)))->toBe([]);
 })->with(['id', 'name', 'email', 'title', 'status', 'created_at', 'internal']);
 
+it('prints the bare RFC 6901 pointer, the one spelling every message uses', function (): void {
+    // `#` is URI-fragment syntax rather than pointer syntax, and nothing ever resolves a safelist entry
+    // as a `$ref`, so one fact gets one spelling across every producer of one.
+    $name = lintFindings(schemaWith('password'))[0];
+    $value = lintFindings(schemaWithExample('AKIAIOSFODNN7EXAMPLE'))[0];
+
+    expect($name->message)->toContain('(/components/schemas/Model/properties/password)')
+        ->and($name->message)->not->toContain('#/')
+        ->and($value->message)->toContain('at /components/schemas/Model/example/type ')
+        ->and($value->message)->not->toContain('#/');
+});
+
 it('silences a property by name and by JSON pointer via the safelist', function (string $allowEntry): void {
     $options = new SensitiveFieldLintOptions(allow: [$allowEntry]);
 
     expect(lintFindings(schemaWith('password'), $options))->toBe([]);
 })->with([
     'by name' => ['password'],
-    'by pointer' => ['#/components/schemas/Model/properties/password'],
+    'by pointer' => ['/components/schemas/Model/properties/password'],
+    // Every message prints the bare pointer, but a `$ref` in the emitted document spells the same path
+    // as a URI fragment, so that is the form an author reaches for as often as not.
+    'by pointer written as a fragment' => ['#/components/schemas/Model/properties/password'],
 ]);
 
 it('reports nothing when disabled', function (): void {
@@ -115,7 +130,7 @@ it('warns on each known credential shape appearing in a published value', functi
     expect($findings[0]->severity)->toBe(Severity::Warning)
         ->and($findings[0]->code)->toBe('lint.data-leakage')
         ->and($findings[0]->message)->toContain($label)
-        ->and($findings[0]->message)->toContain('#/components/schemas/Model/example/type')
+        ->and($findings[0]->message)->toContain('/components/schemas/Model/example/type')
         // The diagnostic must never echo the secret — that just moves it into the build log.
         ->and($findings[0]->message)->not->toContain($value);
 })->with([
@@ -155,7 +170,7 @@ it('scans every published-value member, not only example', function (string $key
 
     $findings = lintFindings($document);
     expect($findings)->toHaveCount(1)
-        ->and($findings[0]->message)->toContain('#/components/schemas/Model/'.$key);
+        ->and($findings[0]->message)->toContain('/components/schemas/Model/'.$key);
 })->with(['example', 'const', 'default']);
 
 it('points at the exact leaf inside a nested examples map or enum list', function (): void {
@@ -167,12 +182,12 @@ it('points at the exact leaf inside a nested examples map or enum list', functio
     $pointers = array_map(static fn (object $d): string => (string) $d->message, lintFindings($document));
 
     expect($pointers)->toHaveCount(2);
-    expect($pointers[0])->toContain('#/components/schemas/Model/examples/first/value/token');
-    expect($pointers[1])->toContain('#/components/schemas/Model/enum/1');
+    expect($pointers[0])->toContain('/components/schemas/Model/examples/first/value/token');
+    expect($pointers[1])->toContain('/components/schemas/Model/enum/1');
 });
 
 it('silences a leaked value by pointer via the safelist', function (): void {
-    $options = new SensitiveFieldLintOptions(allow: ['#/components/schemas/Model/example/type']);
+    $options = new SensitiveFieldLintOptions(allow: ['/components/schemas/Model/example/type']);
 
     expect(lintFindings(schemaWithExample('AKIAIOSFODNN7EXAMPLE'), $options))->toBe([]);
 });

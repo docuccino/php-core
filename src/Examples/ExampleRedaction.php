@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Docuccino\Core\Examples;
 
 use Docuccino\Core\Lint\CredentialShapes;
+use Docuccino\Core\Lint\LintSafelist;
 use Docuccino\Core\Lint\SensitiveFieldLint;
 use Docuccino\Core\Lint\SensitiveFieldLintOptions;
 use stdClass;
@@ -137,13 +138,15 @@ final readonly class ExampleRedaction
 
     /**
      * Records one unsafe pointer and hands back what should stand in the body. Pointers only — see the
-     * class docblock for why a bare name is not enough to publish a value.
+     * class docblock for why a bare name is not enough to publish a value. These pointers are
+     * body-relative where a lint's are document-absolute, and both always open with `/`, so the leading
+     * `#` {@see LintSafelist} takes off only ever normalises the safelist entry.
      *
      * @param  list<string>  $pointers
      */
     private function flag(string $pointer, array &$pointers, mixed $value, bool $replace): mixed
     {
-        if (in_array($pointer, $this->options->allow, true)) {
+        if (LintSafelist::matches($this->options->allow, $pointer)) {
             return $value;
         }
 

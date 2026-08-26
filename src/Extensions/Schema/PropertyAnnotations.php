@@ -107,12 +107,9 @@ final class PropertyAnnotations
     {
         $site = $declaring.'::$'.$property->getName();
 
-        $description = self::first($property, Description::class);
-        if ($description !== null) {
-            $text = DescribedText::of($description, $site, "a property's description", $diagnostics);
-            if ($text !== null) {
-                $schema['description'] = $text;
-            }
+        $text = self::describedText($property, $site, $diagnostics);
+        if ($text !== null) {
+            $schema['description'] = $text;
         }
 
         $example = self::exampleValue($property, $site, $diagnostics);
@@ -121,6 +118,23 @@ final class PropertyAnnotations
         }
 
         return $schema;
+    }
+
+    /**
+     * The prose one property publishes, or null when its declarations describe none — the first
+     * declaration that says something a schema can hold, every rejection reported ({@see DescribedText}).
+     *
+     * @param  list<Diagnostic>  $diagnostics
+     */
+    private static function describedText(ReflectionProperty $property, string $site, array &$diagnostics): ?string
+    {
+        $found = null;
+        foreach (self::all($property, Description::class) as $description) {
+            $text = DescribedText::of($description, $site, "a property's description", $diagnostics);
+            $found ??= $text;
+        }
+
+        return $found;
     }
 
     /**
@@ -233,16 +247,5 @@ final class PropertyAnnotations
         }
 
         return $instances;
-    }
-
-    /**
-     * @template T of object
-     *
-     * @param  class-string<T>  $attribute
-     * @return T|null
-     */
-    private static function first(ReflectionProperty $property, string $attribute): ?object
-    {
-        return self::all($property, $attribute)[0] ?? null;
     }
 }

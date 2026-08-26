@@ -84,7 +84,7 @@ final class SensitiveFieldLint implements DocumentTransformer
                 if ($label !== null) {
                     $findings[] = [
                         'name' => (string) $name,
-                        'pointer' => '#/'.implode('/', [...$path, 'properties', (string) $name]),
+                        'pointer' => '/'.implode('/', [...$path, 'properties', (string) $name]),
                         'label' => $label,
                         'value' => false,
                     ];
@@ -127,15 +127,16 @@ final class SensitiveFieldLint implements DocumentTransformer
         if ($label !== null) {
             $findings[] = [
                 'name' => $name,
-                'pointer' => '#/'.implode('/', $path),
+                'pointer' => '/'.implode('/', $path),
                 'label' => $label,
                 'value' => true,
             ];
         }
     }
 
+    /** {@see LintSafelist} is why a safelist entry spelled `#/…` lands against the bare pointer minted above. */
     private function silenced(string $name, string $pointer): bool
     {
-        return in_array($name, $this->options->allow, true) || in_array($pointer, $this->options->allow, true);
+        return LintSafelist::matches($this->options->allow, $name, $pointer);
     }
 }

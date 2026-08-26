@@ -55,6 +55,30 @@ final readonly class ValidationField
     }
 
     /**
+     * Drop a keyword an earlier, coarser rule left behind — for a rule that REPLACES that rule's claim
+     * rather than adding to it, and would otherwise publish a keyword against a type it no longer
+     * belongs to. The drop stands: a later rule that would only be guessing is refused the keyword
+     * ({@see mayClaim()}), since republishing what was just withdrawn is the same wrong claim arriving
+     * one rule later.
+     */
+    public function remove(string $keyword): void
+    {
+        unset($this->node->keywords[$keyword]);
+        $this->node->withheld[$keyword] = true;
+    }
+
+    /**
+     * Whether a rule with nothing but a GUESS to offer may claim this keyword — nothing set it, and
+     * nothing withdrew it. The guard a rule uses where its keyword is a reading of intent rather than a
+     * fact the rule states (a comparison bound's `format`, a type word's default one). A keyword the
+     * AUTHOR states outright asks {@see has()} instead: their word outranks a withdrawal.
+     */
+    public function mayClaim(string $keyword): bool
+    {
+        return ! $this->has($keyword) && ! array_key_exists($keyword, $this->node->withheld);
+    }
+
+    /**
      * A value this rule alone knows is legal, for the synthesized `example` — or null to say no value
      * would be, which is final and outranks any other rule's proposal.
      *

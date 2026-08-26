@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 use Docuccino\Core\Document\PathItem;
 use Docuccino\Core\Lint\LintOperation;
-use Docuccino\Core\Lint\LintRuleOptions;
 
 /**
  * The walk the completeness lints share. Every HTTP method the spec model knows, and the degradation
@@ -58,16 +57,6 @@ it('reads a source out of the first provenance record that recorded one', functi
     'a source with no file' => [['provenance' => [['source' => ['line' => 9]]]], null],
     'the first record carrying one' => [['provenance' => [['producer' => 'fallback'], ['source' => ['file' => 'app/A.php']], ['source' => ['file' => 'app/B.php']]]], 'app/A.php'],
 ]);
-
-it('silences a subject named in the safelist and nothing else', function (): void {
-    $options = new LintRuleOptions(allow: ['GET /api/ping']);
-
-    expect($options->silences('GET /api/ping'))->toBeTrue()
-        ->and($options->silences(null, 'GET /api/ping'))->toBeTrue()
-        ->and($options->silences('GET /api/pong'))->toBeFalse()
-        ->and($options->silences(null, null))->toBeFalse()
-        ->and((new LintRuleOptions)->silences('GET /api/ping'))->toBeFalse();
-});
 
 it('finds a webhook under every method a path item can carry, named the way the differ names it', function (string $method): void {
     $operations = LintOperation::all(['webhooks' => ['invoice.paid' => [$method => ['summary' => 'Paid.']]]]);

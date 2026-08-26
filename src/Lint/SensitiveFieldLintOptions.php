@@ -38,7 +38,7 @@ final readonly class SensitiveFieldLintOptions
     ];
 
     /**
-     * @param  list<string>  $allow  property names or `#/…` pointers to silence
+     * @param  list<string>  $allow  property names, or pointers either bare or as a `#/…` fragment
      * @param  array<string, string>  $patterns  normalized token → label
      */
     public function __construct(

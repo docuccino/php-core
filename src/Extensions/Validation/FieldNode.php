@@ -8,9 +8,14 @@ use Docuccino\Core\Extensions\Context\RepresentationPolicy;
 
 /**
  * One node of the request schema tree the rule builder assembles. A node is an object (it has
- * named {@see $properties}), an array (it has an {@see $items} node, created by a `*` path segment),
- * or a leaf scalar (its {@see $keywords} carry `type`/`format`/constraints). `required` and
- * `nullable` are node flags a parent lifts into its `required` list and its type expression.
+ * named {@see $properties}, or `additionalProperties` keywords), an array (it has an {@see $items} node,
+ * created by a `*` path segment), or a leaf scalar (its {@see $keywords} carry `type`/`format`/
+ * constraints). `required` and `nullable` are node flags a parent lifts into its `required` list and its
+ * type expression.
+ *
+ * A `*` segment does NOT decide the container: `items` and `additionalProperties` are one slot for two
+ * containers, mutually exclusive on one schema, so the segment names an array's items on an array and an
+ * object's values on an object — {@see build()} owns that choice.
  *
  * @internal builder state; the public surface is {@see ValidationField}.
  */
@@ -45,6 +50,14 @@ final class FieldNode
     public bool $exampleSuppressed = false;
 
     /**
+     * Keywords a rule dropped ({@see ValidationField::remove()}). The drop is a decision about the value,
+     * so a later rule that would only be guessing is told no ({@see ValidationField::mayClaim()}).
+     *
+     * @var array<string, true>
+     */
+    public array $withheld = [];
+
+    /**
      * @var array<string, FieldNode>
      */
     public array $properties = [];
@@ -57,7 +70,7 @@ final class FieldNode
         return $this->properties[$name] ??= new self;
     }
 
-    /** The array-items child, created (and marking this node an array) on first access. */
+    /** The child a `*` segment names — this node's items or its values — created on first access. */
     public function itemsNode(): self
     {
         return $this->items ??= new self;
@@ -91,8 +104,18 @@ final class FieldNode
                 $schema['required'] = $required;
             }
         } elseif ($this->items !== null) {
-            $schema['type'] ??= 'array';
-            $schema['items'] = $this->items->build($policy);
+            // The node's own declaration picks the slot, per the class docblock.
+            if (array_key_exists('additionalProperties', $schema)) {
+                $schema['type'] = 'object';
+                // Only a value SCHEMA is a slot the `*` child fills. A `false` closing the object is a
+                // constraint of its own, and overwriting it would widen a closed object to an open one.
+                if (is_array($schema['additionalProperties'])) {
+                    $schema['additionalProperties'] = $this->items->build($policy);
+                }
+            } else {
+                $schema['type'] ??= 'array';
+                $schema['items'] = $this->items->build($policy);
+            }
         }
 
         return $this->nullable ? self::applyNullable($schema, $policy) : $schema;

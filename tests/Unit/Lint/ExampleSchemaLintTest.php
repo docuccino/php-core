@@ -109,6 +109,16 @@ it('accepts a finding safelisted by its pointer', function (): void {
         ))->toHaveCount(1);
 });
 
+it('accepts a finding safelisted by the pointer in the fragment form every $ref uses', function (): void {
+    // The form the documentation showed, and the one an author reaches for: a pointer in the emitted
+    // document is always a `#/…` fragment, while a finding's message prints the bare RFC 6901 pointer.
+    $options = new LintRuleOptions(enabled: true, allow: [
+        '#/paths/~1api~1widgets/get/responses/200/content/application~1json/example',
+    ]);
+
+    expect(lintDiagnostics(new ExampleSchemaLint($options), exampleLintDocument(['type' => 'boolean'], 'false')))->toBe([]);
+});
+
 it('accepts a finding safelisted by the label the message names', function (): void {
     // The other name a finding goes by, so silencing one never needs a second vocabulary.
     $options = new LintRuleOptions(enabled: true, allow: ['GET /api/widgets → 200 application/json']);
@@ -216,6 +226,7 @@ it('accepts an uncheckable site safelisted the same two ways a mismatch is', fun
     expect(lintDiagnostics(new ExampleSchemaLint($options), $document))->toBe([]);
 })->with([
     'by pointer' => ['/paths/~1api~1widgets/get/responses/200/content/application~1json/example'],
+    'by pointer in the fragment form' => ['#/paths/~1api~1widgets/get/responses/200/content/application~1json/example'],
     'by label' => ['GET /api/widgets → 200 application/json'],
 ]);
 

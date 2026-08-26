@@ -9,9 +9,10 @@ use Docuccino\Core\Extensions\Context\RepresentationPolicy;
 
 /**
  * Assembles the request object schema from dot/wildcard field paths: `field('items.*.id')` creates an
- * `items` array whose item objects carry an `id` property, since a `*` segment turns the current node
- * into an array and descends into its items. A `file`/`image` transformer raises the multipart flag
- * through the field façade.
+ * `items` array whose item objects carry an `id` property, since a `*` segment descends into the
+ * current node's element. Which container that element belongs to is the node's own to settle
+ * ({@see FieldNode::build()}). A `file`/`image` transformer raises the multipart flag through the field
+ * façade.
  */
 final class RequestSchemaBuilder
 {

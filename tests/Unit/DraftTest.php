@@ -530,3 +530,66 @@ it('keeps a media range the declaration does not outrank, nested keywords includ
     expect(array_keys($overlaid->freeze()->content ?? []))->toContain('*/*')
         ->and(array_keys($nested->freeze()->content ?? []))->toContain('*/*');
 });
+
+/*
+ * The request body's own description. `requestBody` is one guarded field every producer writes whole,
+ * so prose about how to fill it in rides ON the body rather than contesting it — a write at any layer
+ * would have to replace the schema to carry a sentence, and a write at the layer that ALREADY assembled
+ * the body would simply be shadowed.
+ */
+it('folds a declared body description into the body whoever wrote it left behind', function (Contribution $by): void {
+    $draft = new OperationDraft;
+    $draft->declareRequestBodyDescription('Send every field.');
+    $draft->set('requestBody', [
+        'required' => true,
+        'content' => ['application/json' => ['schema' => ['type' => 'object']]],
+    ], $by);
+
+    $body = $draft->freeze()->rest['requestBody'];
+
+    expect($body['description'])->toBe('Send every field.')
+        ->and($body['required'])->toBeTrue()
+        ->and($body['content']['application/json']['schema'])->toBe(['type' => 'object']);
+})->with([
+    // The layer that recovered a body, and the layer #[BodyParameter] assembles one at — which is the
+    // same layer the declaration is read at, so a patch would tie and lose.
+    'an integration-layer body' => [Contribution::integration('validation')],
+    'an attribute-layer body' => [Contribution::attribute()],
+    'an overlay-layer body' => [Contribution::overlay()],
+]);
+
+it('folds a body description in whichever order the body was written', function (): void {
+    $before = new OperationDraft;
+    $before->declareRequestBodyDescription('Send every field.');
+    $before->set('requestBody', ['content' => []], Contribution::integration('validation'));
+
+    $after = new OperationDraft;
+    $after->set('requestBody', ['content' => []], Contribution::integration('validation'));
+    $after->declareRequestBodyDescription('Send every field.');
+
+    expect($before->freeze()->rest['requestBody'])->toBe($after->freeze()->rest['requestBody']);
+});
+
+it('keeps the first declared body description, so a later one cannot rewrite it', function (): void {
+    $draft = new OperationDraft;
+    $draft->set('requestBody', ['content' => []], Contribution::integration('validation'));
+    $draft->declareRequestBodyDescription('The specific one.');
+    $draft->declareRequestBodyDescription('The inherited one.');
+
+    expect($draft->freeze()->rest['requestBody']['description'])->toBe('The specific one.');
+});
+
+it('never conjures a request body for a description to sit on', function (): void {
+    $draft = new OperationDraft;
+    $draft->declareRequestBodyDescription('Send every field.');
+
+    expect($draft->freeze()->rest)->not->toHaveKey('requestBody');
+});
+
+it('leaves a request body it cannot make sense of as it found it', function (): void {
+    $draft = new OperationDraft;
+    $draft->set('requestBody', 'nonsense', Contribution::integration('validation'));
+    $draft->declareRequestBodyDescription('Send every field.');
+
+    expect($draft->freeze()->rest['requestBody'])->toBe('nonsense');
+});

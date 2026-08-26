@@ -12,10 +12,15 @@ use Docuccino\Core\Diagnostics\Severity;
  * The prose a `#[Description]` states, for the readers that write it onto a schema — {@see
  * PropertyAnnotations} for a property's member, {@see ClassAnnotations} for the schema of a class.
  *
- * Both hold a bare `description` string, so both refuse the same two declarations for the same reason,
- * and the rule is stated here once rather than at each reader: a declaration carrying both `text:` and
- * `file:`, or neither, says nothing certain, and `file:` is an operation-level form — no application
- * root reaches a schema mapper to resolve a path against.
+ * Both hold a bare `description` string, so both refuse the same declarations for the same reasons, and
+ * the rule is stated here once rather than at each reader: a declaration carrying both `text:` and
+ * `file:`, or neither, says nothing certain, while `file:` and `request:` are operation-level forms —
+ * no application root reaches a schema mapper to resolve a path against, and a request body belongs to
+ * an operation rather than to a type.
+ *
+ * `#[Description]` is repeatable and a schema slot holds one string, so both readers call this for
+ * EVERY declaration and keep the first that yields text: a misplaced declaration is then reported
+ * without costing the author the good one beside it.
  */
 final class DescribedText
 {
@@ -52,6 +57,21 @@ final class DescribedText
                     $subject,
                 ),
                 help: 'Write the prose inline as `text:`, or put the `file:` declaration on the action instead.',
+            );
+
+            return null;
+        }
+
+        if ($description->request) {
+            $diagnostics[] = new Diagnostic(
+                severity: Severity::Warning,
+                code: 'attribute.property-unsupported',
+                message: sprintf(
+                    'The #[Description(request: true)] on %s says something a schema cannot hold — a request body is one operation\'s use of a type, and %s describes the type itself; it was ignored.',
+                    $site,
+                    $subject,
+                ),
+                help: 'Drop `request:` to describe the type here, and declare the request-body prose on the action that accepts it.',
             );
 
             return null;

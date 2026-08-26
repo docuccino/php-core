@@ -147,7 +147,11 @@ it('honours the leakage safelist by pointer, and never by member name', function
     expect($body)->toBe($expected);
 })->with([
     'by pointer' => [new SensitiveFieldLintOptions(allow: ['/reset_token']), ['reset_token' => 'public-value']],
+    // The same list silences the lint, whose pointers an author has seen spelled as `#/…` fragments, so
+    // an entry written that way has to publish the value here too.
+    'by pointer written as a fragment' => [new SensitiveFieldLintOptions(allow: ['#/reset_token']), ['reset_token' => 'public-value']],
     'by name' => [new SensitiveFieldLintOptions(allow: ['reset_token']), ['reset_token' => ExampleRedaction::PLACEHOLDER]],
+    'by name written as a fragment' => [new SensitiveFieldLintOptions(allow: ['#reset_token']), ['reset_token' => ExampleRedaction::PLACEHOLDER]],
     'neither' => [new SensitiveFieldLintOptions, ['reset_token' => ExampleRedaction::PLACEHOLDER]],
 ]);
 

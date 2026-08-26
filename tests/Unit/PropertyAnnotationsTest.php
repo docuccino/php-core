@@ -28,7 +28,7 @@ function annotatedNodeObject(): array
     $properties = [];
     foreach ([
         'tenant', 'settled', 'documented', 'filed', 'undescribed',
-        'overdescribed', 'valueless', 'twoSourced', 'named', 'twice',
+        'overdescribed', 'requestScoped', 'requestScopedFirst', 'valueless', 'twoSourced', 'named', 'twice',
     ] as $name) {
         $properties[$name] = ['type' => $name === 'settled' ? 'boolean' : 'string'];
     }
@@ -50,6 +50,9 @@ it('writes what a property declaration says onto the member it publishes', funct
     'the attribute over the docblock the engine recovered' => ['documented', ['type' => 'string', 'description' => 'What a consumer needs to know.']],
     // One slot, so the first declaration stands — source order, never discovery order.
     'the first of two usable examples' => ['twice', ['type' => 'string', 'example' => 'first']],
+    // Repeatability made this legal PHP, and taking the first declaration and stopping would drop the
+    // author's real sentence to report the misplaced one.
+    'the description standing behind a declaration a schema cannot hold' => ['requestScopedFirst', ['type' => 'string', 'description' => 'What the invoice bills for.']],
 ]);
 
 it('leaves a member whose declaration a property schema cannot hold as it found it', function (string $property): void {
@@ -60,6 +63,7 @@ it('leaves a member whose declaration a property schema cannot hold as it found 
     'a #[Description(file:)], with no application root to resolve against' => 'filed',
     'a #[Description] carrying neither text nor file' => 'undescribed',
     'a #[Description] carrying both' => 'overdescribed',
+    'a #[Description(request:)], which describes an operation rather than a type' => 'requestScoped',
     'an #[Example] carrying no value' => 'valueless',
     'an #[Example] carrying two' => 'twoSourced',
     'an #[Example] naming what only an Example Object holds' => 'named',
@@ -74,6 +78,8 @@ it('reports every property declaration it could not publish', function (): void 
         'attribute.property-unsupported: The #[Description(file: …)] on '.$node.'::$filed says something a schema cannot hold — a property\'s description is read from the attribute itself; it was ignored.',
         'attribute.description-unusable: The #[Description] on '.$node.'::$undescribed carries neither `text:` nor `file:`; the description was not documented.',
         'attribute.description-unusable: The #[Description] on '.$node.'::$overdescribed carries both `text:` and `file:`; the description was not documented.',
+        'attribute.property-unsupported: The #[Description(request: true)] on '.$node.'::$requestScoped says something a schema cannot hold — a request body is one operation\'s use of a type, and a property\'s description describes the type itself; it was ignored.',
+        'attribute.property-unsupported: The #[Description(request: true)] on '.$node.'::$requestScopedFirst says something a schema cannot hold — a request body is one operation\'s use of a type, and a property\'s description describes the type itself; it was ignored.',
         'attribute.example-unusable: An #[Example] on '.$node.'::$valueless carries no value — give it a `value:`; it was not documented.',
         'attribute.example-unusable: An #[Example] on '.$node.'::$twoSourced carries more than one value — `value:`, `file:` and `externalValue:` are alternatives; it was not documented.',
         'attribute.property-unsupported: The #[Example] on '.$node.'::$named says something a property schema cannot hold — a property publishes one bare example value, which carries no `name:`, no `summary:`, no `status:`; it was ignored.',

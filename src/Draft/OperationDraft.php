@@ -50,6 +50,12 @@ final class OperationDraft
     /** @var array<string, mixed> */
     private array $requestExample = [];
 
+    /**
+     * The request body's own `description` ({@see declareRequestBodyDescription()}), merged into the
+     * winning body at {@see freeze()} for the reason stated on {@see $requestExamples}.
+     */
+    private ?string $requestDescription = null;
+
     private ?string $id = null;
 
     public function __construct()
@@ -203,6 +209,15 @@ final class OperationDraft
         }
     }
 
+    /**
+     * Set the request body's own `description` ({@see $requestDescription}). The FIRST call stands, so a
+     * caller reading declarations most-specific-first gets the most specific one.
+     */
+    public function declareRequestBodyDescription(string $description): void
+    {
+        $this->requestDescription ??= $description;
+    }
+
     /** The provenance producer of the currently-winning contribution for a field, or null if unset. */
     public function producerFor(string $field): ?string
     {
@@ -260,6 +275,21 @@ final class OperationDraft
         }
 
         $body['content'] = $updated;
+
+        return $body;
+    }
+
+    /**
+     * The request body with a declared `description` on it, untouched where the body is shaped like
+     * nothing this recognises. Nothing in the build derives request-body prose, so the declaration wins.
+     */
+    private function withRequestDescription(mixed $body): mixed
+    {
+        if ($this->requestDescription === null || ! is_array($body)) {
+            return $body;
+        }
+
+        $body['description'] = $this->requestDescription;
 
         return $body;
     }
@@ -324,6 +354,7 @@ final class OperationDraft
 
         if (isset($resolved['requestBody'])) {
             $resolved['requestBody'] = $this->withRequestExamples($resolved['requestBody']);
+            $resolved['requestBody'] = $this->withRequestDescription($resolved['requestBody']);
         }
 
         $parameters = [];

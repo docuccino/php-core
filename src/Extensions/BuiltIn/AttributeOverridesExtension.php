@@ -33,6 +33,9 @@ use Docuccino\Core\Support\PlainText;
  * The last pair exist because one docblock serves two readers. Prose written for whoever maintains
  * the action is not prose an API consumer can use, and until these there was no way to say the second
  * thing without deleting the first.
+ *
+ * `#[Description(request: true)]` is the same attribute pointed at the request body instead, which is a
+ * fact about this operation's use of the body rather than about the type behind it.
  */
 final class AttributeOverridesExtension implements OperationExtension
 {
@@ -95,10 +98,78 @@ final class AttributeOverridesExtension implements OperationExtension
             $operation->setSummary($summary->text, $attribute);
         }
 
-        $described = $context->attributes->first(Description::class);
-        $description = $described === null ? null : $this->describedText($context, $described);
+        [$describedOperation, $describedRequest] = $this->partitionDescriptions($context);
+
+        $description = $describedOperation === null ? null : $this->describedText($context, $describedOperation);
 
         $this->applyDescriptionAndReason($operation, $description, $attributeReason ?? $docblockReason, $attributeReason, $attribute);
+
+        if ($describedRequest !== null) {
+            $this->applyRequestDescription($operation, $context, $describedRequest);
+        }
+    }
+
+    /**
+     * The `#[Description]` declarations that describe the operation and the request body, most specific
+     * of each first — the attribute set already orders method-level ahead of class-level, so the head of
+     * each partition is the one that wins.
+     *
+     * @return array{0: Description|null, 1: Description|null}
+     */
+    private function partitionDescriptions(RouteContext $context): array
+    {
+        $operation = null;
+        $request = null;
+
+        foreach ($context->attributes->all(Description::class) as $described) {
+            if ($described->request) {
+                $request ??= $described;
+
+                continue;
+            }
+
+            $operation ??= $described;
+        }
+
+        return [$operation, $request];
+    }
+
+    /**
+     * The `requestBody.description` write: prose about how to fill THIS operation's body in, which is a
+     * different fact from the schema's own description, which a class-level declaration writes — that
+     * one says what the type IS, and every operation sharing the component reads it.
+     *
+     * A declaration written on the ACTION with no body to describe is reported rather than dropped: it
+     * is the same mistake as a `#[Description]` that says nothing certain, and lands in the same channel.
+     */
+    private function applyRequestDescription(OperationDraft $operation, RouteContext $context, Description $described): void
+    {
+        $text = $this->describedText($context, $described);
+        if ($text === null) {
+            return;
+        }
+
+        // Every requestBody producer runs in OperationPhase::Request, ahead of this extension's
+        // Overrides phase, so by now the field is settled whatever DefaultExtensions::all() lists first.
+        if (is_array($operation->resolvedField('requestBody'))) {
+            $operation->declareRequestBodyDescription($text);
+
+            return;
+        }
+
+        // Reported only where the author is standing: one declaration on a CONTROLLER covers every
+        // action under it, so a report per bodyless action fires where there is nothing to do.
+        if (! in_array($described, $context->attributes->direct(Description::class), true)) {
+            return;
+        }
+
+        $this->report(
+            $context,
+            Severity::Warning,
+            'attribute.description-unusable',
+            'A #[Description(request: true)] here describes a request body, and this operation documents none; the description was not documented.',
+            'Document the body first — validation rules, a request DTO or #[BodyParameter] — or drop `request:` to describe the operation itself.',
+        );
     }
 
     /**
@@ -123,15 +194,17 @@ final class AttributeOverridesExtension implements OperationExtension
     }
 
     /**
-     * The prose `#[Description]` states: inline `text:`, or the markdown file `file:` names. Exactly one
-     * of them says something, so a declaration carrying both or neither is diagnosed and states nothing
-     * — picking one would document prose the author never chose.
+     * The prose one `#[Description]` states: inline `text:`, or the markdown file `file:` names. Exactly
+     * one of them says something, so a declaration carrying both or neither is diagnosed and states
+     * nothing — picking one would document prose the author never chose. The report names which slot
+     * the declaration was aimed at, since an action may carry one of each.
      */
     private function describedText(RouteContext $context, Description $description): ?string
     {
         if (($description->text === null) === ($description->file === null)) {
             $this->report($context, Severity::Warning, 'attribute.description-unusable', sprintf(
-                'A #[Description] here carries %s; the description was not documented.',
+                'A %s here carries %s; the description was not documented.',
+                $description->request ? '#[Description(request: true)]' : '#[Description]',
                 $description->text === null ? 'neither `text:` nor `file:`' : 'both `text:` and `file:`',
             ), 'One of `text:` (inline prose) or `file:` (a markdown file under the application root) per declaration.');
 

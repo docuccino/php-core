@@ -45,9 +45,10 @@ final class ClassAnnotations
     }
 
     /**
-     * `$schema` with the class's `#[Description]` as its `description`, plus whatever that declaration
-     * said that a schema cannot hold. A schema already carrying a description keeps it — a mapper that
-     * built one knows something the class-level sentence does not.
+     * `$schema` with the class's `#[Description]` as its `description`, plus whatever its declarations
+     * said that a schema cannot hold ({@see DescribedText} for which one of several stands). A schema
+     * already carrying a description keeps it — a mapper that built one knows something the class-level
+     * sentence does not.
      *
      * @param  array<string, mixed>  $schema
      * @return array{0: array<string, mixed>, 1: list<Diagnostic>}
@@ -58,13 +59,15 @@ final class ClassAnnotations
             return [$schema, []];
         }
 
-        $description = self::first($fqcn);
-        if ($description === null) {
-            return [$schema, []];
-        }
+        $site = ClassNames::publishable($fqcn);
 
         $diagnostics = [];
-        $text = DescribedText::of($description, ClassNames::publishable($fqcn), "a schema's description", $diagnostics);
+        $text = null;
+        foreach (self::all($fqcn) as $description) {
+            $candidate = DescribedText::of($description, $site, "a schema's description", $diagnostics);
+            $text ??= $candidate;
+        }
+
         if ($text !== null) {
             $schema['description'] = $text;
         }
@@ -73,21 +76,23 @@ final class ClassAnnotations
     }
 
     /**
-     * The class's own `#[Description]`, or null. Two declarations leave the first standing, as source order.
+     * The class's own `#[Description]` declarations, in source order.
      *
      * @param  class-string  $fqcn
+     * @return list<Description>
      */
-    private static function first(string $fqcn): ?Description
+    private static function all(string $fqcn): array
     {
+        $instances = [];
         foreach ((new ReflectionClass($fqcn))->getAttributes(Description::class) as $declaration) {
             try {
-                return $declaration->newInstance();
+                $instances[] = $declaration->newInstance();
             } catch (Throwable) {
                 // An argument the constructor rejects is the adapter's `attribute.unreadable` story on an
                 // action; here there is no route to name, so it simply says nothing.
             }
         }
 
-        return null;
+        return $instances;
     }
 }
