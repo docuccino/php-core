@@ -7,6 +7,16 @@ User-facing changes to `docuccino/core` — features, fixes, performance work an
 taken from the commit messages scoped `core`. Entries begin after v0.1.2; older history is in
 the [repository](https://github.com/docuccino/docuccino) git log.
 
+## v0.10.4
+
+### Features
+
+- describe a request body per operation ([#253](https://github.com/docuccino/docuccino/pull/253))
+
+### Bug fixes
+
+- read a lint safelist pointer in the spelling every message prints ([#250](https://github.com/docuccino/docuccino/pull/250))
+
 ## v0.10.3
 
 ### Features
