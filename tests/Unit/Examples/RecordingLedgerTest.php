@@ -8,8 +8,10 @@ use Docuccino\Core\Examples\ProcessRecordingLedger;
 use Docuccino\Core\Examples\RecordedBody;
 use Docuccino\Core\Examples\RecordedExample;
 use Docuccino\Core\Examples\RecordingStore;
+use Docuccino\Core\Examples\ResponseShape;
 use Docuccino\Core\Examples\SharedRecordingLedger;
 use Docuccino\Core\Examples\UnlockableRecording;
+use Docuccino\Core\Support\Json;
 
 /**
  * The two ledgers, and the one claim that lets the second one exist: a recording is the same file
@@ -190,6 +192,50 @@ it('leaves a committed body alone across workers while its shape is unchanged', 
         ->record(LEDGER_OPERATION, 'GET /api/invoices/{invoice}', RecordedExample::of('200', 'application/json', ['id' => 3, 'note' => 'later still']));
 
     expect(file_get_contents((string) $store->pathFor(LEDGER_OPERATION)))->toBe($committed);
+});
+
+it('leaves an id-KEYED committed body alone across workers, whichever ids the run produced', function (): void {
+    [$recordings, $scratch] = ledgerDirectories();
+    $store = new RecordingStore($recordings);
+
+    $keyedBy = static fn (string $first, string $second): mixed => RecordedBody::decode(
+        '{"'.$first.'":{"name":"Core details"},"'.$second.'":{"name":"Contact details"}}',
+    );
+
+    $body = $keyedBy('3fa85f64-5717-4562-b3fc-2c963f66afa6', 'c0ffee00-dead-4bee-8000-000000000001');
+    $committedExample = RecordedExample::of('200', 'application/json', $body);
+
+    // Two runs' worth of ids, one sorting either side of what was committed. The rank is a total order
+    // on content, so ranking is what would decide the file if the shape rule ever let go of it.
+    $lower = RecordedExample::of('200', 'application/json', $keyedBy(
+        '0193a1f0-0000-7000-8000-000000000001',
+        '0193a1f0-0000-7000-8000-000000000002',
+    ));
+    $higher = RecordedExample::of('200', 'application/json', $keyedBy(
+        'f47ac10b-58cc-1372-a567-0e02b2c3d479',
+        'fa85f64d-5717-4562-b3fc-2c963f66afa6',
+    ));
+
+    // What the rank actually does with them: the count of filled-in places and the encoded length tie,
+    // because ids are fixed-width and there are still two of them, so the encoded bytes are the only
+    // component left to decide — and they decide differently every run.
+    expect(ResponseShape::populatedPaths($lower->body))->toBe(ResponseShape::populatedPaths($committedExample->body))
+        ->and(strlen(Json::stable($lower->body)))->toBe(strlen(Json::stable($committedExample->body)))
+        ->and($lower->outranks($committedExample))->toBeTrue()
+        ->and($higher->outranks($committedExample))->toBeFalse();
+
+    $store->put(ExampleRecording::of(LEDGER_OPERATION, 'GET /api/settings', [$committedExample]));
+    $expected = (string) file_get_contents((string) $store->pathFor(LEDGER_OPERATION));
+
+    foreach ([$lower, $higher] as $candidate) {
+        (new SharedRecordingLedger($store, 'id-keyed-run', $scratch))
+            ->record(LEDGER_OPERATION, 'GET /api/settings', $candidate);
+    }
+
+    // The better-ranked candidate never gets to win, because `with()` finds the shape unchanged and
+    // keeps the committed bytes — which is the whole of why the third rank component is inert here.
+    expect(file_get_contents((string) $store->pathFor(LEDGER_OPERATION)))->toBe($expected)
+        ->and($expected)->toContain('3fa85f64-5717-4562-b3fc-2c963f66afa6');
 });
 
 it('starts a later run from the file as it stands, not from what the last one was accumulating', function (): void {

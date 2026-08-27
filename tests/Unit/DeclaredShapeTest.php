@@ -416,3 +416,13 @@ it('supersedes a contentSchema only where the declared type is no longer a strin
         ->and(SchemaKeywords::isSuperseded('contentSchema', ['type' => 'object']))->toBeTrue()
         ->and(SchemaKeywords::isSuperseded('definitions', ['type' => 'object']))->toBeFalse();
 });
+
+it('answers no for a keyword its annotation-only set does not name', function (): void {
+    // Unknown-entry degradation: a keyword nothing classifies is a keyword the diff must keep reporting,
+    // so the safe answer is "not an annotation" rather than "not a change".
+    expect(SchemaKeywords::isAnnotationOnly('type'))->toBeFalse()
+        ->and(SchemaKeywords::isAnnotationOnly('x-vendor-note'))->toBeFalse()
+        ->and(SchemaKeywords::isAnnotationOnly('summary'))->toBeFalse()
+        ->and(SchemaKeywords::isAnnotationOnly(''))->toBeFalse()
+        ->and(SchemaKeywords::annotationOnly())->not->toBeEmpty();
+});

@@ -10,7 +10,9 @@ use Docuccino\Core\Diff\FieldChange;
 use Docuccino\Core\Diff\IdentityKeys;
 use Docuccino\Core\Diff\IncomparableDocumentsException;
 use Docuccino\Core\Diff\Pairing;
+use Docuccino\Core\Diff\Policy\VersioningPolicies;
 use Docuccino\Core\Document\UirDocument;
+use Docuccino\Core\Draft\SchemaKeywords;
 use Docuccino\Core\Emit\EmitOptions;
 use Docuccino\Core\Emit\OpenApi32Emitter;
 use Docuccino\Core\Identity\IdentityGenerator;
@@ -119,8 +121,10 @@ it('escapes the algo version it quotes back in that refusal', function (): void 
 function diffBaseArtifact(bool $keepIds = false): array
 {
     $options = $keepIds ? (new EmitOptions)->withKeepIds() : new EmitOptions;
+    // Through the shared reader: an associative decode reads `{}` back as `[]`, and at a compared
+    // keyword those are two values — so the round trip alone would report a change nobody made.
     /** @var array<string, mixed> $decoded */
-    $decoded = json_decode((new OpenApi32Emitter)->emit(UirDocument::fromArray(diffBase()), $options), true);
+    $decoded = JsonValue::decode((new OpenApi32Emitter)->emit(UirDocument::fromArray(diffBase()), $options));
 
     return $decoded;
 }
@@ -2345,3 +2349,229 @@ it('leaves legitimate non-ASCII in artifact text alone', function (): void {
     expect($rendered)->toContain('query:état')
         ->and($rendered)->toContain('Formulaire — 日本語');
 });
+
+/**
+ * {@see diffBase()} with one keyword written onto the JSON response body's schema — one pointer, one
+ * keyword, and nothing else in the document touched.
+ *
+ * @return array<string, mixed>
+ */
+function diffBaseWithSchemaKeyword(string $keyword, mixed $value): array
+{
+    $doc = diffBase();
+    $doc['paths']['/api/v1/forms/{id}']['get']['responses']['200']['content']['application/json']['schema'][$keyword] = $value;
+
+    return $doc;
+}
+
+/**
+ * One edit, one keyword, both sides.
+ */
+function diffOfSchemaKeyword(string $keyword, mixed $before, mixed $after): Changeset
+{
+    return diffOf(diffBaseWithSchemaKeyword($keyword, $before), diffBaseWithSchemaKeyword($keyword, $after));
+}
+
+/** @return list<string> */
+function diffCodes(Changeset $changeset): array
+{
+    return array_map(static fn (Change $change): string => $change->code, $changeset->changes);
+}
+
+/**
+ * Every built-in versioning policy, each at a version its own grammar accepts and which did NOT move.
+ * A policy that cannot read the versions violates before it ever looks at the changeset, so one pair of
+ * strings cannot serve all three.
+ *
+ * @return array<string, array{0: string, 1: string}>
+ */
+function unmovedVersionPerPolicy(): array
+{
+    return ['semver' => ['1.4.2', '1.4.2'], 'date' => ['2026-08-01', '2026-08-01'], 'none' => ['', '']];
+}
+
+/**
+ * The annotation keywords, with an edit for each. The set itself is {@see SchemaKeywords}'s, and the
+ * test below fails if this list is short of it.
+ *
+ * @return array<string, array{0: string, 1: mixed, 2: mixed}>
+ */
+function annotationKeywordEdits(): array
+{
+    return [
+        '$comment' => ['$comment', 'written by the generator', 'written by hand'],
+        'description' => ['description', 'The form', 'The form, as stored'],
+        'example' => ['example', ['id' => 1], ['id' => 999]],
+        'examples' => ['examples', [['id' => 1]], [['id' => 999]]],
+        'externalDocs' => ['externalDocs', ['url' => 'https://forms.test/a'], ['url' => 'https://forms.test/b']],
+        'title' => ['title', 'Form', 'Stored form'],
+    ];
+}
+
+/**
+ * Every keyword that lives in {@see SchemaKeywords}'s SUPERSESSION annotations and deliberately not in
+ * its annotation-only set, with an edit for each. The reasons are the ones stated there; the test below
+ * holds this list to the difference between the two sets, so a new annotation cannot land in neither.
+ *
+ * @return array<string, array{0: string, 1: mixed, 2: mixed}>
+ */
+function contractBearingKeywordEdits(): array
+{
+    return [
+        'default' => ['default', 'draft', 'published'],
+        'deprecated' => ['deprecated', false, true],
+        'readOnly' => ['readOnly', false, true],
+        'writeOnly' => ['writeOnly', false, true],
+        '$defs' => ['$defs', ['Inner' => ['type' => 'string']], ['Inner' => ['type' => 'integer']]],
+        'definitions' => ['definitions', ['Inner' => ['type' => 'string']], ['Inner' => ['type' => 'integer']]],
+        '$id' => ['$id', 'https://forms.test/schemas/a', 'https://forms.test/schemas/b'],
+        '$anchor' => ['$anchor', 'formA', 'formB'],
+        '$schema' => ['$schema', 'https://json-schema.org/draft/2020-12/schema', 'http://json-schema.org/draft-07/schema#'],
+        'x-docuccino' => ['x-docuccino', ['id' => 'sch:v1:aaaaaaaaaaaaaaaa'], ['id' => 'sch:v1:bbbbbbbbbbbbbbbb']],
+    ];
+}
+
+it('reports an annotation keyword as a non-breaking change that gates under no policy', function (string $keyword, mixed $before, mixed $after): void {
+    $changeset = diffOfSchemaKeyword($keyword, $before, $after);
+
+    expect(SchemaKeywords::isAnnotationOnly($keyword))->toBeTrue()
+        ->and(diffCodes($changeset))->toBe(['schema.annotation-changed'])
+        ->and($changeset->changes[0]->breaking)->toBeFalse()
+        ->and($changeset->changes[0]->fields[0]->field)->toBe($keyword)
+        ->and($changeset->changes[0]->path)->toEndWith('schema.'.$keyword)
+        ->and($changeset->isBreaking())->toBeFalse();
+
+    foreach (unmovedVersionPerPolicy() as $policy => [$oldVersion, $newVersion]) {
+        expect(VersioningPolicies::for($policy)->evaluate($changeset, $oldVersion, $newVersion)->satisfied)
+            ->toBeTrue("the {$policy} policy gated on an annotation-only changeset");
+    }
+})->with(annotationKeywordEdits());
+
+it('never classifies a contract-bearing keyword as an annotation', function (string $keyword, mixed $before, mixed $after): void {
+    // Nothing compares any of these today, so the changeset is empty — pinned as `[]` rather than as
+    // "not an annotation", because that is the fact a comparator arriving for one of them would move,
+    // and a comparator that classed it as an annotation would be the mistake this row exists to catch.
+    expect(SchemaKeywords::isAnnotationOnly($keyword))->toBeFalse()
+        ->and(diffCodes(diffOfSchemaKeyword($keyword, $before, $after)))->toBe([]);
+})->with(contractBearingKeywordEdits());
+
+/**
+ * The two datasets above only prove the rows they list, and the split between them is the thing that
+ * must not move quietly: a keyword wrongly called an annotation silences a real change, and a new
+ * supersession annotation landing in NEITHER list is a decision nobody made. So both are derived from
+ * the source of truth — the members from the annotation-only set, the exclusions from what the
+ * supersession set has over it — and a keyword can only be added to one by choosing which.
+ */
+it('covers every annotation keyword there is, and every exclusion the supersession set has over it', function (): void {
+    $listed = array_keys(annotationKeywordEdits());
+    $actual = SchemaKeywords::annotationOnly();
+    sort($listed);
+    sort($actual);
+
+    $excluded = array_keys(contractBearingKeywordEdits());
+    $exclusions = array_values(array_diff(SchemaKeywords::annotations(), $actual));
+    sort($excluded);
+    sort($exclusions);
+
+    expect($listed)->toBe($actual)
+        ->and($excluded)->toBe($exclusions)
+        // Anti-vacuity: two empty sets would agree with each other and prove nothing.
+        ->and(count($actual))->toBeGreaterThanOrEqual(5)
+        ->and(count($exclusions))->toBeGreaterThanOrEqual(8);
+
+    foreach ($actual as $keyword) {
+        expect(SchemaKeywords::classification()[$keyword] ?? null)->toBe('annotation', "{$keyword} is annotation-only but not an annotation");
+    }
+
+    // Every policy the version map names really is that policy: a typo'd row would resolve to the
+    // no-versioning fallback and go on passing while proving nothing about the policy it names.
+    foreach (array_keys(unmovedVersionPerPolicy()) as $policy) {
+        expect(VersioningPolicies::for($policy)->name())->toBe($policy);
+    }
+});
+
+it('keeps a schema change and an annotation change at one pointer apart', function (): void {
+    $old = diffBaseWithSchemaKeyword('description', 'The form');
+    $new = diffBaseWithSchemaKeyword('description', 'The form, as stored');
+    // The same schema node, narrowed: a response body that was an object is now a string.
+    $new['paths']['/api/v1/forms/{id}']['get']['responses']['200']['content']['application/json']['schema']['type'] = 'string';
+
+    $changeset = diffOf($old, $new);
+    $byCode = changesByCode($changeset);
+
+    expect(diffCodes($changeset))->toContain('schema.annotation-changed', 'schema.type-changed')
+        ->and($byCode['schema.type-changed']->breaking)->toBeTrue()
+        ->and($byCode['schema.annotation-changed']->breaking)->toBeFalse()
+        ->and($changeset->isBreaking())->toBeTrue()
+        // Neither hides the other: each is in exactly one of the two buckets the renderer prints.
+        ->and(array_map(static fn (Change $c): string => $c->code, $changeset->breakingChanges()))->toBe(['schema.type-changed'])
+        ->and(array_map(static fn (Change $c): string => $c->code, $changeset->nonBreakingChanges()))->toBe(['schema.annotation-changed']);
+
+    $rendered = (new ChangesetRenderer)->render($changeset);
+
+    expect($rendered)->toContain('2 changes (1 breaking)')
+        ->and($rendered)->toContain('schema.type-changed')
+        ->and($rendered)->toContain('schema.annotation-changed');
+
+    // The annotation change rescues nothing: every policy still gates on the narrowing beside it.
+    foreach (unmovedVersionPerPolicy() as $policy => [$oldVersion, $newVersion]) {
+        expect(VersioningPolicies::for($policy)->evaluate($changeset, $oldVersion, $newVersion)->satisfied)
+            ->toBeFalse("the {$policy} policy passed a breaking change sharing a pointer with an annotation");
+    }
+});
+
+it('renders an annotation-only changeset rather than reporting no API changes', function (): void {
+    $changeset = diffOfSchemaKeyword('example', ['id' => 1], ['id' => 999]);
+    $rendered = (new ChangesetRenderer)->render($changeset);
+
+    expect($changeset->isEmpty())->toBeFalse()
+        ->and($rendered)->not->toContain('No API changes.')
+        ->and($rendered)->toContain('1 change (0 breaking)')
+        ->and($rendered)->toContain('NON-BREAKING')
+        ->and($rendered)->toContain('schema.annotation-changed')
+        ->and($rendered)->toContain('example: {"id":1} -> {"id":999}');
+});
+
+it('tells an empty-object annotation from an empty list, and the same object from a change', function (): void {
+    // Two `stdClass` standing for one JSON object are never the identical instance, so `===` read an
+    // example that had not moved as one that had. `{}` and `[]` at the same keyword really do differ.
+    expect(diffOf(diffBaseWithSchemaKeyword('example', new stdClass), diffBaseWithSchemaKeyword('example', new stdClass))->isEmpty())->toBeTrue()
+        ->and(diffCodes(diffOfSchemaKeyword('example', new stdClass, [])))->toBe(['schema.annotation-changed']);
+});
+
+it('reports an annotation change inside a property, and on a named component', function (): void {
+    $old = diffBase();
+    $new = diffBase();
+    $new['paths']['/api/v1/forms/{id}']['get']['responses']['200']['content']['application/json']['schema']['properties']['title']['description'] = 'The form title';
+    $new['components']['schemas']['FormData']['title'] = 'Form data';
+
+    $changeset = diffOf($old, $new);
+
+    expect(diffCodes($changeset))->toBe(['schema.annotation-changed', 'schema.annotation-changed'])
+        ->and($changeset->isBreaking())->toBeFalse()
+        ->and(array_map(static fn (Change $c): string => $c->path, $changeset->changes))->toBe([
+            'GET /api/v1/forms/{id} responses 200 application/json schema.properties.title.description',
+            'components.schemas.FormData.title',
+        ]);
+});
+
+/**
+ * The fingerprint every value comparison here runs on, at the values JSON cannot spell. Its fallback
+ * was `gettype()` — one key for every un-encodable value — so two of them in one enum compared EQUAL
+ * and dropping one read as dropping nothing. Harmless where an annotation goes unreported; not where a
+ * `schema.enum-value-removed` does, which is breaking.
+ */
+it('tells two values JSON cannot encode apart, so a removed enum value is still reported', function (mixed $kept, mixed $dropped): void {
+    expect(json_encode([$kept, $dropped]))->toBeFalse();
+
+    $changeset = diffOf(diffBaseWithSchemaKeyword('enum', [$kept, $dropped]), diffBaseWithSchemaKeyword('enum', [$kept]));
+
+    expect(diffCodes($changeset))->toBe(['schema.enum-value-removed'])
+        ->and($changeset->isBreaking())->toBeTrue()
+        // And the value that stayed is still the same value: a fingerprint that told everything apart
+        // would report it removed and re-added.
+        ->and(diffOf(diffBaseWithSchemaKeyword('enum', [$kept]), diffBaseWithSchemaKeyword('enum', [$kept]))->isEmpty())->toBeTrue();
+})->with([
+    'strings that are not valid UTF-8' => ["\xB1\x31", "\xB2\x31"],
+    'INF and NAN' => [INF, NAN],
+]);

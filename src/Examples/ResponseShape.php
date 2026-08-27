@@ -15,12 +15,29 @@ use stdClass;
  * committed body alone unless the structure actually moved — which is a contract change, and worth
  * seeing in the diff.
  *
+ * That promise covers a generated id wherever it sits, and an id-keyed map puts one in the KEY: a map
+ * under `0193a1f0-…` holds one kind of thing, it does not have a member of that name. Such a key
+ * therefore contributes its KIND, while how many of them there are stays in the fingerprint — so a key
+ * that changes kind and a map that grows a member both still move it.
+ *
  * @internal
  */
 final class ResponseShape
 {
     /** How deep the walk goes; a recorded body is a response, not a document. */
     private const int MAX_DEPTH = 64;
+
+    /**
+     * Key text an application MINTS rather than names, as kind marker => pattern. ULID is here beside
+     * UUID because a framework mints it the same way, not on the chance one might; both are fixed-width
+     * and unambiguous, which is what lets a key be read with no schema to ask.
+     *
+     * @var array<string, string>
+     */
+    private const array GENERATED_KEY_KINDS = [
+        '<uuid>' => '/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iD',
+        '<ulid>' => '/^[0-7][0-9ABCDEFGHJKMNPQRSTVWXYZ]{25}$/iD',
+    ];
 
     /** A short, stable fingerprint of the body's structure. */
     public static function of(mixed $body): string
@@ -39,6 +56,17 @@ final class ResponseShape
         self::collect($body, '', $paths, 0);
 
         return count($paths);
+    }
+
+    /**
+     * Every kind marker a generated key can contribute, so a guard reads the set rather than a second
+     * copy of it. {@see GENERATED_KEY_KINDS}
+     *
+     * @return list<string>
+     */
+    public static function generatedKeyKinds(): array
+    {
+        return array_keys(self::GENERATED_KEY_KINDS);
     }
 
     private static function describe(mixed $value, int $depth): string
@@ -68,9 +96,10 @@ final class ResponseShape
                 return '['.implode('|', $shapes).']';
             }
 
+            // Members are LISTED, not deduplicated, so nine ids stay nine.
             $members = [];
             foreach ($value as $key => $item) {
-                $members[] = (string) $key.':'.self::describe($item, $depth + 1);
+                $members[] = self::keyKind((string) $key).':'.self::describe($item, $depth + 1);
             }
             sort($members);
 
@@ -85,6 +114,18 @@ final class ResponseShape
             is_string($value) => 's',
             default => '?',
         };
+    }
+
+    /** The kind marker of a key that was generated, or the key itself when someone chose it. */
+    private static function keyKind(string $key): string
+    {
+        foreach (self::GENERATED_KEY_KINDS as $kind => $pattern) {
+            if (preg_match($pattern, $key) === 1) {
+                return $kind;
+            }
+        }
+
+        return $key;
     }
 
     /**
@@ -102,6 +143,8 @@ final class ResponseShape
                 return;
             }
 
+            // Key text reaches a path as it is; only describe() reads a generated key as its kind, so
+            // an id-keyed map still counts each id as a place of its own.
             $list = ! $map && array_is_list($value);
             foreach ($value as $key => $item) {
                 self::collect($item, $path.'/'.($list ? '*' : (string) $key), $paths, $depth + 1);

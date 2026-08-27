@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Docuccino\Core\Contract\ContractIndex;
+use Docuccino\Core\Diff\DocumentDiffer;
 
 it('lists operations by path then canonical method order, whatever order the document holds them in', function (): void {
     $labels = array_map(
@@ -116,4 +117,29 @@ it('keeps an empty object distinct from an empty array in the graph it validates
     $graph = ContractIndex::fromJson('{"components":{"schemas":{"Empty":{"properties":{}}}}}')->graph();
 
     expect($graph->components->schemas->Empty->properties)->toBeInstanceOf(stdClass::class);
+});
+
+it('hands the differ a document that keeps an empty object apart from an empty list', function (): void {
+    // The index's own copy is decoded associatively, which cannot spell `{}` — so a document diffed
+    // against ITSELF reported every empty-object example inside it changing shape. `comparable()` reads
+    // the kept JSON text instead, exactly as `graph()` does for validation.
+    $json = (string) json_encode([
+        'uir' => '1.0.0',
+        'openapi' => '3.2.0',
+        'info' => ['title' => 'Forms API', 'version' => '1.0.0'],
+        'paths' => ['/forms' => ['get' => [
+            'x-docuccino' => ['id' => 'op:v1:aaaaaaaaaaaaaaaa'],
+            'responses' => ['200' => [
+                'x-docuccino' => ['id' => 'res:v1:bbbbbbbbbbbbbbbb'],
+                'description' => 'ok',
+                'content' => ['application/json' => ['schema' => ['type' => 'object', 'example' => new stdClass]]],
+            ]],
+        ]]],
+    ]);
+
+    $index = ContractIndex::fromJson($json);
+
+    expect((new DocumentDiffer)->diff($index->comparable(), $index->comparable())->isEmpty())->toBeTrue()
+        // The lossy copy is still what the lookups walk, and it still reads that example as a list.
+        ->and($index->document()['paths']['/forms']['get']['responses']['200']['content']['application/json']['schema']['example'])->toBe([]);
 });

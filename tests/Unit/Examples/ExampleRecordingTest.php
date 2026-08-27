@@ -58,6 +58,35 @@ it('leaves a committed body alone while its shape is unchanged', function (): vo
     expect($rerecorded->toArray())->toBe($recording->toArray());
 });
 
+it('leaves a committed body alone while only the ids it is keyed BY move', function (): void {
+    // The ordinary keyBy('id') payload, which decodes to an object: the ids are the member names, so a
+    // rule that read key TEXT would find every re-recording a new shape and rewrite the file every run.
+    $keyedBy = static fn (string $first, string $second): mixed => RecordedBody::decode(
+        '{"'.$first.'":{"name":"Core details"},"'.$second.'":{"name":"Contact details"}}',
+    );
+
+    $recording = ExampleRecording::of('op:v1:abcdefgh12345678', 'GET /api/invoices', [
+        RecordedExample::of('200', 'application/json', $keyedBy(
+            '0193a1f0-0000-7000-8000-000000000001',
+            '0193a1f0-0000-7000-8000-000000000002',
+        )),
+    ]);
+
+    $rerecorded = $recording->with(RecordedExample::of('200', 'application/json', $keyedBy(
+        '3fa85f64-5717-4562-b3fc-2c963f66afa6',
+        'c0ffee00-dead-4bee-8000-000000000001',
+    )));
+
+    // A third id is a member the contract did not have, and that still rewrites the file — the rule is
+    // "which ids" rather than "id-keyed bodies never move".
+    $grown = $recording->with(RecordedExample::of('200', 'application/json', RecordedBody::decode(
+        '{"3fa85f64-5717-4562-b3fc-2c963f66afa6":{"name":"a"},"c0ffee00-dead-4bee-8000-000000000001":{"name":"b"},"f47ac10b-58cc-1372-a567-0e02b2c3d479":{"name":"c"}}',
+    )));
+
+    expect($rerecorded->toArray())->toBe($recording->toArray())
+        ->and($grown->toArray())->not->toBe($recording->toArray());
+});
+
 it('replaces a committed body when the shape really did move', function (): void {
     $recording = ExampleRecording::of('op:v1:abcdefgh12345678', 'GET /api/invoices', [
         RecordedExample::of('200', 'application/json', ['id' => 1]),

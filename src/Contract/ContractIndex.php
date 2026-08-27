@@ -9,6 +9,7 @@ use Docuccino\Core\Document\NodeIdentity;
 use Docuccino\Core\Document\PathItem;
 use Docuccino\Core\Document\UirDocument;
 use Docuccino\Core\Support\Arr;
+use Docuccino\Core\Support\JsonValue;
 use JsonException;
 use stdClass;
 
@@ -86,6 +87,9 @@ final class ContractIndex
      * The document as an object graph, which is what JSON Schema validation needs: `properties: {}`
      * and `properties: []` mean different things and only the object form keeps them apart.
      *
+     * An empty graph where the kept text is not JSON, which {@see fromArray()} reaches whenever
+     * `json_encode` refuses the array it was handed — invalid UTF-8, an `INF` — and hands over `''`.
+     *
      * @internal
      */
     public function graph(): object
@@ -97,6 +101,18 @@ final class ContractIndex
         $decoded = json_decode($this->json, false);
 
         return $this->graph = is_object($decoded) ? $decoded : new stdClass;
+    }
+
+    /**
+     * The document as the typed model, for the SEMANTIC DIFF. Read off {@see graph()} rather than off
+     * the associative copy this class indexes, and for the same reason validation is: only the object
+     * form tells `{}` from `[]`, and at a compared keyword those are two different values.
+     *
+     * @internal
+     */
+    public function comparable(): UirDocument
+    {
+        return UirDocument::fromArray(Arr::stringKeyed((array) JsonValue::normalize($this->graph())));
     }
 
     /**
