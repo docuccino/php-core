@@ -7,6 +7,16 @@ User-facing changes to `docuccino/core` — features, fixes, performance work an
 taken from the commit messages scoped `core`. Entries begin after v0.1.2; older history is in
 the [repository](https://github.com/docuccino/docuccino) git log.
 
+## v0.10.5
+
+### Features
+
+- report an annotation-only schema change without gating on it ([#256](https://github.com/docuccino/docuccino/pull/256))
+
+### Bug fixes
+
+- read a generated key as its kind, not its identity ([#257](https://github.com/docuccino/docuccino/pull/257))
+
 ## v0.10.4
 
 ### Features
