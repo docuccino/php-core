@@ -17,13 +17,20 @@ final class Refs
     private const int MAX_HOPS = 8;
 
     /**
-     * The node a `$ref` chain ends at, with the pointer segments that address it. A reference that goes
-     * nowhere resolves to itself, so the caller reports "nothing documented" rather than crashing.
+     * The node a `$ref` chain ends at, with the pointer segments that address it, and the reference
+     * that went nowhere — null where everything resolved, or where there was no `$ref` at all.
+     *
+     * A reference that goes nowhere still degrades to the `$ref` node itself, so a caller mid-walk can
+     * carry on; but a node that is only a pointer says nothing about `required`, `schema` or anything
+     * else, and a caller that read those off it would be checking a header against nothing and calling
+     * it a pass. So non-resolution is REPORTED rather than implied, and the callers that answer for a
+     * document turn it into a violation: a `$ref` at a name the document does not define is a broken
+     * document, not an uncheckable one.
      *
      * @param  array<string, mixed>  $document
      * @param  array<string, mixed>  $node
      * @param  list<string>  $segments
-     * @return array{0: array<string, mixed>, 1: list<string>}
+     * @return array{0: array<string, mixed>, 1: list<string>, 2: string|null}
      */
     public static function follow(array $document, array $node, array $segments): array
     {
@@ -31,7 +38,7 @@ final class Refs
             $ref = $node['$ref'] ?? null;
 
             if (! is_string($ref) || ! str_starts_with($ref, '#/')) {
-                return [$node, $segments];
+                return [$node, $segments, null];
             }
 
             $target = self::segments($ref);
@@ -39,13 +46,13 @@ final class Refs
 
             foreach ($target as $segment) {
                 if (! is_array($resolved) || ! array_key_exists($segment, $resolved)) {
-                    return [$node, $segments];
+                    return [$node, $segments, $ref];
                 }
                 $resolved = $resolved[$segment];
             }
 
             if (! is_array($resolved)) {
-                return [$node, $segments];
+                return [$node, $segments, $ref];
             }
 
             /** @var array<string, mixed> $resolved */
@@ -53,7 +60,31 @@ final class Refs
             $segments = $target;
         }
 
-        return [$node, $segments];
+        // Out of hops with a `$ref` still in hand: the chain never lands, which is a cycle.
+        $last = $node['$ref'] ?? null;
+
+        return [$node, $segments, is_string($last) ? $last : null];
+    }
+
+    /**
+     * One member of an OAS object with its `$ref` chain followed, or null when the member is not there
+     * (or is not an object). The one reader for "the requestBody of this thing", whatever the thing is.
+     *
+     * @param  array<string, mixed>  $document
+     * @param  array<string, mixed>  $node
+     * @param  list<string>  $segments  pointer segments addressing $node
+     * @return array{0: array<string, mixed>, 1: list<string>, 2: string|null}|null
+     */
+    public static function member(array $document, array $node, string $member, array $segments): ?array
+    {
+        $value = $node[$member] ?? null;
+
+        if (! is_array($value)) {
+            return null;
+        }
+
+        /** @var array<string, mixed> $value */
+        return self::follow($document, $value, [...$segments, $member]);
     }
 
     /**

@@ -14,12 +14,13 @@ use JsonException;
 use stdClass;
 
 /**
- * A generated document, indexed for lookup by (method, concrete request path) and by node id.
+ * A generated document, indexed for lookup by (method, concrete request path), by webhook name, and by
+ * node id.
  *
- * The entry point for contract testing: given a UIR artifact and one observed exchange,
- * {@see ContractChecker} answers whether the exchange matches what the document promises, and
- * {@see ProvenanceTrail} answers who promised it. Framework-neutral throughout — an adapter supplies
- * the exchange, this package supplies the verdict.
+ * The entry point for contract testing: given a UIR artifact and one observed exchange — or one
+ * payload dispatched for a documented webhook — {@see ContractChecker} answers whether it matches what
+ * the document promises, and {@see ProvenanceTrail} answers who promised it. Framework-neutral
+ * throughout — an adapter supplies the observation, this package supplies the verdict.
  *
  * It reads the raw decoded document rather than {@see UirDocument} because
  * everything downstream — JSON Schema validation, the provenance trail, the example audit — needs the
@@ -35,12 +36,14 @@ final class ContractIndex
     /**
      * @param  array<string, mixed>  $document
      * @param  list<ContractOperation>  $operations
+     * @param  list<ContractWebhook>  $webhooks
      * @param  string  $json  the document's own JSON text, kept because associative decoding cannot
      *                        tell an empty object from an empty array and JSON Schema very much can
      */
     private function __construct(
         private readonly array $document,
         private readonly array $operations,
+        private readonly array $webhooks,
         private readonly string $json,
     ) {}
 
@@ -50,7 +53,12 @@ final class ContractIndex
      */
     public static function fromArray(array $document, ?string $json = null): self
     {
-        return new self($document, self::index($document), $json ?? (string) json_encode($document));
+        return new self(
+            $document,
+            self::index($document),
+            self::indexWebhooks($document),
+            $json ?? (string) json_encode($document),
+        );
     }
 
     /**
@@ -165,6 +173,108 @@ final class ContractIndex
     }
 
     /**
+     * Every documented webhook, ordered by name then by the canonical method order — a function of the
+     * document's content, so two runs over the same artifact list them identically.
+     *
+     * @return list<ContractWebhook>
+     *
+     * @internal
+     */
+    public function webhooks(): array
+    {
+        return $this->webhooks;
+    }
+
+    /**
+     * The webhooks published under this name, in canonical method order. A name is the whole lookup:
+     * {@see match()} is inbound-only by construction, and a webhook has no path to match on.
+     *
+     * @return list<ContractWebhook>
+     */
+    public function webhooksNamed(string $name): array
+    {
+        return array_values(array_filter(
+            $this->webhooks,
+            static fn (ContractWebhook $webhook): bool => $webhook->name === $name,
+        ));
+    }
+
+    /**
+     * The distinct names the document publishes webhooks under, sorted — what a "no such webhook"
+     * message offers instead.
+     *
+     * @return list<string>
+     *
+     * @internal
+     */
+    public function webhookNames(): array
+    {
+        $names = [];
+        foreach ($this->webhooks as $webhook) {
+            $names[$webhook->name] = true;
+        }
+
+        $sorted = array_keys($names);
+        sort($sorted, SORT_STRING);
+
+        return $sorted;
+    }
+
+    /**
+     * The path templates whose path item is written as a `$ref` the document does not define, as
+     * `template => the reference`, sorted. Empty where every reference lands.
+     *
+     * A path item that points nowhere has no methods to read, so the path publishes no operations —
+     * and every lookup and every count here would then report exactly what an undocumented route
+     * reports. This is the difference: the document DOES describe that path, and a typo in one
+     * pointer is a broken document rather than a missing route. An index cannot fail an assertion, so
+     * it keeps the fact and {@see ContractMessages::undocumented()} says it.
+     *
+     * @return array<string, string>
+     *
+     * @internal
+     */
+    public function unresolvedPaths(): array
+    {
+        return self::unresolvedPathItems($this->document, 'paths');
+    }
+
+    /**
+     * The same for `webhooks`, as `name => the reference` — the outbound half of one defect, and
+     * {@see ContractMessages::undocumentedWebhook()} says it.
+     *
+     * @return array<string, string>
+     *
+     * @internal
+     */
+    public function unresolvedWebhooks(): array
+    {
+        return self::unresolvedPathItems($this->document, 'webhooks');
+    }
+
+    /**
+     * Whether this artifact's FORMAT has a `webhooks` member at all: OpenAPI 3.0 defines none, so a
+     * document downlevelled to it dropped every webhook it had. That is a different answer from
+     * "documents no webhooks", and a caller owes its reader the difference.
+     */
+    public function supportsWebhooks(): bool
+    {
+        return ! str_starts_with($this->openApiVersion(), '3.0');
+    }
+
+    /**
+     * The OpenAPI version the document declares, empty when it declares none.
+     *
+     * @internal
+     */
+    public function openApiVersion(): string
+    {
+        $version = $this->document['openapi'] ?? null;
+
+        return is_string($version) ? $version : '';
+    }
+
+    /**
      * Where every node carrying an `x-docuccino` id lives, as `id => pointer segments`. Both id forms
      * are read ({@see NodeIdentity}), so an OpenAPI export with flat ids maps as well as UIR does.
      *
@@ -212,6 +322,15 @@ final class ContractIndex
     }
 
     /**
+     * The `paths` map, one entry per (path item, method).
+     *
+     * A path item may be written as a `$ref` into `components.pathItems`, so it is followed
+     * ({@see Refs::follow()}) before anything is read off it — a reference is a spelling, not a
+     * different contract, and an operation behind one indexes exactly as the same operation written
+     * inline does. The `path` stays the USE SITE's template, which is what a request binds against;
+     * only the pointer segments move to where a reader would go and look, as {@see
+     * ContractOperation::responseFor()} already has them.
+     *
      * @param  array<string, mixed>  $document
      * @return list<ContractOperation>
      */
@@ -228,13 +347,22 @@ final class ContractIndex
 
         $operations = [];
         foreach ($templates as $template) {
-            $item = $paths[$template];
-            if (! is_array($item)) {
+            $written = $paths[$template];
+            if (! is_array($written)) {
                 continue;
             }
 
-            /** @var array<string, mixed> $item */
-            $shared = self::parameters($document, $item['parameters'] ?? null, ['paths', $template, 'parameters']);
+            /** @var array<string, mixed> $written */
+            [$item, $at, $dangling] = Refs::follow($document, $written, ['paths', $template]);
+
+            // Nothing to index behind a pointer that lands nowhere: which methods it publishes is
+            // precisely what could not be read. {@see unresolvedPaths()} keeps the fact so the reader
+            // is told the pointer is broken rather than that the route is undocumented.
+            if ($dangling !== null) {
+                continue;
+            }
+
+            $shared = self::parameters($document, $item['parameters'] ?? null, [...$at, 'parameters']);
 
             foreach (PathItem::METHODS as $method) {
                 $operation = $item[$method] ?? null;
@@ -243,7 +371,7 @@ final class ContractIndex
                 }
 
                 /** @var array<string, mixed> $operation */
-                $segments = ['paths', $template, $method];
+                $segments = [...$at, $method];
 
                 $operations[] = new ContractOperation(
                     id: NodeIdentity::inArray($operation),
@@ -260,6 +388,98 @@ final class ContractIndex
         }
 
         return $operations;
+    }
+
+    /**
+     * The `webhooks` map, indexed the same way {@see index()} does `paths` — by a sorted key rather
+     * than by the order the document happens to spell them in, and with a path item written as a
+     * `$ref` followed for the same reason.
+     *
+     * @param  array<string, mixed>  $document
+     * @return list<ContractWebhook>
+     */
+    private static function indexWebhooks(array $document): array
+    {
+        $webhooks = $document['webhooks'] ?? null;
+
+        if (! is_array($webhooks)) {
+            return [];
+        }
+
+        $names = array_map(strval(...), array_keys($webhooks));
+        sort($names, SORT_STRING);
+
+        $indexed = [];
+        foreach ($names as $name) {
+            $written = $webhooks[$name];
+            if (! is_array($written)) {
+                continue;
+            }
+
+            /** @var array<string, mixed> $written */
+            [$item, $at, $dangling] = Refs::follow($document, $written, ['webhooks', $name]);
+
+            if ($dangling !== null) {
+                continue;
+            }
+
+            foreach (PathItem::METHODS as $method) {
+                $operation = $item[$method] ?? null;
+                if (! is_array($operation)) {
+                    continue;
+                }
+
+                /** @var array<string, mixed> $operation */
+                $indexed[] = new ContractWebhook(
+                    id: NodeIdentity::inArray($operation),
+                    name: $name,
+                    method: strtoupper($method),
+                    operation: $operation,
+                    segments: [...$at, $method],
+                );
+            }
+        }
+
+        return $indexed;
+    }
+
+    /**
+     * The entries of a path-item map whose `$ref` chain never lands — a name nothing defines, or a
+     * cycle, which {@see Refs::follow()} reports the same way because both leave the same nothing to
+     * read.
+     *
+     * @param  array<string, mixed>  $document
+     * @param  'paths'|'webhooks'  $member
+     * @return array<string, string>
+     */
+    private static function unresolvedPathItems(array $document, string $member): array
+    {
+        $map = $document[$member] ?? null;
+
+        if (! is_array($map)) {
+            return [];
+        }
+
+        $keys = array_map(strval(...), array_keys($map));
+        sort($keys, SORT_STRING);
+
+        $found = [];
+        foreach ($keys as $key) {
+            $node = $map[$key];
+
+            if (! is_array($node)) {
+                continue;
+            }
+
+            /** @var array<string, mixed> $node */
+            $dangling = Refs::follow($document, $node, [$member, $key])[2];
+
+            if ($dangling !== null) {
+                $found[$key] = $dangling;
+            }
+        }
+
+        return $found;
     }
 
     /**
@@ -280,7 +500,24 @@ final class ContractIndex
             }
 
             /** @var array<string, mixed> $parameter */
-            [$definition, $where] = Refs::follow($document, $parameter, [...$segments, (string) $index]);
+            [$definition, $where, $dangling] = Refs::follow($document, $parameter, [...$segments, (string) $index]);
+
+            // A `$ref` at a name the document does not define leaves nothing to read `name`, `in` or
+            // `schema` off. Dropping it here would make the parameter simply cease to be checked, so it
+            // is kept and reported: the checker fails naming the pointer.
+            if ($dangling !== null) {
+                $out[] = new ContractParameter(
+                    name: '',
+                    in: '',
+                    required: false,
+                    definition: $definition,
+                    segments: $where,
+                    label: 'the parameter at '.Pointer::of($where),
+                    danglingRef: $dangling,
+                );
+
+                continue;
+            }
 
             $name = $definition['name'] ?? null;
             $in = $definition['in'] ?? null;
@@ -313,13 +550,24 @@ final class ContractIndex
     {
         $merged = [];
         foreach ($own as $parameter) {
-            $merged[$parameter->in.':'.$parameter->name] = $parameter;
+            $merged[self::mergeKey($parameter)] = $parameter;
         }
 
         foreach ($shared as $parameter) {
-            $merged[$parameter->in.':'.$parameter->name] ??= $parameter;
+            $merged[self::mergeKey($parameter)] ??= $parameter;
         }
 
         return array_values($merged);
+    }
+
+    /**
+     * What "the same parameter" means for that merge. A dangling one has no name and no location to be
+     * the same BY, so it keys on where it was written — two unresolvable `$ref`s are two findings.
+     */
+    private static function mergeKey(ContractParameter $parameter): string
+    {
+        return $parameter->danglingRef === null
+            ? $parameter->in.':'.$parameter->name
+            : 'at:'.Pointer::of($parameter->segments);
     }
 }

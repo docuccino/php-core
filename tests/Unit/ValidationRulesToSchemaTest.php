@@ -26,8 +26,10 @@ function ruleContext(RepresentationPolicy $policy = new RepresentationPolicy): S
 
 /**
  * A minimal transformer set: `required` marks required, `nullable` marks nullable, `str`/`int` set
- * a scalar type, `map` declares open object values and `closed` refuses them. Enough to drive the
- * builder without any Laravel semantics.
+ * a scalar type, `map` declares open object values and `closed` refuses them. `pair`/`solo` state a
+ * type union and a one-member one, and `bound` is a rule whose keyword depends on the types — the
+ * shape of every type-aware constraint rule, without any of Laravel's. Enough to drive the builder
+ * without any Laravel semantics.
  *
  * @return list<RuleTransformer>
  */
@@ -43,7 +45,7 @@ function fakeTransformers(): array
 
             public function handledRuleNames(): array
             {
-                return ['required', 'nullable', 'str', 'int', 'map', 'closed'];
+                return ['required', 'nullable', 'str', 'int', 'map', 'closed', 'pair', 'solo', 'bound'];
             }
 
             public function apply(ValidationRule $rule, ValidationField $field, SchemaContext $context): void
@@ -54,6 +56,9 @@ function fakeTransformers(): array
                     'str' => $field->setType('string'),
                     'map' => $this->map($field),
                     'closed' => $this->closed($field),
+                    'pair' => $field->setTypes(['array', 'object']),
+                    'solo' => $field->setTypes(['string']),
+                    'bound' => $field->set('bounds', implode('+', $field->types())),
                     default => $field->setType('integer'),
                 };
             }
@@ -125,6 +130,28 @@ it('nests dot notation and wildcard arrays', function (): void {
     ]);
 });
 
+// Laravel reads `\.` in a rule key as a dot belonging to the field name rather than a descent, so a
+// builder that split on every dot published a field called `meta\` holding one called
+// `validation_overrides` — a shape the application never validates and no client can send. One
+// grammar, read by every reader of a body path: FieldPath.
+it('reads an escaped dot as part of the field name rather than a descent', function (): void {
+    $driver = new DefaultValidationRulesToSchema(fakeTransformers());
+    $schema = $driver->convert(fakeRuleSet([
+        'meta\.validation_overrides' => ['required', 'str'],
+        'meta.locale' => ['str'],
+    ]), ruleContext())->schema;
+
+    // The escape is grammar, so what the document publishes is the key itself: one property whose own
+    // name holds a dot, beside the `meta` the unescaped key nested into.
+    expect($schema['properties'])->toHaveKeys(['meta.validation_overrides', 'meta'])
+        ->and($schema['properties']['meta.validation_overrides'])->toBe(['type' => 'string'])
+        ->and($schema['properties']['meta'])->toBe([
+            'type' => 'object',
+            'properties' => ['locale' => ['type' => 'string']],
+        ])
+        ->and($schema['required'])->toBe(['meta.validation_overrides']);
+});
+
 it('publishes a `*` child as the value schema of a node that declares additionalProperties', function (): void {
     // `additionalProperties` and `items` are the SAME slot for two different containers — an object's
     // values and an array's items — and mutually exclusive on one schema. A `*` segment names whichever
@@ -167,6 +194,39 @@ it('expresses nullable per the representation policy', function (): void {
     expect($typeArray['properties']['nick'])->toBe(['type' => ['string', 'null']])
         ->and($anyOf['properties']['nick'])->toBe(['anyOf' => [['type' => 'string'], ['type' => 'null']]]);
 });
+
+it('takes null as one more member of a type union, under either policy', function (): void {
+    // Null is a member of the type expression, not a rewrite of it — a union that dropped its nullability
+    // here would document a field the endpoint accepts null for as one that refuses it.
+    $driver = new DefaultValidationRulesToSchema(fakeTransformers());
+    $typeArray = $driver->convert(fakeRuleSet(['meta' => ['pair', 'nullable']]), ruleContext())->schema;
+    $anyOf = $driver->convert(fakeRuleSet(['meta' => ['pair', 'nullable']]), ruleContext(new RepresentationPolicy(nullable: 'anyof')))->schema;
+
+    expect($typeArray['properties']['meta'])->toBe(['type' => ['array', 'object', 'null']])
+        ->and($anyOf['properties']['meta'])->toBe(['anyOf' => [['type' => 'array'], ['type' => 'object'], ['type' => 'null']]]);
+});
+
+it('writes a one-member type union as the plain type word it says', function (): void {
+    // Otherwise `type: [string]` and `type: string` would be two spellings of one fact, and only one of
+    // them is what the rest of the document publishes.
+    $schema = (new DefaultValidationRulesToSchema(fakeTransformers()))
+        ->convert(fakeRuleSet(['nick' => ['solo']]), ruleContext())->schema;
+
+    expect($schema['properties']['nick'])->toBe(['type' => 'string']);
+});
+
+it('reads back every type word a field carries, for a rule whose keyword depends on them', function (array $rules, string $bounds): void {
+    // What a constraint rule asks when its keyword differs per type: a bound that is one keyword on an
+    // array and another on an object owes both to a value that may be either.
+    $schema = (new DefaultValidationRulesToSchema(fakeTransformers()))
+        ->convert(fakeRuleSet(['meta' => $rules]), ruleContext())->schema;
+
+    expect($schema['properties']['meta']['bounds'])->toBe($bounds);
+})->with([
+    'a union' => [['pair', 'bound'], 'array+object'],
+    'one type' => [['str', 'bound'], 'string'],
+    'nothing typed yet' => [['bound'], ''],
+]);
 
 it('leaves an unhandled rule permissive and raises an info diagnostic', function (): void {
     $driver = new DefaultValidationRulesToSchema(fakeTransformers());

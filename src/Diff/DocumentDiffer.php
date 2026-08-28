@@ -8,6 +8,7 @@ use Docuccino\Core\Document\Content\Page;
 use Docuccino\Core\Document\NodeIdentity;
 use Docuccino\Core\Document\Operation;
 use Docuccino\Core\Document\Parameter;
+use Docuccino\Core\Document\PathItem;
 use Docuccino\Core\Document\ResponseObject;
 use Docuccino\Core\Document\UirDocument;
 use Docuccino\Core\Support\Arr;
@@ -56,7 +57,10 @@ final class DocumentDiffer
 
     public function diff(UirDocument $old, UirDocument $new): Changeset
     {
-        $pairing = $this->pairing($old, $new);
+        $oldRefs = ComponentRefs::of($old);
+        $newRefs = ComponentRefs::of($new);
+
+        $pairing = $this->pairing($old, $new, $oldRefs, $newRefs);
 
         /** @var list<Change> $changes */
         $changes = [];
@@ -64,9 +68,9 @@ final class DocumentDiffer
         /** @var array<string, true> $unreferenced */
         $unreferenced = [];
 
-        $this->diffOperations($old, $new, $changes, $pairing);
+        $this->diffOperations($old, $new, $oldRefs, $newRefs, $changes, $pairing);
         $this->diffComponentSchemas($old, $new, $changes, $unreferenced, $pairing);
-        $this->diffSecuritySchemes($old, $new, $changes, $unreferenced);
+        $this->diffSecuritySchemes($old, $new, $oldRefs, $newRefs, $changes, $unreferenced);
         $this->diffPages($old, $new, $changes);
 
         usort($changes, static fn (Change $a, Change $b): int => $a->sortKey() <=> $b->sortKey());
@@ -84,10 +88,10 @@ final class DocumentDiffer
      * removed AND re-added. Falling back to method + path on both sides is what every other OpenAPI
      * differ does: weaker (a rename reads as remove + add) but never phantom.
      */
-    private function pairing(UirDocument $old, UirDocument $new): Pairing
+    private function pairing(UirDocument $old, UirDocument $new, ComponentRefs $oldRefs, ComponentRefs $newRefs): Pairing
     {
-        $oldAlgo = $this->firstAlgoVersion($old);
-        $newAlgo = $this->firstAlgoVersion($new);
+        $oldAlgo = $this->firstAlgoVersion($old, $oldRefs);
+        $newAlgo = $this->firstAlgoVersion($new, $newRefs);
 
         if ($oldAlgo === null || $newAlgo === null) {
             return Pairing::Structural;
@@ -100,9 +104,9 @@ final class DocumentDiffer
         return Pairing::Identity;
     }
 
-    private function firstAlgoVersion(UirDocument $document): ?string
+    private function firstAlgoVersion(UirDocument $document, ComponentRefs $refs): ?string
     {
-        foreach ($this->operations($document) as [$op]) {
+        foreach ($this->operations($document, $refs) as [$op]) {
             $algo = self::algoVersionOf(self::operationId($op));
             if ($algo !== null) {
                 return $algo;
@@ -124,16 +128,36 @@ final class DocumentDiffer
     }
 
     /**
+     * A path item whose `$ref` reached no path item states no operations, so nothing under that path can be
+     * compared — on EITHER side, since the operations the other side spells out have nothing to pair
+     * against. Naming each one removed would claim knowledge the differ hasn't got, and reporting nothing
+     * would claim the opposite. So the path drops out of the comparison and the changeset says so once,
+     * with {@see unresolvedBreaks()} deciding what the unknown costs — except where both sides carry the
+     * same pointer for the same reason, which is a document that did not change here and is reported as
+     * unchanged for the same reason an unresolved response or parameter `$ref` is.
+     *
      * @param  list<Change>  $changes
      */
-    private function diffOperations(UirDocument $old, UirDocument $new, array &$changes, Pairing $pairing): void
+    private function diffOperations(UirDocument $old, UirDocument $new, ComponentRefs $oldRefs, ComponentRefs $newRefs, array &$changes, Pairing $pairing): void
     {
+        $oldUnresolved = $this->unresolvedPathItems($old, $oldRefs);
+        $newUnresolved = $this->unresolvedPathItems($new, $newRefs);
+
+        foreach (Arr::sortedUnion(array_keys($oldUnresolved), array_keys($newUnresolved)) as $path) {
+            $oldRef = $oldUnresolved[$path] ?? null;
+            $newRef = $newUnresolved[$path] ?? null;
+
+            if (! UnresolvedRef::same($oldRef, $newRef)) {
+                $changes[] = new Change(ChangeKind::Changed, ChangeTarget::Operation, 'pathItem:'.$path, $path, self::unresolvedBreaks($oldRef, $newRef), 'pathItem.unresolved-ref', [new FieldChange('$ref', $oldRef?->ref, $newRef?->ref)]);
+            }
+        }
+
+        $skip = $oldUnresolved + $newUnresolved;
+
         [$oldOps, $newOps] = IdentityKeys::pair(
-            $this->operationEntries($old, $pairing),
-            $this->operationEntries($new, $pairing),
+            $this->operationEntries($old, $oldRefs, $pairing, $skip),
+            $this->operationEntries($new, $newRefs, $pairing, $skip),
         );
-        $oldRefs = ComponentRefs::of($old);
-        $newRefs = ComponentRefs::of($new);
 
         foreach (Arr::sortedUnion(array_keys($oldOps), array_keys($newOps)) as $key) {
             $inOld = array_key_exists($key, $oldOps);
@@ -172,7 +196,7 @@ final class DocumentDiffer
         $this->diffSecurity($id, $path, $oldOp, $newOp, $changes);
         $this->diffParameters($id, $path, $old, $new, $oldRefs, $newRefs, $changes, $pairing);
         $this->diffResponses($id, $path, $oldOp, $newOp, $oldRefs, $newRefs, $changes);
-        $this->diffRequestBody($id, $path, $oldOp, $newOp, $changes);
+        $this->diffRequestBody($id, $path, $oldOp, $newOp, $oldRefs, $newRefs, $changes);
     }
 
     /**
@@ -332,12 +356,23 @@ final class DocumentDiffer
     }
 
     /**
+     * A body behind a `$ref` is the same body: hoisting one into `components.requestBodies` is no change,
+     * and an edit to a shared one is reported against every operation that points at it. A pointer that
+     * reached no request body says the same thing an unfollowable path item's does — the comparison could
+     * not be made — and says it once rather than comparing an empty body against a real one.
+     *
      * @param  list<Change>  $changes
      */
-    private function diffRequestBody(string $opId, string $path, Operation $old, Operation $new, array &$changes): void
+    private function diffRequestBody(string $opId, string $path, Operation $old, Operation $new, ComponentRefs $oldRefs, ComponentRefs $newRefs, array &$changes): void
     {
-        $oldContent = self::requestBodySchemas($old);
-        $newContent = self::requestBodySchemas($new);
+        [$oldContent, $oldRef] = self::requestBody($old, $oldRefs);
+        [$newContent, $newRef] = self::requestBody($new, $newRefs);
+
+        if (! UnresolvedRef::same($oldRef, $newRef)) {
+            $changes[] = new Change(ChangeKind::Changed, ChangeTarget::Operation, $opId, $path.' requestBody', self::unresolvedBreaks($oldRef, $newRef), 'requestBody.unresolved-ref', [new FieldChange('$ref', $oldRef?->ref, $newRef?->ref)]);
+
+            return;
+        }
 
         foreach (Arr::sortedUnion(array_keys($oldContent), array_keys($newContent)) as $media) {
             if (! array_key_exists($media, $oldContent) || ! array_key_exists($media, $newContent)) {
@@ -431,10 +466,10 @@ final class DocumentDiffer
      * @param  list<Change>  $changes
      * @param  array<string, true>  $unreferenced
      */
-    private function diffSecuritySchemes(UirDocument $old, UirDocument $new, array &$changes, array &$unreferenced): void
+    private function diffSecuritySchemes(UirDocument $old, UirDocument $new, ComponentRefs $oldRefs, ComponentRefs $newRefs, array &$changes, array &$unreferenced): void
     {
-        $oldSchemes = self::securitySchemes($old);
-        $newSchemes = self::securitySchemes($new);
+        $oldSchemes = array_map($oldRefs->resolveSecurityScheme(...), self::securitySchemes($old));
+        $newSchemes = array_map($newRefs->resolveSecurityScheme(...), self::securitySchemes($new));
 
         if ($oldSchemes === [] && $newSchemes === []) {
             return;
@@ -601,13 +636,18 @@ final class DocumentDiffer
     }
 
     /**
+     * @param  array<string, UnresolvedRef>  $skip  paths no comparison can be made at ({@see diffOperations()})
      * @return list<array{0: ?string, 1: string, 2: string, 3: OperationEntry}>
      */
-    private function operationEntries(UirDocument $document, Pairing $pairing): array
+    private function operationEntries(UirDocument $document, ComponentRefs $refs, Pairing $pairing, array $skip): array
     {
         $out = [];
 
-        foreach ($this->operations($document) as [$op, $method, $path, $shared]) {
+        foreach ($this->operations($document, $refs) as [$op, $method, $path, $shared]) {
+            if (isset($skip[$path])) {
+                continue;
+            }
+
             $out[] = [
                 $pairing === Pairing::Identity ? self::operationId($op) : null,
                 '_'.strtoupper($method).' '.$path,
@@ -625,25 +665,80 @@ final class DocumentDiffer
     }
 
     /**
-     * A webhook is an operation the API promises to CALL, which is as much a published contract as one it
-     * answers, so it is walked here rather than beside here. It is named by a key instead of a URI, and
-     * `webhooks.` keeps that key out of the space a path template occupies — a path always begins with `/`.
+     * Every path item is read through {@see ComponentRefs::resolvePathItem()} first, so a path spelled as a
+     * pointer into `components.pathItems` yields the operations it names — the diff is the same whether an
+     * author wrote the endpoint inline or hoisted it. One whose pointer reached nothing yields none, and
+     * {@see diffOperations()} is what says so.
      *
      * @return list<array{0: Operation, 1: string, 2: string, 3: list<Parameter>}>
      */
-    private function operations(UirDocument $document): array
+    private function operations(UirDocument $document, ComponentRefs $refs): array
+    {
+        $out = [];
+
+        foreach (self::pathItems($document) as $path => $item) {
+            [$item] = $refs->resolvePathItem($item);
+
+            foreach ($item->operations as $method => $op) {
+                $out[] = [$op, $method, $path, $item->parameters];
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * A webhook is an operation the API promises to CALL, which is as much a published contract as one it
+     * answers, so it is walked with the paths rather than beside them. It is named by a key instead of a
+     * URI, and `webhooks.` keeps that key out of the space a path template occupies — a path always begins
+     * with `/`.
+     *
+     * @return array<string, PathItem>
+     */
+    private static function pathItems(UirDocument $document): array
     {
         $out = [];
 
         foreach ($document->paths ?? [] as $template => $item) {
-            foreach ($item->operations as $method => $op) {
-                $out[] = [$op, $method, (string) $template, $item->parameters];
-            }
+            $out[(string) $template] = $item;
         }
 
         foreach ($document->webhooks ?? [] as $name => $item) {
-            foreach ($item->operations as $method => $op) {
-                $out[] = [$op, $method, 'webhooks.'.$name, $item->parameters];
+            $out['webhooks.'.$name] = $item;
+        }
+
+        return $out;
+    }
+
+    /**
+     * What a pointer the differ could not follow costs. Unresolved, the change under it is UNKNOWN, and
+     * unknown is only safe while the document might still be whole — which a pointer into another file
+     * leaves open and a local one does not. A `#/components/…` pointer at a name the NEW document does not
+     * declare publishes nothing at that position for any reader of it, so the operations, parameters,
+     * schemas and security requirements it stood for are gone from the contract, which is exactly what
+     * renaming or dropping a component under a pointer leaves behind. Only the new side's answer decides:
+     * a document already broken there published nothing left to break, and repairing one is not a breaking
+     * change.
+     */
+    private static function unresolvedBreaks(?UnresolvedRef $old, ?UnresolvedRef $new): bool
+    {
+        return $new !== null && $new->undeclared && ($old === null || ! $old->undeclared);
+    }
+
+    /**
+     * Path → the pointer that reached no path item, for every path either document spells with one.
+     *
+     * @return array<string, UnresolvedRef>
+     */
+    private function unresolvedPathItems(UirDocument $document, ComponentRefs $refs): array
+    {
+        $out = [];
+
+        foreach (self::pathItems($document) as $path => $item) {
+            [, $ref] = $refs->resolvePathItem($item);
+
+            if ($ref !== null) {
+                $out[$path] = $ref;
             }
         }
 
@@ -799,17 +894,26 @@ final class DocumentDiffer
     }
 
     /**
-     * @return array<string, mixed>
+     * The schema each media type of an operation's request body declares, and the pointer that reached no
+     * request body. A body is not modelled, so it is read out of the operation's remaining members.
+     *
+     * @return array{0: array<string, mixed>, 1: UnresolvedRef|null}
      */
-    private static function requestBodySchemas(Operation $op): array
+    private static function requestBody(Operation $op, ComponentRefs $refs): array
     {
         $requestBody = $op->rest['requestBody'] ?? null;
 
-        if (! is_array($requestBody) || ! isset($requestBody['content']) || ! is_array($requestBody['content'])) {
-            return [];
+        if (! is_array($requestBody)) {
+            return [[], null];
         }
 
-        return self::contentSchemas(Arr::stringKeyed($requestBody['content']));
+        [$body, $unresolved] = $refs->resolveRequestBody(Arr::stringKeyed($requestBody));
+
+        if ($unresolved !== null || ! isset($body['content']) || ! is_array($body['content'])) {
+            return [[], $unresolved];
+        }
+
+        return [self::contentSchemas(Arr::stringKeyed($body['content'])), null];
     }
 
     /**

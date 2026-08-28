@@ -10,7 +10,7 @@
         "summary": "List invoices.",
         "parameters": [
           {
-            "x-docuccino": { "id": "par:v1:aaaapage" },
+            "x-docuccino": { "id": "par:v1:aaaaaaaaaaaapage" },
             "name": "page",
             "in": "query",
             "schema": {
@@ -25,13 +25,13 @@
             }
           },
           {
-            "x-docuccino": { "id": "par:v1:aaaasort" },
+            "x-docuccino": { "id": "par:v1:aaaaaaaaaaaasort" },
             "name": "sort",
             "in": "query",
             "schema": { "type": "array", "items": { "type": "string", "enum": ["total", "-total"] } }
           },
           {
-            "x-docuccino": { "id": "par:v1:aaaatenant" },
+            "x-docuccino": { "id": "par:v1:aaaaaaaaaatenant" },
             "name": "X-Tenant",
             "in": "header",
             "required": true,
@@ -40,7 +40,7 @@
         ],
         "responses": {
           "200": {
-            "x-docuccino": { "id": "res:v1:aaaainvoicelist" },
+            "x-docuccino": { "id": "res:v1:aaaaainvoicelist" },
             "description": "OK",
             "content": {
               "application/json": {
@@ -71,12 +71,32 @@
         },
         "responses": {
           "201": {
-            "x-docuccino": { "id": "res:v1:aaaainvoicemade" },
+            "x-docuccino": { "id": "res:v1:aaaaainvoicemade" },
             "description": "Created",
+            "headers": {
+              "Location": {
+                "required": true,
+                "description": "Where the new invoice lives.",
+                "schema": {
+                  "x-docuccino": {
+                    "provenance": [
+                      { "producer": "integration:redirect", "layer": "integration", "fields": ["type"],
+                        "source": { "file": "app/Http/Controllers/InvoiceController.php", "line": 44, "symbol": "App\\Http\\Controllers\\InvoiceController::store" } }
+                    ]
+                  },
+                  "type": "string"
+                }
+              },
+              "X-RateLimit-Remaining": { "schema": { "type": "integer", "minimum": 0 }, "example": 4 },
+              "X-Chunk": { "schema": { "type": "integer" } },
+              "Content-Type": { "schema": { "type": "integer" } },
+              "X-Signature": { "content": { "application/jose": { "schema": { "type": "string" } } } },
+              "X-Legacy": { "$ref": "#/components/headers/Legacy" }
+            },
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Invoice" } } }
           },
           "4XX": {
-            "x-docuccino": { "id": "res:v1:aaaainvoicebad" },
+            "x-docuccino": { "id": "res:v1:aaaaaainvoicebad" },
             "description": "Invalid",
             "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } }
           }
@@ -85,7 +105,7 @@
     },
     "/api/invoices/recent": {
       "get": {
-        "x-docuccino": { "id": "op:v1:aaaainvoicerecent" },
+        "x-docuccino": { "id": "op:v1:aaainvoicerecent" },
         "responses": {
           "200": {
             "description": "OK",
@@ -97,7 +117,7 @@
     "/api/invoices/{invoice}": {
       "parameters": [
         {
-          "x-docuccino": { "id": "par:v1:aaaainvoiceid" },
+          "x-docuccino": { "id": "par:v1:aaaaaaainvoiceid" },
           "name": "invoice",
           "in": "path",
           "required": true,
@@ -105,10 +125,10 @@
         }
       ],
       "get": {
-        "x-docuccino": { "id": "op:v1:aaaainvoiceshow" },
+        "x-docuccino": { "id": "op:v1:aaaaainvoiceshow" },
         "responses": {
           "200": {
-            "x-docuccino": { "id": "res:v1:aaaainvoiceone" },
+            "x-docuccino": { "id": "res:v1:aaaaaainvoiceone" },
             "description": "OK",
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Invoice" } } }
           },
@@ -119,13 +139,13 @@
         }
       },
       "delete": {
-        "x-docuccino": { "id": "op:v1:aaaainvoicekill" },
+        "x-docuccino": { "id": "op:v1:aaaaainvoicekill" },
         "responses": { "204": { "description": "No content" } }
       }
     },
     "/api/exports": {
       "get": {
-        "x-docuccino": { "id": "op:v1:aaaaexportsfeed" },
+        "x-docuccino": { "id": "op:v1:aaaaaexportsfeed" },
         "responses": {
           "200": {
             "description": "OK",
@@ -135,7 +155,92 @@
       }
     }
   },
+  "webhooks": {
+    "alert.raised": {
+      "post": {
+        "x-docuccino": { "id": "op:v1:aaaaaalertraised" },
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": {} }
+        },
+        "responses": { "200": { "description": "Delivery accepted." } }
+      }
+    },
+    "digest.sent": {
+      "post": {
+        "x-docuccino": { "id": "op:v1:aaaaaadigestsent" },
+        "requestBody": { "required": true, "content": {} },
+        "responses": { "200": { "description": "Delivery accepted." } }
+      }
+    },
+    "export.ready": {
+      "post": {
+        "x-docuccino": { "id": "op:v1:aaaaaexportready" },
+        "requestBody": {
+          "required": true,
+          "content": { "text/csv": { "schema": { "type": "string" } } }
+        },
+        "responses": { "200": { "description": "Delivery accepted." } }
+      }
+    },
+    "invoice.paid": {
+      "post": {
+        "x-docuccino": { "id": "op:v1:aaaaainvoicepaid" },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/Invoice" } }
+          }
+        },
+        "responses": { "200": { "description": "Delivery accepted." } }
+      }
+    },
+    "invoice.voided": {
+      "post": {
+        "x-docuccino": { "id": "op:v1:aaaaaavoidedpost" },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/Invoice" } }
+          }
+        },
+        "responses": { "200": { "description": "Delivery accepted." } }
+      },
+      "put": {
+        "x-docuccino": { "id": "op:v1:aaaaaaavoidedput" },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/Invoice" } }
+          }
+        },
+        "responses": { "200": { "description": "Delivery accepted." } }
+      }
+    },
+    "ping.sent": {
+      "post": {
+        "x-docuccino": { "id": "op:v1:aaaaaaaapingsent" },
+        "responses": { "200": { "description": "Delivery accepted." } }
+      }
+    },
+    "receipt.sent": {
+      "post": {
+        "x-docuccino": { "id": "op:v1:aaaaareceiptsent" },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/Invoice" } },
+            "application/xml": { "schema": { "type": "string" } }
+          }
+        },
+        "responses": { "200": { "description": "Delivery accepted." } }
+      }
+    }
+  },
   "components": {
+    "headers": {
+      "Legacy": { "description": "Sent while the old client is still out there.", "schema": { "type": "boolean" } }
+    },
     "schemas": {
       "Invoice": {
         "x-docuccino": {
@@ -162,7 +267,7 @@
         "required": ["reference", "total"]
       },
       "Line": {
-        "x-docuccino": { "id": "sch:v1:aaaalineshape" },
+        "x-docuccino": { "id": "sch:v1:aaaaaaalineshape" },
         "type": "object",
         "properties": {
           "quantity": { "type": "integer", "example": 3 },
@@ -172,7 +277,7 @@
       },
       "InvoiceDraft": {
         "x-docuccino": {
-          "id": "sch:v1:aaaadraftshape",
+          "id": "sch:v1:aaaaaadraftshape",
           "provenance": [
             { "producer": "integration:form-request", "layer": "integration", "fields": ["properties"],
               "source": { "file": "app/Http/Requests/StoreInvoice.php", "line": 14, "symbol": "App\\Http\\Requests\\StoreInvoice::rules" } }

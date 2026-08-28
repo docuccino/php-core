@@ -180,6 +180,13 @@ final class Assembler
         // shapes do — and a bucket is ordered by its names or it isn't.
         $doc = self::orderComponents($doc);
 
+        // Last, over the finished document: an overlay or a transformer can add a scheme as easily as it
+        // can add a requirement, so anything earlier would hold the build to a catalogue it had not
+        // finished writing.
+        foreach (SecurityAudit::report($doc) as $diagnostic) {
+            $diagnostics[] = $diagnostic;
+        }
+
         $doc = $this->stampContentHash($doc);
 
         return new AssemblyResult($doc, $diagnostics);

@@ -9,12 +9,12 @@ namespace Docuccino\Core\Contract\Coverage;
  * can take on its own.
  *
  * A union has no order and no first writer, so the merged list is a function of what ran and nothing
- * else: the same ids come back whatever the worker count was, whichever file each id was seen in, and
- * whatever order the directories were named in. An id in twenty files counts once.
+ * else: the same entries come back whatever the worker count was, whichever file each was seen in, and
+ * whatever order the directories were named in. An entry in twenty files counts once.
  *
  * What it will NOT do is answer from part of the input. A directory it cannot read — absent, or there
  * and refusing to open, at the top of a tree or nested anywhere in one — a directory that holds no log
- * at all, and a file that does not read back as ids each mean the merge is INCOMPLETE, and a gate that
+ * at all, and a file that does not read back as entries each mean the merge is INCOMPLETE, and a gate that
  * quietly measured three of four shards is worse than no gate: those are reported and {@see complete()}
  * is false, rather than being averaged away into a number.
  *
@@ -28,7 +28,7 @@ namespace Docuccino\Core\Contract\Coverage;
 final readonly class CoverageMerge
 {
     /**
-     * @param  list<string>  $ids  every operation id exercised, deduped and sorted
+     * @param  list<string>  $entries  every operation and response exercised, deduped and sorted
      * @param  list<string>  $files  the log files that were read
      * @param  list<string>  $missing  directories that could not be read at all, nested ones included
      * @param  list<string>  $empty  directories that hold no coverage log
@@ -36,7 +36,7 @@ final readonly class CoverageMerge
      * @param  int  $span  seconds between the oldest and newest log read, 0 when nothing was read
      */
     private function __construct(
-        public array $ids,
+        public array $entries,
         public array $files,
         public array $missing,
         public array $empty,
@@ -71,9 +71,9 @@ final readonly class CoverageMerge
             }
 
             foreach ($scan->files as $log) {
-                $ids = self::read($log);
+                $entries = self::read($log);
 
-                if ($ids === null) {
+                if ($entries === null) {
                     $unreadable[] = $log;
 
                     continue;
@@ -86,17 +86,17 @@ final readonly class CoverageMerge
                     $times[] = $time;
                 }
 
-                foreach ($ids as $id) {
-                    $seen[$id] = true;
+                foreach ($entries as $entry) {
+                    $seen[$entry] = true;
                 }
             }
         }
 
-        $ids = array_keys($seen);
-        sort($ids);
+        $entries = array_keys($seen);
+        sort($entries);
         sort($files);
 
-        return new self($ids, $files, $missing, $empty, $unreadable, $times === [] ? 0 : max($times) - min($times));
+        return new self($entries, $files, $missing, $empty, $unreadable, $times === [] ? 0 : max($times) - min($times));
     }
 
     /** Whether every directory asked for contributed, which is the only state a gate may read. */
@@ -106,15 +106,15 @@ final readonly class CoverageMerge
     }
 
     /**
-     * The ids one log file holds, or null when it holds something that is not one.
+     * The entries one log file holds, or null when it holds something that is not one.
      *
-     * A file is written by appending whole ids and by nothing else, so a line that is not one means the
-     * file was torn or was never a log — and either way it is a shard's worth of coverage silently
-     * missing, the failure this whole class refuses to paper over. The line is held to the id SHAPE
-     * ({@see CoverageLog::isId()}) rather than merely to being printable, because the likeliest tear is
-     * a worker killed part way through a write, which leaves a prefix of an id that would otherwise
-     * merge as an id, match nothing, and undercount in silence. An EMPTY file is not torn: it is a
-     * worker that exercised nothing, which is an ordinary thing for a worker to do.
+     * A file is written by appending whole entries and by nothing else, so a line that is not one means
+     * the file was torn or was never a log — and either way it is a shard's worth of coverage silently
+     * missing, the failure this whole class refuses to paper over. The line is held to the entry SHAPE
+     * ({@see CoverageLog::isEntry()}) rather than merely to being printable, because the likeliest tear
+     * is a worker killed part way through a write, which leaves a prefix that would otherwise merge as
+     * an entry, match nothing, and undercount in silence. An EMPTY file is not torn: it is a worker that
+     * exercised nothing, which is an ordinary thing for a worker to do.
      *
      * @return list<string>|null
      */
@@ -126,21 +126,21 @@ final readonly class CoverageMerge
             return null;
         }
 
-        $ids = [];
+        $entries = [];
         foreach (explode("\n", $contents) as $line) {
-            $id = rtrim($line, "\r");
+            $entry = rtrim($line, "\r");
 
-            if ($id === '') {
+            if ($entry === '') {
                 continue;
             }
 
-            if (! CoverageLog::isId($id)) {
+            if (! CoverageLog::isEntry($entry)) {
                 return null;
             }
 
-            $ids[] = $id;
+            $entries[] = $entry;
         }
 
-        return $ids;
+        return $entries;
     }
 }

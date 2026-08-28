@@ -98,3 +98,38 @@ it('adding a webhook moves nothing about the operations already there', function
     expect($signatures($before))->toBe(['GET /api/a', 'POST webhooks.b.happened'])
         ->and($signatures($after))->toBe(['GET /api/a', 'POST webhooks.a.happened', 'POST webhooks.b.happened']);
 });
+
+/*
+ * A path item may be written as a `$ref`, and every lint that walks this list would otherwise see the
+ * path publishing no operations at all — which is not a document that lints clean, it is a document
+ * nobody looked at.
+ */
+it('follows a path item written as a $ref, under paths and under webhooks', function (string $member, string $key, string $signature): void {
+    $referenced = LintOperation::all([
+        $member => [$key => ['$ref' => '#/components/pathItems/Shared']],
+        'components' => ['pathItems' => ['Shared' => ['get' => ['summary' => 'A thing.']]]],
+    ]);
+
+    $inline = LintOperation::all([$member => [$key => ['get' => ['summary' => 'A thing.']]]]);
+
+    expect($referenced)->toHaveCount(1)
+        ->and($referenced[0]->signature)->toBe($signature)
+        ->and($referenced[0]->operation)->toBe($inline[0]->operation)
+        ->and($referenced[0]->webhook)->toBe($inline[0]->webhook);
+})->with([
+    'a path' => ['paths', '/api/thing', 'GET /api/thing'],
+    'a webhook' => ['webhooks', 'thing.made', 'GET webhooks.thing.made'],
+]);
+
+it('follows a chain of path-item references and stops on a cycle', function (array $pathItems, int $expected): void {
+    $operations = LintOperation::all([
+        'paths' => ['/api/thing' => ['$ref' => '#/components/pathItems/A']],
+        'components' => ['pathItems' => $pathItems],
+    ]);
+
+    expect($operations)->toHaveCount($expected);
+})->with([
+    'a chain' => [['A' => ['$ref' => '#/components/pathItems/B'], 'B' => ['get' => ['summary' => 'A thing.']]], 1],
+    'a cycle' => [['A' => ['$ref' => '#/components/pathItems/B'], 'B' => ['$ref' => '#/components/pathItems/A']], 0],
+    'a name nothing defines' => [['B' => ['get' => ['summary' => 'A thing.']]], 0],
+]);

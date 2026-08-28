@@ -64,11 +64,13 @@
     },
     "server": {
       "type": "object",
-      "x-canonicalOrder": ["url", "description", "variables", "x-docuccino"],
+      "description": "An OAS 3.2 Server Object. `name` is 3.2-only — a short label for the server, which OAS 3.1 has no word for, so the 3.1 downlevel drops it with a warning.",
+      "x-canonicalOrder": ["url", "description", "name", "variables", "x-docuccino"],
       "required": ["url"],
       "properties": {
         "url": { "type": "string" },
         "description": { "type": "string" },
+        "name": { "type": "string" },
         "variables": { "type": "object" },
         "x-docuccino": { "$ref": "#/$defs/docuccinoNode" }
       },
@@ -97,7 +99,7 @@
     },
     "pathItem": {
       "type": "object",
-      "x-canonicalOrder": ["x-docuccino", "$ref", "summary", "description", "servers", "parameters", "get", "put", "post", "delete", "options", "head", "patch", "trace", "query"],
+      "x-canonicalOrder": ["x-docuccino", "$ref", "summary", "description", "servers", "parameters", "get", "put", "post", "delete", "options", "head", "patch", "trace", "query", "additionalOperations"],
       "properties": {
         "x-docuccino": { "$ref": "#/$defs/docuccinoNode" },
         "$ref": { "type": "string" },
@@ -113,10 +115,20 @@
         "head": { "$ref": "#/$defs/operation" },
         "patch": { "$ref": "#/$defs/operation" },
         "trace": { "$ref": "#/$defs/operation" },
-        "query": { "$ref": "#/$defs/operation" }
+        "query": { "$ref": "#/$defs/operation" },
+        "additionalOperations": { "$ref": "#/$defs/additionalOperations" }
       },
       "patternProperties": { "^x-": true },
       "additionalProperties": false
+    },
+    "additionalOperations": {
+      "type": "object",
+      "description": "OAS 3.2's map of HTTP method to Operation Object, carrying the methods a Path Item has no fixed field for. RFC 9110 restricts a method to `1*tchar`, and the nine OAS spells as fixed fields are excluded because a Path Item states those there. OAS 3.1 and below have no word for this member, so the 3.1 downlevel drops it with a warning.",
+      "propertyNames": {
+        "pattern": "^[a-zA-Z0-9!#$%&'*+.^_`|~-]+$",
+        "not": { "enum": ["GET", "PUT", "POST", "DELETE", "OPTIONS", "HEAD", "PATCH", "TRACE", "QUERY"] }
+      },
+      "additionalProperties": { "$ref": "#/$defs/operation" }
     },
     "operation": {
       "type": "object",
@@ -141,7 +153,7 @@
     },
     "parameter": {
       "type": "object",
-      "x-canonicalOrder": ["x-docuccino", "name", "in", "description", "required", "deprecated", "allowEmptyValue", "style", "explode", "allowReserved", "schema", "example", "examples", "content"],
+      "x-canonicalOrder": ["x-docuccino", "$ref", "name", "in", "description", "required", "deprecated", "allowEmptyValue", "style", "explode", "allowReserved", "schema", "example", "examples", "content"],
       "anyOf": [
         { "required": ["$ref"] },
         { "required": ["schema"] },
@@ -201,7 +213,8 @@
     },
     "components": {
       "type": "object",
-      "x-canonicalOrder": ["schemas", "responses", "parameters", "examples", "requestBodies", "headers", "securitySchemes", "links", "callbacks", "pathItems", "x-docuccino"],
+      "description": "The OAS 3.2 Components Object. `mediaTypes` is 3.2-only — reusable Media Type Objects, which OAS 3.1 has no word for, so the 3.1 downlevel drops it with a warning.",
+      "x-canonicalOrder": ["schemas", "responses", "parameters", "examples", "requestBodies", "headers", "mediaTypes", "securitySchemes", "links", "callbacks", "pathItems", "x-docuccino"],
       "properties": {
         "schemas": { "type": "object", "additionalProperties": { "$ref": "#/$defs/schema" } },
         "responses": { "type": "object", "additionalProperties": { "$ref": "#/$defs/response" } },
@@ -209,6 +222,7 @@
         "examples": { "type": "object" },
         "requestBodies": { "type": "object" },
         "headers": { "type": "object" },
+        "mediaTypes": { "type": "object" },
         "securitySchemes": { "type": "object" },
         "links": { "type": "object" },
         "callbacks": { "type": "object" },

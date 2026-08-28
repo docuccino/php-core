@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Lint;
 
+use Docuccino\Core\Contract\Refs;
 use Docuccino\Core\Document\PathItem;
+use Docuccino\Core\Examples\RecordedExampleAudit;
 use Docuccino\Core\Provenance\Source;
 
 /**
@@ -42,8 +44,8 @@ final readonly class LintOperation
     public static function all(array $document): array
     {
         return [
-            ...self::under($document['paths'] ?? null, '', webhook: false),
-            ...self::under($document['webhooks'] ?? null, 'webhooks.', webhook: true),
+            ...self::under($document, $document['paths'] ?? null, '', webhook: false),
+            ...self::under($document, $document['webhooks'] ?? null, 'webhooks.', webhook: true),
         ];
     }
 
@@ -104,17 +106,34 @@ final readonly class LintOperation
      * The operations published under one heading, in signature order. `$prefix` is what keeps a
      * webhook name out of the space a path template occupies.
      *
+     * A path item written as a `$ref` is followed ({@see Refs::follow()}) before its methods are read:
+     * every lint here — and {@see RecordedExampleAudit} with them — would otherwise see a path
+     * publishing no operations at all, which is not a document that lints clean but a document nobody
+     * looked at. The signature stays the USE SITE's, since that is what a safelist entry and a
+     * diagnostic name.
+     *
+     * @param  array<string, mixed>  $document
      * @return list<self>
      */
-    private static function under(mixed $items, string $prefix, bool $webhook): array
+    private static function under(array $document, mixed $items, string $prefix, bool $webhook): array
     {
         if (! is_array($items)) {
             return [];
         }
 
         $operations = [];
-        foreach ($items as $key => $item) {
-            if (! is_array($item)) {
+        foreach ($items as $key => $written) {
+            if (! is_array($written)) {
+                continue;
+            }
+
+            /** @var array<string, mixed> $written */
+            [$item, , $unresolved] = Refs::follow($document, $written, []);
+
+            // A pointer that lands nowhere leaves no methods to read. There is nothing to lint and
+            // nothing to invent; the pointer itself is reported as `lint.unresolved-reference` by the example
+            // audit, which reads the same fact off {@see \Docuccino\Core\Contract\ContractIndex}.
+            if ($unresolved !== null) {
                 continue;
             }
 

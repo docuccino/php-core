@@ -18,7 +18,7 @@ it('names the operation, the failing member and the producer that wrote the sche
 
     expect($message)
         ->toContain('GET /api/invoices/42 does not match the documented contract.')
-        ->toContain('operation  GET /api/invoices/{invoice}  op:v1:aaaainvoiceshow')
+        ->toContain('operation  GET /api/invoices/{invoice}  op:v1:aaaaainvoiceshow')
         ->toContain('status     200')
         ->toContain('the response body at /total')
         ->toContain('must match the type: number')
@@ -45,6 +45,59 @@ it('stops listing violations before the list stops being read', function (): voi
     $result = (new ContractChecker($index))->check($exchange);
 
     expect(ContractMessages::exchange($result->operation, $exchange, $result))->toContain('… and 5 more.');
+});
+
+/*
+ * The note channel. A check that could not read what the document published passes with a NOTE, and a
+ * note nobody is told is a pass that proved nothing and said nothing — which is how a suite comes to
+ * believe it has contract coverage it does not have.
+ */
+it('says an exchange passed having proved less than it looks like, naming every half that could not be read', function (): void {
+    $exchange = contractExchange(
+        'GET',
+        '/api/exports',
+        responseBody: 'a,b',
+        responseContentType: 'text/csv',
+        query: ['cursor' => 'abc'],
+    );
+    $result = checkContract($exchange, static function (array $document): array {
+        // A query parameter documented with `content` rather than a schema: the request half's own way
+        // of being uncheckable, so the line carries a finding from each half rather than only the last.
+        $document['paths']['/api/exports']['get']['parameters'] = [
+            ['name' => 'cursor', 'in' => 'query', 'content' => ['application/json' => []]],
+        ];
+
+        return $document;
+    });
+
+    expect(ContractMessages::uncheckedExchange($exchange, $result))->toBe(
+        'GET /api/exports passed, but part of the contract was not checked: '.
+        '?cursor is documented as a content object, which the check does not decode; '.
+        'the response body is text/csv, which JSON Schema cannot check.'
+    );
+});
+
+it('says nothing at all about an exchange it checked in full', function (): void {
+    $exchange = contractExchange('GET', '/api/invoices/42', responseBody: '{"reference":"INV-1","total":12.5,"lines":[]}');
+
+    expect(ContractMessages::uncheckedExchange($exchange, checkContract($exchange)))->toBeNull();
+});
+
+it('escapes an artifact string on its way into an exchange note', function (): void {
+    // A parameter name out of a generated artifact nobody re-read, in a message that reaches a terminal.
+    $forged = "cursor\x1b[32mAll contract assertions passed";
+    $exchange = contractExchange('GET', '/api/exports', responseBody: 'a,b', responseContentType: 'text/csv', query: [$forged => 'abc']);
+    $result = checkContract($exchange, static function (array $document) use ($forged): array {
+        $document['paths']['/api/exports']['get']['parameters'] = [
+            ['name' => $forged, 'in' => 'query', 'content' => ['application/json' => []]],
+        ];
+
+        return $document;
+    });
+
+    expect(ContractMessages::uncheckedExchange($exchange, $result))
+        ->toContain('?cursor\x1B[32mAll contract assertions passed is documented as a content object')
+        ->not->toContain("\x1b");
 });
 
 it('tells a reader which paths the contract does document for the method they tried', function (): void {
@@ -86,7 +139,7 @@ it('counts the examples it checked as well as the ones that lied', function (): 
     })))->run();
 
     expect(ContractMessages::examples($report))
-        ->toContain('1 of 3 documented examples does not match the schema beside it.')
+        ->toContain('1 of 4 documented examples does not match the schema beside it.')
         ->toContain('components/schemas/Invoice')
         ->toContain('at /components/schemas/Invoice/properties/total/example')
         ->toContain('from     integration:eloquent (integration) — app/Models/Invoice.php:31');
@@ -101,7 +154,30 @@ it('agrees the verb with how many lied, not with how many it checked', function 
     })))->run();
 
     expect(ContractMessages::examples($report))
-        ->toContain('2 of 3 documented examples do not match the schema beside them.');
+        ->toContain('2 of 4 documented examples do not match the schema beside them.');
+});
+
+it('names the examples nobody could check, rather than leaving them out of the count and the message', function (): void {
+    // A refused schema is not a passing example. Dropping it from both the denominator and the body is
+    // how a report comes to claim more than it proved.
+    $report = (new ExampleAudit(contractIndex(static function (array $document): array {
+        $document['components']['schemas']['Invoice']['properties']['total']['example'] = 'lots';
+        $document['components']['schemas']['Invoice']['properties']['ref'] = [
+            'type' => 'object',
+            'additionalProperties' => ['first_name'],
+            'example' => ['first_name' => 'Ada'],
+        ];
+
+        return $document;
+    })))->run();
+
+    expect($report->uncheckable)->toHaveCount(1)
+        ->and(ContractMessages::examples($report))
+        ->toContain('1 of 4 documented examples does not match the schema beside it.')
+        ->toContain('1 more could not be checked at all')
+        ->toContain('at /components/schemas/Invoice/properties/ref/example')
+        ->toContain('schema   /components/schemas/Invoice/properties/ref')
+        ->toContain('additionalProperties must be a json schema (object or boolean)');
 });
 
 it('renders a breaking changeset the way the diff command does, and adds who wrote it', function (): void {
@@ -180,7 +256,7 @@ it('shows an artifact its own escape sequences rather than obeying them', functi
 
     $index = contractIndex(static function (array $document) use ($forgery): array {
         $document['components']['schemas']['Invoice']['properties']['total']['x-docuccino']['provenance'][0]['source']['file'] = 'app/Models/Invoice.php'.$forgery;
-        $document['paths']['/api/invoices/{invoice}']['get']['x-docuccino']['id'] = 'op:v1:aaaainvoiceshow'.$forgery;
+        $document['paths']['/api/invoices/{invoice}']['get']['x-docuccino']['id'] = 'op:v1:aaaaainvoiceshow'.$forgery;
 
         return $document;
     });
@@ -191,7 +267,7 @@ it('shows an artifact its own escape sequences rather than obeying them', functi
     $message = ContractMessages::exchange($result->operation, $exchange, $result);
 
     expect($message)
-        ->toContain('operation  GET /api/invoices/{invoice}  op:v1:aaaainvoiceshow\x0A\x1B[32mAll contract assertions passed\x1B[0m\x0A')
+        ->toContain('operation  GET /api/invoices/{invoice}  op:v1:aaaaainvoiceshow\x0A\x1B[32mAll contract assertions passed\x1B[0m\x0A')
         ->toContain('from     integration:eloquent (integration) — app/Models/Invoice.php\x0A\x1B[32mAll contract assertions passed\x1B[0m\x0A')
         ->not->toContain("\x1b")
         ->and(explode("\n", $message))->not->toContain('All contract assertions passed');

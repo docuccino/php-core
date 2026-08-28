@@ -4,15 +4,16 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Contract\Examples;
 
+use Docuccino\Core\Contract\ContractChecker;
 use Docuccino\Core\Contract\ContractIndex;
+use Docuccino\Core\Contract\ContractParameter;
 use Docuccino\Core\Contract\Pointer;
 use Docuccino\Core\Contract\Refs;
+use Docuccino\Core\Contract\RefusedSchema;
+use Docuccino\Core\Contract\ResponseHeaders;
 use Docuccino\Core\Contract\SchemaCheck;
+use Docuccino\Core\Contract\Violation;
 use Docuccino\Core\Draft\SchemaKeywords;
-use Docuccino\Core\Provenance\ClassNames;
-use Docuccino\Core\Provenance\MessagePaths;
-use Docuccino\Core\Provenance\RootRelativeSourcePathResolver;
-use Docuccino\Core\Support\PlainText;
 use Throwable;
 
 /**
@@ -34,35 +35,52 @@ use Throwable;
  * and a schema it will not parse throws rather than failing — so a single unreadable keyword would
  * otherwise take every example after it, and the build that asked, down with it. Such a site is
  * recorded as {@see ExampleUncheckable} and the walk carries on.
+ *
+ * **A reference that names nothing is a finding, not a silence.** A path item, response or request body
+ * written as a `$ref` the document does not define has no `content` to read, so every example under it
+ * would otherwise drop out of the walk and out of the count — one typo, and the audit reports that
+ * everything it could find was fine. {@see ContractChecker} already fails on the identical situation,
+ * so this records an {@see ExampleFinding} naming the pointer, in the same words.
  */
 final class ExampleAudit
 {
     private readonly SchemaCheck $schema;
 
-    private readonly MessagePaths $messagePaths;
-
-    private readonly ClassNames $classNames;
-
     public function __construct(private readonly ContractIndex $index)
     {
         $this->schema = new SchemaCheck($index);
-
-        $paths = new RootRelativeSourcePathResolver('');
-        $this->messagePaths = new MessagePaths($paths);
-        $this->classNames = new ClassNames($paths);
     }
 
     public function run(): ExampleReport
     {
         $checked = 0;
-        $findings = [];
         $uncheckable = [];
 
-        foreach ($this->sites() as $site) {
+        // The broken references come first and the walk that finds them is the walk that finds the
+        // sites: a reference naming nothing is why a whole response's or body's examples are missing
+        // from the list below, so the two are read together or the report explains itself with the
+        // half that is silent.
+        $findings = [];
+        $sites = $this->sites($findings);
+
+        foreach ($sites as $site) {
             [$exampleSegments, $schemaSegments, $label] = $site;
-            $checked++;
 
             $value = Pointer::readGraph($this->index->graph(), $exampleSegments);
+
+            // No schema beside it is the same nothing a refused one leaves. `check()` answers `[]` to
+            // both — "nothing disagreed" — and counting that as checked makes the report claim an
+            // example was held to a contract that was never there.
+            if (! $this->schema->has($schemaSegments)) {
+                $uncheckable[] = new ExampleUncheckable(
+                    Pointer::of($exampleSegments),
+                    Pointer::of($schemaSegments),
+                    $label,
+                    'the contract puts no schema beside it',
+                );
+
+                continue;
+            }
 
             try {
                 $violations = $this->schema->check($value, $schemaSegments, 'the example');
@@ -71,11 +89,16 @@ final class ExampleAudit
                     Pointer::of($exampleSegments),
                     Pointer::of($schemaSegments),
                     $label,
-                    $this->reason($refused),
+                    RefusedSchema::reason($refused),
                 );
 
                 continue;
             }
+
+            // Counted here rather than at the top of the loop: an example the validator refused is one
+            // the audit knows nothing about, and counting it as checked makes the report read as having
+            // proved more than it did.
+            $checked++;
 
             if ($violations !== []) {
                 $findings[] = new ExampleFinding(Pointer::of($exampleSegments), $label, $violations);
@@ -86,65 +109,55 @@ final class ExampleAudit
     }
 
     /**
-     * Why the validator would not take the schema, in its own words. A thrown message is somebody
-     * else's text, so it is relativised before it goes anywhere: a diagnostic naming the build machine
-     * would make one machine's document differ from another's. An exception with nothing to say is
-     * named by its class instead, through {@see ClassNames} — an anonymous one names a file too.
-     */
-    private function reason(Throwable $refused): string
-    {
-        $message = trim($refused->getMessage());
-
-        return $message === ''
-            ? $this->classNames->of($refused)
-            : rtrim(PlainText::of($this->messagePaths->relative($message)), '.');
-    }
-
-    /**
      * Every (example, schema, label) triple in the document, in a deterministic order: operations as
-     * the index lists them, then component schemas by name.
+     * the index lists them, then webhooks as it lists them, then component schemas by name.
      *
+     * A parameter's own broken reference is not collected here: the index already builds one of those
+     * as a {@see ContractParameter} carrying its `danglingRef`, and {@see ContractChecker} fails on it —
+     * a second report of the same fact from the same document would read as two defects.
+     *
+     * @param  list<ExampleFinding>  $unresolvedRefs  filled with the references that name nothing
      * @return list<array{0: list<string>, 1: list<string>, 2: string}>
      */
-    private function sites(): array
+    private function sites(array &$unresolvedRefs): array
     {
         $document = $this->index->document();
         $sites = [];
 
+        // A path item behind a pointer that lands nowhere is the widest case of all: it is not one
+        // response that went unread but every operation of that path, and the index cannot report it
+        // because there is nothing left to index. It comes first for the same reason.
+        foreach (['paths' => $this->index->unresolvedPaths(), 'webhooks' => $this->index->unresolvedWebhooks()] as $member => $unresolved) {
+            foreach ($unresolved as $key => $reference) {
+                $unresolvedRefs[] = self::unresolvedReference(
+                    $member === 'paths' ? (string) $key : 'webhooks.'.$key,
+                    'the path item',
+                    [$member, (string) $key],
+                    $reference,
+                );
+            }
+        }
+
         foreach ($this->index->operations() as $operation) {
             foreach ($operation->parameters as $parameter) {
-                foreach ($this->beside($parameter->definition, $parameter->segments, $parameter->schemaSegments()) as $site) {
-                    $sites[] = [$site[0], $site[1], $operation->label().' → '.$parameter->label()];
+                $where = $operation->label().' → '.$parameter->label();
+
+                foreach ($this->beside($parameter->definition, $parameter->segments, $parameter->schemaSegments(), $where, $unresolvedRefs) as $site) {
+                    $sites[] = [$site[0], $site[1], $where];
                 }
             }
 
-            $body = $operation->requestBody($document);
-            if ($body !== null) {
-                foreach ($this->inContent($body[0], $body[1]) as $site) {
-                    $sites[] = [$site[0], $site[1], $operation->label().' → request body '.$site[2]];
-                }
+            foreach ($this->inOperation($operation->label(), $operation->operation, $operation->segments, $operation->requestBody($document), $unresolvedRefs) as $site) {
+                $sites[] = $site;
             }
+        }
 
-            $responses = $operation->operation['responses'] ?? null;
-            if (! is_array($responses)) {
-                continue;
-            }
-
-            $statuses = array_map(strval(...), array_keys($responses));
-            sort($statuses);
-
-            foreach ($statuses as $status) {
-                $raw = $responses[$status];
-                if (! is_array($raw)) {
-                    continue;
-                }
-
-                /** @var array<string, mixed> $raw */
-                [$response, $segments] = Refs::follow($document, $raw, [...$operation->segments, 'responses', $status]);
-
-                foreach ($this->inContent($response, $segments) as $site) {
-                    $sites[] = [$site[0], $site[1], $operation->label().' → '.$status.' '.$site[2]];
-                }
+        // A webhook publishes a body and response headers of exactly the same kind, and an example
+        // beside one is copied by exactly the same reader — the outbound half is not a different sort of
+        // document, only a different half of the same one. It has no parameters: nothing routes to it.
+        foreach ($this->index->webhooks() as $webhook) {
+            foreach ($this->inOperation($webhook->label(), $webhook->operation, $webhook->segments, $webhook->requestBody($document), $unresolvedRefs) as $site) {
+                $sites[] = $site;
             }
         }
 
@@ -155,6 +168,84 @@ final class ExampleAudit
         }
 
         return $sites;
+    }
+
+    /**
+     * The sites of one operation object — a route's or a webhook's: its request body, and the headers
+     * and content of each documented response, statuses in sorted order.
+     *
+     * @param  array<string, mixed>  $operation
+     * @param  list<string>  $segments  pointer segments addressing the operation
+     * @param  array{0: array<string, mixed>, 1: list<string>, 2: string|null}|null  $body  its request body, `$ref` followed
+     * @param  list<ExampleFinding>  $unresolvedRefs
+     * @return list<array{0: list<string>, 1: list<string>, 2: string}>
+     */
+    private function inOperation(string $label, array $operation, array $segments, ?array $body, array &$unresolvedRefs): array
+    {
+        $sites = [];
+
+        if ($body !== null) {
+            // The third element is the reference that landed nowhere. Reading `content` off the `$ref`
+            // node it degrades to would find none, and the body's examples would simply stop being
+            // audited — which is the one outcome a broken pointer must never buy.
+            if ($body[2] !== null) {
+                $unresolvedRefs[] = self::unresolvedReference($label.' → request body', 'the request body', $body[1], $body[2]);
+            } else {
+                foreach ($this->inContent($body[0], $body[1], $label.' → request body ', $unresolvedRefs) as $site) {
+                    $sites[] = [$site[0], $site[1], $label.' → request body '.$site[2]];
+                }
+            }
+        }
+
+        $responses = $operation['responses'] ?? null;
+
+        if (! is_array($responses)) {
+            return $sites;
+        }
+
+        $statuses = array_map(strval(...), array_keys($responses));
+        sort($statuses);
+
+        foreach ($statuses as $status) {
+            $raw = $responses[$status];
+            if (! is_array($raw)) {
+                continue;
+            }
+
+            /** @var array<string, mixed> $raw */
+            [$response, $where, $dangling] = Refs::follow($this->index->document(), $raw, [...$segments, 'responses', $status]);
+
+            if ($dangling !== null) {
+                $unresolvedRefs[] = self::unresolvedReference($label.' → '.$status, 'the response', $where, $dangling);
+
+                continue;
+            }
+
+            $prefix = $label.' → '.$status.' ';
+
+            foreach ([...$this->inHeaders($response, $where, $prefix, $unresolvedRefs), ...$this->inContent($response, $where, $prefix, $unresolvedRefs)] as $site) {
+                $sites[] = [$site[0], $site[1], $label.' → '.$status.' '.$site[2]];
+            }
+        }
+
+        return $sites;
+    }
+
+    /**
+     * A reference the document does not define. The sentence is {@see Violation::unresolvedRef()}'s,
+     * which is where {@see ContractChecker} draws it from too — one product, one sentence for one
+     * defect, minted rather than copied.
+     *
+     * @param  list<string>  $segments  where the reference stands
+     */
+    private static function unresolvedReference(string $label, string $location, array $segments, string $reference): ExampleFinding
+    {
+        return new ExampleFinding(
+            Pointer::of($segments),
+            $label,
+            [Violation::unresolvedRef($reference, $location)],
+            unresolvedRef: $reference,
+        );
     }
 
     /** @return list<string> */
@@ -174,13 +265,46 @@ final class ExampleAudit
     }
 
     /**
+     * The `example` / `examples` beside each documented response header, and every example inside that
+     * header's own schema. A header object is Parameter-like, so its examples sit exactly where a
+     * parameter's do — and a hand-written one is as copyable, and as unverified, as a body's.
+     *
+     * WHICH headers those are is {@see ResponseHeaders}'s answer, the same one the assertions check
+     * against, so the audit can never hold an example to a header the check ignores or miss one it does.
+     *
+     * @param  array<string, mixed>  $node
+     * @param  list<string>  $segments
+     * @param  string  $prefix  how the caller will name a site found here, for a finding that has no site
+     * @param  list<ExampleFinding>  $unresolvedRefs
+     * @return list<array{0: list<string>, 1: list<string>, 2: string}>
+     */
+    private function inHeaders(array $node, array $segments, string $prefix, array &$unresolvedRefs): array
+    {
+        $sites = [];
+
+        foreach (ResponseHeaders::of($this->index->document(), $node, $segments) as $header) {
+            foreach ($this->beside($header->definition, $header->segments, $header->schemaSegments(), $prefix.'header '.$header->name, $unresolvedRefs) as $site) {
+                $sites[] = [$site[0], $site[1], 'header '.$header->name];
+            }
+
+            foreach ($this->inSchema($header->schemaSegments()) as $site) {
+                $sites[] = [$site[0], $site[1], 'header '.$header->name];
+            }
+        }
+
+        return $sites;
+    }
+
+    /**
      * The `example` / `examples` of every media type under a response or request-body object.
      *
      * @param  array<string, mixed>  $node
      * @param  list<string>  $segments
+     * @param  string  $prefix  how the caller will name a site found here, for a finding that has no site
+     * @param  list<ExampleFinding>  $unresolvedRefs
      * @return list<array{0: list<string>, 1: list<string>, 2: string}>
      */
-    private function inContent(array $node, array $segments): array
+    private function inContent(array $node, array $segments, string $prefix, array &$unresolvedRefs): array
     {
         $content = $node['content'] ?? null;
 
@@ -201,7 +325,7 @@ final class ExampleAudit
             /** @var array<string, mixed> $media */
             $mediaSegments = [...$segments, 'content', $mediaType];
 
-            foreach ($this->beside($media, $mediaSegments, [...$mediaSegments, 'schema']) as $site) {
+            foreach ($this->beside($media, $mediaSegments, [...$mediaSegments, 'schema'], $prefix.$mediaType, $unresolvedRefs) as $site) {
                 $sites[] = [$site[0], $site[1], $mediaType];
             }
 
@@ -218,12 +342,19 @@ final class ExampleAudit
      * The OAS `example` and `examples` members that sit BESIDE a schema — on a media type or a
      * parameter. `examples` there is a map of Example Objects, so the instance is under `value`.
      *
+     * An entry of that map is an Example Object OR a Reference Object naming one in
+     * `components.examples`, so the chain is followed before `value` is looked for: an example audited
+     * only where it was written out is an example whose checking depends on how the document was
+     * spelled, and a shared one is the copyable half for every site that references it.
+     *
      * @param  array<string, mixed>  $node
      * @param  list<string>  $segments
      * @param  list<string>  $schemaSegments
+     * @param  string  $label  how a reader would name this position
+     * @param  list<ExampleFinding>  $unresolvedRefs
      * @return list<array{0: list<string>, 1: list<string>}>
      */
-    private function beside(array $node, array $segments, array $schemaSegments): array
+    private function beside(array $node, array $segments, array $schemaSegments, string $label, array &$unresolvedRefs): array
     {
         $sites = [];
 
@@ -240,8 +371,21 @@ final class ExampleAudit
             foreach ($names as $name) {
                 $example = $examples[$name];
 
-                if (is_array($example) && array_key_exists('value', $example)) {
-                    $sites[] = [[...$segments, 'examples', $name, 'value'], $schemaSegments];
+                if (! is_array($example)) {
+                    continue;
+                }
+
+                /** @var array<string, mixed> $example */
+                [$resolved, $where, $dangling] = Refs::follow($this->index->document(), $example, [...$segments, 'examples', $name]);
+
+                if ($dangling !== null) {
+                    $unresolvedRefs[] = self::unresolvedReference($label.' → example '.$name, 'the example', $where, $dangling);
+
+                    continue;
+                }
+
+                if (array_key_exists('value', $resolved)) {
+                    $sites[] = [[...$where, 'value'], $schemaSegments];
                 }
             }
         }

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Docuccino\Core\Diagnostics\Diagnostic;
+use Docuccino\Core\Diagnostics\Severity;
 use Docuccino\Core\Document\UirDocument;
 use Docuccino\Core\Emit\EmitOptions;
 use Docuccino\Core\Emit\Postman\CollectionEmitter;
@@ -926,4 +927,218 @@ it('yields to the base URL when a server variable would collide with it', functi
 
     expect(array_count_values($keys)['baseUrl'])->toBe(1)
         ->and(postmanCodes($document))->toContain('postman.variable-name-collision');
+});
+
+/*
+ * OAS permits a Reference Object at a path item, a request body, a response, a header and a media
+ * type's schema, and every one of those was read by hand here: a collection therefore carried more or
+ * less depending on whether a shape happened to be shared, which is a fact about how the document was
+ * written rather than about the API. `Refs` is the one resolver, so all of them read the same.
+ */
+
+/**
+ * The same API written twice — once with every shareable node inline, once with each one hoisted into
+ * `components` and `$ref`ed. Nothing below can pass by agreeing with itself.
+ *
+ * @return array<string, mixed>
+ */
+function postmanSharedShapes(bool $referenced): array
+{
+    $schema = ['type' => 'object', 'properties' => ['name' => ['type' => 'string']], 'required' => ['name']];
+    $header = ['schema' => ['type' => 'string'], 'description' => 'When it was made'];
+    $response = [
+        'description' => 'Made',
+        'headers' => ['X-Made-At' => $referenced ? ['$ref' => '#/components/headers/MadeAt'] : $header],
+        'content' => ['application/json' => ['schema' => ['type' => 'object']]],
+    ];
+    $pathItem = ['post' => [
+        'summary' => 'Store a thing',
+        'requestBody' => ['content' => ['multipart/form-data' => [
+            'schema' => $referenced ? ['$ref' => '#/components/schemas/NewThing'] : $schema,
+        ]]],
+        'responses' => ['201' => $referenced ? ['$ref' => '#/components/responses/Made'] : $response],
+    ]];
+
+    $document = postmanDocumentWithPaths([
+        '/things' => $referenced ? ['$ref' => '#/components/pathItems/Things'] : $pathItem,
+    ]);
+
+    $document['components'] = $referenced
+        ? [
+            'pathItems' => ['Things' => $pathItem],
+            'schemas' => ['NewThing' => $schema],
+            'responses' => ['Made' => $response],
+            'headers' => ['MadeAt' => $header],
+        ]
+        : ['schemas' => ['NewThing' => $schema]];
+
+    return $document;
+}
+
+it('emits the same collection whether a shape is shared or written inline', function (): void {
+    $referenced = postman(postmanSharedShapes(referenced: true));
+    $inline = postman(postmanSharedShapes(referenced: false));
+
+    // A plausible minimum beside the real assertion: an equality that compared two empty collections
+    // would pass forever.
+    expect($referenced['item'])->toBe($inline['item'])
+        ->and($referenced['item'])->toHaveCount(1)
+        ->and(json_encode($inline['item']))->toContain('formdata')
+        ->toContain('X-Made-At')
+        ->toContain('Accept');
+});
+
+it('builds a form body from a schema written as a $ref', function (): void {
+    $document = postmanDocumentWithPaths(['/things' => ['post' => [
+        'requestBody' => ['content' => ['application/x-www-form-urlencoded' => [
+            'schema' => ['$ref' => '#/components/schemas/NewThing'],
+        ]]],
+        'responses' => ['204' => ['description' => 'No content']],
+    ]]]);
+    $document['components']['schemas']['NewThing'] = [
+        'type' => 'object',
+        'properties' => ['name' => ['type' => 'string'], 'size' => ['type' => 'integer']],
+        'required' => ['name'],
+    ];
+
+    /** @var array<string, mixed> $request */
+    $request = postman($document)['item'][0]['request'];
+
+    expect($request['body'])->toBe(['mode' => 'urlencoded', 'urlencoded' => [
+        ['key' => 'name', 'value' => 'string', 'type' => 'text'],
+        ['key' => 'size', 'value' => '0', 'type' => 'text', 'disabled' => true],
+    ]]);
+});
+
+it('builds a form body from every branch of an allOf, references included', function (): void {
+    $document = postmanDocumentWithPaths(['/things' => ['post' => [
+        'requestBody' => ['content' => ['application/x-www-form-urlencoded' => ['schema' => ['allOf' => [
+            ['$ref' => '#/components/schemas/Named'],
+            ['type' => 'object', 'properties' => ['size' => ['type' => 'integer']]],
+        ]]]]],
+        'responses' => ['204' => ['description' => 'No content']],
+    ]]]);
+    $document['components']['schemas']['Named'] = [
+        'type' => 'object',
+        'properties' => ['name' => ['type' => 'string']],
+        'required' => ['name'],
+    ];
+
+    /** @var array<string, mixed> $request */
+    $request = postman($document)['item'][0]['request'];
+
+    // A form body is a flat list of fields, so a shape composed of two objects has the fields of both —
+    // and `required` comes from the branch that declared it, not from the outer wrapper.
+    expect($request['body'])->toBe(['mode' => 'urlencoded', 'urlencoded' => [
+        ['key' => 'name', 'value' => 'string', 'type' => 'text'],
+        ['key' => 'size', 'value' => '0', 'type' => 'text', 'disabled' => true],
+    ]]);
+});
+
+it('reports a body schema the document does not define rather than shipping an empty request', function (): void {
+    $report = postmanReport(postmanDocumentWithPaths(['/things' => ['post' => [
+        'requestBody' => ['content' => ['application/x-www-form-urlencoded' => [
+            'schema' => ['$ref' => '#/components/schemas/Gone'],
+        ]]],
+        'responses' => ['204' => ['description' => 'No content']],
+    ]]]));
+
+    $unresolved = array_values(array_filter($report, static fn (Diagnostic $d): bool => $d->code === 'postman.body-unresolved'));
+
+    expect($unresolved)->toHaveCount(1)
+        ->and($unresolved[0]->severity)->toBe(Severity::Warning)
+        ->and($unresolved[0]->message)->toContain('#/components/schemas/Gone')
+        ->and($unresolved[0]->routeSignature)->toBe('POST /things');
+});
+
+it('warns once per unresolved reference however many routes share it', function (): void {
+    $operation = [
+        'requestBody' => ['content' => ['application/json' => ['schema' => ['$ref' => '#/components/schemas/Gone']]]],
+        'responses' => ['204' => ['description' => 'No content']],
+    ];
+
+    $codes = postmanCodes(postmanDocumentWithPaths([
+        '/things' => ['post' => $operation],
+        '/others' => ['post' => $operation],
+    ]));
+
+    expect(array_values(array_filter($codes, static fn (string $c): bool => $c === 'postman.body-unresolved')))
+        ->toBe(['postman.body-unresolved']);
+});
+
+it('emits nothing for a path item behind a reference that names nothing, and everything for its neighbour', function (): void {
+    $collection = postman(postmanDocumentWithPaths([
+        '/gone' => ['$ref' => '#/components/pathItems/Gone'],
+        '/here' => ['get' => ['responses' => ['200' => ['description' => 'OK']]]],
+    ]));
+
+    expect(array_map(static fn (array $i): string => (string) $i['name'], $collection['item']))->toBe(['GET /here']);
+});
+
+it('folds a self-referencing allOf in work bounded by the document, not by the depth cap', function (): void {
+    // Eight branches, each pointing back at the shape that holds them. A fold that bounds only DEPTH
+    // walks every path through them — 8^8 node visits at a cap of 8, measured at 31 seconds of pure
+    // CPU on a document of under a kilobyte, at flat memory, so no limit anywhere ends it. Folding a
+    // pointer once makes the same document eight visits. The budget is what separates the two: it is
+    // fifteen times the depth-bounded run's own measurement, so nothing but the defect reaches it.
+    $document = postmanDocumentWithPaths(['/things' => ['post' => [
+        'requestBody' => ['content' => ['application/x-www-form-urlencoded' => [
+            'schema' => ['$ref' => '#/components/schemas/Knot'],
+        ]]],
+        'responses' => ['204' => ['description' => 'No content']],
+    ]]]);
+    $document['components']['schemas']['Knot'] = [
+        'type' => 'object',
+        'properties' => ['name' => ['type' => 'string']],
+        'allOf' => array_fill(0, 8, ['$ref' => '#/components/schemas/Knot']),
+    ];
+
+    $startedAt = hrtime(true);
+    /** @var array<string, mixed> $request */
+    $request = postman($document)['item'][0]['request'];
+    $seconds = (hrtime(true) - $startedAt) / 1e9;
+
+    // And the answer is the one the unbounded walk gave: a shape conjoined with itself has its own
+    // fields and no others.
+    expect($request['body'])->toBe(['mode' => 'urlencoded', 'urlencoded' => [
+        ['key' => 'name', 'value' => 'string', 'type' => 'text', 'disabled' => true],
+    ]])
+        ->and($seconds)->toBeLessThan(2.0);
+});
+
+it('folds a shape reached down two branches at once, once, and keeps every field of it', function (): void {
+    // The other half of folding by pointer: a diamond is not a cycle, and skipping the second arrival
+    // must not cost the body the fields behind it. Both branches reach `Shared`; `size` is folded on
+    // the first and is still in the form when the second is skipped.
+    $document = postmanDocumentWithPaths(['/things' => ['post' => [
+        'requestBody' => ['content' => ['application/x-www-form-urlencoded' => ['schema' => ['allOf' => [
+            ['$ref' => '#/components/schemas/Left'],
+            ['$ref' => '#/components/schemas/Right'],
+        ]]]]],
+        'responses' => ['204' => ['description' => 'No content']],
+    ]]]);
+    $document['components']['schemas']['Shared'] = [
+        'type' => 'object',
+        'properties' => ['size' => ['type' => 'integer']],
+        'required' => ['size'],
+    ];
+    $document['components']['schemas']['Left'] = [
+        'type' => 'object',
+        'properties' => ['name' => ['type' => 'string']],
+        'allOf' => [['$ref' => '#/components/schemas/Shared']],
+    ];
+    $document['components']['schemas']['Right'] = [
+        'type' => 'object',
+        'properties' => ['colour' => ['type' => 'string']],
+        'allOf' => [['$ref' => '#/components/schemas/Shared']],
+    ];
+
+    /** @var array<string, mixed> $request */
+    $request = postman($document)['item'][0]['request'];
+
+    expect($request['body'])->toBe(['mode' => 'urlencoded', 'urlencoded' => [
+        ['key' => 'colour', 'value' => 'string', 'type' => 'text', 'disabled' => true],
+        ['key' => 'name', 'value' => 'string', 'type' => 'text', 'disabled' => true],
+        ['key' => 'size', 'value' => '0', 'type' => 'text'],
+    ]]);
 });

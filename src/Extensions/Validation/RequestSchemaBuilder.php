@@ -13,6 +13,9 @@ use Docuccino\Core\Extensions\Context\RepresentationPolicy;
  * current node's element. Which container that element belongs to is the node's own to settle
  * ({@see FieldNode::build()}). A `file`/`image` transformer raises the multipart flag through the field
  * façade.
+ *
+ * Paths are split by {@see FieldPath}, so a `\.` escape names a field whose own name holds a dot
+ * rather than descending — the same reading Laravel's validator gives the same key.
  */
 final class RequestSchemaBuilder
 {
@@ -29,7 +32,7 @@ final class RequestSchemaBuilder
     public function field(string $path): ValidationField
     {
         $node = $this->root;
-        foreach (explode('.', $path) as $segment) {
+        foreach (FieldPath::segments($path) as $segment) {
             $node = $segment === '*' ? $node->itemsNode() : $node->child($segment);
         }
 

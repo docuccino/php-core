@@ -155,6 +155,41 @@ it('publishes the best object-shaped body whichever worker met it', function ():
     }
 });
 
+it('publishes the same body from two candidates that fingerprint alike, in either order', function (): void {
+    // The same members in a different order: one model hydrated by create(), the same model hydrated by
+    // find(). The fingerprint the rank is built on sorts members, so these tie on it — and a tie is
+    // settled by arrival, while the bytes each would write differ. Two tests can share one `recordAs:`,
+    // so opt-in narrows this and does not remove it.
+    [$recordings, $scratch] = ledgerDirectories();
+    $store = new RecordingStore($recordings);
+
+    $candidates = array_map(
+        static fn (string $json): RecordedExample => RecordedExample::of(
+            '200',
+            'application/json',
+            RecordedBody::decode($json),
+            'listed',
+        ),
+        ['{"id":1,"title":"Intake"}', '{"title":"Intake","id":1}'],
+    );
+
+    $written = [];
+    foreach ([[0, 1], [1, 0]] as $run => $ordering) {
+        @unlink((string) $store->pathFor(LEDGER_OPERATION));
+
+        foreach ($ordering as $index) {
+            (new SharedRecordingLedger($store, 'tie-run-'.$run, $scratch))
+                ->record(LEDGER_OPERATION, 'GET /api/invoices/{invoice}', $candidates[$index]);
+        }
+
+        $written[] = (string) file_get_contents((string) $store->pathFor(LEDGER_OPERATION));
+    }
+
+    expect($written[0])->toBe($written[1])
+        // Anti-vacuity: a run that wrote nothing at all would agree with itself.
+        ->and($written[0])->toContain('"title": "Intake"');
+});
+
 it('carries an empty object through the session file a second worker reads', function (): void {
     // The session file is how a body reaches the worker that did not record it, and it was read with an
     // associative decode while the committed sidecar beside it went through `RecordedBody`. So `{}` came

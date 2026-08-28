@@ -44,7 +44,7 @@ it('matches a concrete request path to its operation', function (string $method,
 ]);
 
 it('finds an operation by its stable id, and nothing by an id it does not carry', function (): void {
-    expect(contractIndex()->operation('op:v1:aaaainvoiceshow')?->label())->toBe('GET /api/invoices/{invoice}')
+    expect(contractIndex()->operation('op:v1:aaaaainvoiceshow')?->label())->toBe('GET /api/invoices/{invoice}')
         ->and(contractIndex()->operation('op:v1:nosuchthing'))->toBeNull();
 });
 
@@ -90,9 +90,9 @@ it('knows a UIR document from a plain OpenAPI export', function (): void {
 it('maps every identified node to where it lives, reading both id forms', function (): void {
     $identities = contractIndex()->identities();
 
-    expect($identities['op:v1:aaaainvoiceshow'])->toBe(['paths', '/api/invoices/{invoice}', 'get'])
+    expect($identities['op:v1:aaaaainvoiceshow'])->toBe(['paths', '/api/invoices/{invoice}', 'get'])
         ->and($identities['sch:v1:aaaainvoiceshape'])->toBe(['components', 'schemas', 'Invoice'])
-        ->and($identities['res:v1:aaaainvoiceone'])->toBe(['paths', '/api/invoices/{invoice}', 'get', 'responses', '200']);
+        ->and($identities['res:v1:aaaaaainvoiceone'])->toBe(['paths', '/api/invoices/{invoice}', 'get', 'responses', '200']);
 
     $flat = ContractIndex::fromArray(['paths' => ['/a' => ['get' => ['x-docuccino-id' => 'op:v1:flatform']]]]);
 

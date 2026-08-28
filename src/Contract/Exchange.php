@@ -18,6 +18,17 @@ final readonly class Exchange
      * @param  array<string, mixed>  $query  decoded query parameters, nesting preserved
      * @param  array<string, string>  $headers  request headers; lookup is case-insensitive
      * @param  array<string, string>  $cookies
+     * @param  array<string, list<string>>  $responseHeaders  every value sent under each name — a list,
+     *                                                        because a response may send one name twice
+     * @param  bool  $ambiguousEmptyRequestBody  whether whatever serialised `$requestBody` writes an
+     *                                           empty list and an empty map as the same bytes, so `[]`
+     *                                           on the wire is not evidence the sender meant a list.
+     *                                           An adapter states it; nothing reads it off the bytes,
+     *                                           because the bytes are the thing that cannot tell the
+     *                                           two apart. Only the REQUEST half asks: a response body
+     *                                           is what a consumer really receives, and a client
+     *                                           generated from an object schema really does break on
+     *                                           `[]`.
      */
     public function __construct(
         public string $method,
@@ -28,8 +39,10 @@ final readonly class Exchange
         public array $cookies = [],
         public string $requestBody = '',
         public ?string $requestContentType = null,
+        public bool $ambiguousEmptyRequestBody = false,
         public string $responseBody = '',
         public ?string $responseContentType = null,
+        public array $responseHeaders = [],
     ) {}
 
     public function header(string $name): ?string
@@ -41,6 +54,23 @@ final readonly class Exchange
         }
 
         return null;
+    }
+
+    /**
+     * Every value the response sent under this name, empty when it sent none. Header names are
+     * case-insensitive, so the lookup is.
+     *
+     * @return list<string>
+     */
+    public function responseHeader(string $name): array
+    {
+        foreach ($this->responseHeaders as $header => $values) {
+            if (strcasecmp($header, $name) === 0) {
+                return $values;
+            }
+        }
+
+        return [];
     }
 
     /** `GET /api/invoices/42` — how a failure message names the exchange itself. */

@@ -76,7 +76,7 @@ final readonly class RecordedExampleAudit implements DocumentTransformer
                     'No response recordings were found in %s, so the document publishes none.',
                     $configured ?? $store->directory,
                 ),
-                help: 'Record some by running your suite with the recorder registered, or drop examples.recordings from the document config.',
+                help: 'Recording is opt-in per assertion: name the scenario a test set up — assertValidResponse(recordAs: \'empty-cart\') — and run your suite with the recorder registered. An assertion that names nothing checks the response and records none of it. Or drop examples.recordings from the document config.',
             ));
 
             return;
@@ -138,6 +138,7 @@ final readonly class RecordedExampleAudit implements DocumentTransformer
             return;
         }
 
+        self::reportUnnamed($recording, $file, $context);
         $this->reportUnpublishableNames($recording, $file, $documented[$operationId], $hoists, $context);
 
         foreach ($recording->responses as $response) {
@@ -163,12 +164,55 @@ final readonly class RecordedExampleAudit implements DocumentTransformer
     }
 
     /**
+     * A committed body no assertion named.
+     *
+     * Recording is asked for one exchange at a time, and the name is the asking, so a file holding an
+     * unnamed body was written by a suite from before that was true. Such a body still publishes — the
+     * reader takes it as the singular `example`, and dropping it would take an example out of a document
+     * on an upgrade nobody asked to change anything — but no run can ever refresh it, which is the fact
+     * an author would otherwise learn from a body that quietly stopped tracking their application.
+     *
+     * Once per file rather than once per body: the remedy is the same sentence for all of them, and a
+     * file is what the author opens.
+     */
+    private static function reportUnnamed(ExampleRecording $recording, string $file, DocumentContext $context): void
+    {
+        $slots = [];
+        foreach ($recording->responses as $response) {
+            if (! $response->isNamed()) {
+                $slots[$response->slot()] = true;
+            }
+        }
+
+        if ($slots === []) {
+            return;
+        }
+
+        $context->report(new Diagnostic(
+            severity: Severity::Info,
+            code: 'examples.recording-unnamed',
+            message: sprintf(
+                'The recordings in %s (%s) named no scenario, so they still publish and no run can re-record them.',
+                $file,
+                implode(', ', array_keys($slots)),
+            ),
+            help: 'Name the scenario at the assertion that produces the body — assertValidResponse(recordAs: \'empty-cart\') — and the next run replaces it with the named one. Delete the file instead if the endpoint no longer needs an example.',
+        ));
+    }
+
+    /**
      * The names a recording asked for that the document cannot carry.
      *
      * A media type's `examples` map is not stripped before the shared-error hoist groups bodies, so a
      * named example on a status it groups would take that response out of the component an unrelated
      * route also points at. The body still publishes, as the singular `example`; the name does not,
      * and an author who named a scenario is owed the news.
+     *
+     * Info rather than a warning, and that is a consequence of recording being opt-in: a name is now
+     * how a body is asked for at all, so every error body anyone records reaches this — where the one
+     * remaining remedy is a document-wide setting most authors will not want to touch. A warning that
+     * fires on every recorded error and points at something nobody will do is how a channel stops being
+     * read.
      *
      * @param  array<string, true>  $statuses  the statuses this operation documents
      */
@@ -187,7 +231,7 @@ final readonly class RecordedExampleAudit implements DocumentTransformer
 
         foreach ($dropped as $slot => $names) {
             $context->report(new Diagnostic(
-                severity: Severity::Warning,
+                severity: Severity::Info,
                 code: 'examples.recording-name-unpublished',
                 message: sprintf(
                     'The %s recordings in %s publish without their names (%s), which an error response cannot carry.',
@@ -195,7 +239,7 @@ final readonly class RecordedExampleAudit implements DocumentTransformer
                     $file,
                     implode(', ', $names),
                 ),
-                help: 'Named examples on an error status would keep that response out of the shared error component other routes point at. Record it without a name — the body still publishes as the example — or set representation.errors.components to false for this document.',
+                help: 'Named examples on an error status would keep that response out of the shared error component other routes point at, so the body publishes as the singular example and nothing else is lost. Set representation.errors.components to false for this document if the names matter more.',
             ));
         }
     }

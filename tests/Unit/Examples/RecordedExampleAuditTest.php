@@ -67,7 +67,10 @@ it('says a configured directory holds nothing yet, once', function (): void {
         ->and($findings[0]->code)->toBe('examples.recordings-empty')
         // The action, not the adapter class that performs it: core says what to do, and the framework
         // it is running under is what names the recorder.
-        ->and($findings[0]->help)->toContain('running your suite with the recorder registered')
+        // The action, and the fact that makes it an action: naming a scenario is what asks for a
+        // recording, so a suite whose bootstrap is already right can still record nothing.
+        ->and($findings[0]->help)->toContain('run your suite with the recorder registered')
+        ->and($findings[0]->help)->toContain('recordAs:')
         ->and($findings[0]->help)->not->toContain('Docuccino\\Laravel');
 });
 
@@ -148,7 +151,7 @@ it('reports a committed recording that still holds a credential, and never quote
     (new RecordingStore($base.'/docs/recordings'))->put(ExampleRecording::of(
         'op:v1:abcdefgh12345678',
         'GET /api/invoices',
-        [RecordedExample::of('200', 'application/json', ['api_key' => 'live-secret-value'])],
+        [RecordedExample::of('200', 'application/json', ['api_key' => 'live-secret-value'], 'listed')],
     ));
 
     $findings = auditFindings($base, auditDocument('op:v1:abcdefgh12345678'));
@@ -165,7 +168,7 @@ it('reports a committed recording whose credential is a number the recorder coul
     (new RecordingStore($base.'/docs/recordings'))->put(ExampleRecording::of(
         'op:v1:abcdefgh12345678',
         'GET /api/invoices',
-        [RecordedExample::of('200', 'application/json', ['cvv' => 987, 'token_count' => 4])],
+        [RecordedExample::of('200', 'application/json', ['cvv' => 987, 'token_count' => 4], 'listed')],
     ));
 
     $findings = auditFindings($base, auditDocument('op:v1:abcdefgh12345678'));
@@ -178,15 +181,40 @@ it('reports a committed recording whose credential is a number the recorder coul
         ->and($findings[0]->help)->toContain('lint.leakage.allow');
 });
 
-it('says nothing about a clean, claimed recording', function (): void {
+it('says nothing about a clean, claimed, named recording', function (): void {
     $base = auditBase();
     (new RecordingStore($base.'/docs/recordings'))->put(ExampleRecording::of(
         'op:v1:abcdefgh12345678',
         'GET /api/invoices',
-        [RecordedExample::of('200', 'application/json', ['id' => 1])],
+        [RecordedExample::of('200', 'application/json', ['id' => 1], 'listed')],
     ));
 
     expect(auditFindings($base, auditDocument('op:v1:abcdefgh12345678')))->toBe([]);
+});
+
+it('reports a committed body no assertion named, once per file', function (): void {
+    $base = auditBase();
+    (new RecordingStore($base.'/docs/recordings'))->put(ExampleRecording::of(
+        'op:v1:abcdefgh12345678',
+        'GET /api/invoices',
+        [
+            RecordedExample::of('200', 'application/json', ['id' => 1]),
+            RecordedExample::of('404', 'application/json', ['message' => 'No invoice.']),
+        ],
+    ));
+
+    $findings = auditFindings($base, auditDocument('op:v1:abcdefgh12345678', ['200', '404']));
+
+    // A recording is asked for one assertion at a time and the name is the asking, so an unnamed body
+    // came from a suite recorded before that was true. It still publishes — an upgrade takes no example
+    // out of a document — but nothing will ever refresh it, and that is the part an author cannot see.
+    expect($findings)->toHaveCount(1)
+        ->and($findings[0]->severity)->toBe(Severity::Info)
+        ->and($findings[0]->code)->toBe('examples.recording-unnamed')
+        ->and($findings[0]->message)->toContain('op-v1-abcdefgh12345678.json')
+        ->and($findings[0]->message)->toContain('200 application/json, 404 application/json')
+        ->and($findings[0]->message)->toContain('no run can re-record them')
+        ->and($findings[0]->help)->toContain('recordAs:');
 });
 
 it('says nothing when the configured directory is not there', function (): void {
@@ -221,8 +249,10 @@ it('reports the names an error response cannot carry, once per media type', func
 
     $findings = auditFindings($base, auditDocument('op:v1:abcdefgh12345678', ['200', '403']));
 
+    // Info rather than a warning: naming is now how a body is asked for at all, so every recorded
+    // error body reaches this, and the one remaining remedy is a document-wide setting.
     expect($findings)->toHaveCount(1)
-        ->and($findings[0]->severity)->toBe(Severity::Warning)
+        ->and($findings[0]->severity)->toBe(Severity::Info)
         ->and($findings[0]->code)->toBe('examples.recording-name-unpublished')
         ->and($findings[0]->message)->toContain('expired, missing')
         ->and($findings[0]->help)->toContain('representation.errors.components');

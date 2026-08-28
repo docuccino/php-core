@@ -12,6 +12,8 @@ declare(strict_types=1);
  * which would couple the vocabulary-free core to a host framework or to the static analyser — fails
  * the build.
  */
+use Docuccino\Core\Contract\ContractIndex;
+
 arch('core never depends on the Laravel framework')
     ->expect('Docuccino\Core')
     ->not->toUse('Illuminate');
@@ -112,6 +114,41 @@ it('never hands a public API consumer a type marked @internal', function (): voi
     }
 
     expect($leaks)->toBe([]);
+});
+
+/**
+ * The reflection rule above catches a public method that HANDS BACK something internal. This one catches
+ * the other way a promise gets made by accident: a public method that is fine to return but was never
+ * meant to be called from outside the package at all.
+ *
+ * {@see ContractIndex} is where that bites, because it is the one class on the contract-testing surface
+ * whose split is invisible from the outside — an adapter's assertions call a handful of these and core's
+ * own checker and messages call the rest. The list is the DECISION; reflection is the source of truth,
+ * so a public method added without one fails here rather than shipping as a v1 promise.
+ */
+it('freezes the contract index at the methods outside core actually call', function (): void {
+    $public = [];
+    foreach ((new ReflectionClass(ContractIndex::class))->getMethods(ReflectionMethod::IS_PUBLIC) as $method) {
+        if (! str_contains((string) $method->getDocComment(), '@internal')) {
+            $public[] = $method->getName();
+        }
+    }
+
+    sort($public);
+
+    expect($public)->toBe([
+        'document',
+        'fromArray',
+        'fromJson',
+        'identities',
+        'isUir',
+        'match',
+        'operation',
+        'operations',
+        'provenanceOf',
+        'supportsWebhooks',
+        'webhooksNamed',
+    ]);
 });
 
 it('names the Laravel adapter nowhere in its source, prose and diagnostics included', function (): void {

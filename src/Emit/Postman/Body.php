@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Docuccino\Core\Emit\Postman;
 
 use Docuccino\Core\Canonical\CanonicalJsonSerializer;
+use Docuccino\Core\Contract\Pointer;
 use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
 use Docuccino\Core\Emit\SchemaExampleFactory;
@@ -21,10 +22,19 @@ use stdClass;
  * The JSON body is itself written through {@see CanonicalJsonSerializer}, so the string nested inside
  * the collection is as deterministic as the collection around it.
  *
+ * **A schema is READ, not assumed to be spelled out.** `#/components/schemas/CreateUser` and the object
+ * written inline describe one payload, and a collection where only one of the two carries a body is a
+ * collection whose contents depend on whether a shape happened to be shared. {@see Ref} follows the
+ * chain — the one resolver, hop-capped and cycle-terminating — and {@see fields()} folds `allOf` for
+ * the form kinds, which need the property list itself rather than a value built from it.
+ *
  * @internal
  */
 final class Body
 {
+    /** An `allOf` nested deeper than this is not a shape anybody wrote as a form. */
+    private const int MAX_COMPOSITION_DEPTH = 8;
+
     /**
      * Which media type to build from. A fixed preference, then lowest-sorted — never map order, which
      * no author chose.
@@ -60,7 +70,12 @@ final class Body
     public static function of(string $mediaType, array $media, array $components, SchemaExampleFactory $examples, string $signature, array &$diagnostics): ?array
     {
         $base = strtolower(trim(explode(';', $mediaType)[0]));
-        $schema = is_array($media['schema'] ?? null) ? Arr::stringKeyed($media['schema']) : [];
+
+        [$schema, $unresolved] = self::schema($media, $components);
+
+        if ($unresolved !== null) {
+            self::reportUnresolved($base, $unresolved, $signature, $diagnostics);
+        }
 
         if ($base === 'application/json' || str_ends_with($base, '+json')) {
             return self::raw(self::json($media, $schema, $components, $examples), 'json');
@@ -133,7 +148,8 @@ final class Body
      */
     private static function form(string $base, array $media, array $schema, array $components, SchemaExampleFactory $examples, string $signature, array &$diagnostics): ?array
     {
-        $properties = is_array($schema['properties'] ?? null) ? Arr::stringKeyed($schema['properties']) : [];
+        $folded = [];
+        [$properties, $required] = self::fields($schema, $components, $folded);
 
         if ($properties === []) {
             if ($schema !== [] && ($schema['type'] ?? 'object') !== 'object') {
@@ -148,8 +164,6 @@ final class Body
             // No fields: omit `body` entirely rather than shipping an empty array.
             return null;
         }
-
-        $required = is_array($schema['required'] ?? null) ? array_values($schema['required']) : [];
 
         $keys = array_keys($properties);
         sort($keys, SORT_STRING);
@@ -183,6 +197,119 @@ final class Body
 
         // No field the consumer may send: omit `body` entirely rather than shipping an empty array.
         return $fields === [] ? null : ['mode' => $mode, $mode => $fields];
+    }
+
+    /**
+     * The media type's schema with its `$ref` chain followed, and the reference that landed nowhere.
+     *
+     * Followed HERE rather than in each body kind, so `json`, `text` and the two form kinds all read
+     * one shape: a payload does not change because its schema was shared. A reference that resolves to
+     * nothing degrades to the empty schema — the `$ref` node says nothing about the payload, and
+     * reading `type` or `properties` off it would answer for a shape nobody wrote.
+     *
+     * @param  array<string, mixed>  $media
+     * @param  array<string, mixed>  $components
+     * @return array{0: array<string, mixed>, 1: string|null}
+     */
+    private static function schema(array $media, array $components): array
+    {
+        $written = is_array($media['schema'] ?? null) ? Arr::stringKeyed($media['schema']) : [];
+
+        [$schema, , $unresolved] = Ref::follow($written, $components);
+
+        return [$unresolved === null ? $schema : [], $unresolved];
+    }
+
+    /**
+     * The fields a form body has, as `[properties, required]`, with `allOf` folded flat.
+     *
+     * A form body IS a list of fields, so a shape composed of several object schemas has the same
+     * fields as the one that wrote them out — and a collection that read only the outer object would
+     * send a request missing every inherited one. A conjunction cannot disagree with itself, so a
+     * property named twice is one property and the outer schema, then the earlier branch, keeps the
+     * say; `required` accumulates, since `in_array` is all it is asked.
+     *
+     * **Bounded by the document, not by the depth cap.** A pointer is folded ONCE across the whole
+     * walk, so `k` branches referencing a shape already folded cost `k` visits rather than `k` to the
+     * power of the cap — which is seconds of pure CPU on a document under a kilobyte, at flat memory,
+     * so no limit anywhere stops it. Skipping costs the answer nothing: a conjunction is a union, and
+     * whatever is behind a pointer met twice is already in the set the first visit merged.
+     *
+     * @param  array<string, mixed>  $schema  the media type's schema, `$ref` already followed
+     * @param  array<string, mixed>  $components
+     * @param  array<string, true>  $folded  the pointers this walk has already folded
+     * @return array{0: array<string, mixed>, 1: list<mixed>}
+     */
+    private static function fields(array $schema, array $components, array &$folded, int $depth = 0): array
+    {
+        $properties = is_array($schema['properties'] ?? null) ? Arr::stringKeyed($schema['properties']) : [];
+        $required = is_array($schema['required'] ?? null) ? array_values($schema['required']) : [];
+
+        $branches = is_array($schema['allOf'] ?? null) ? array_values($schema['allOf']) : [];
+
+        if ($depth >= self::MAX_COMPOSITION_DEPTH) {
+            return [$properties, $required];
+        }
+
+        foreach ($branches as $branch) {
+            if (! is_array($branch)) {
+                continue;
+            }
+
+            [$resolved, $where, $unresolved] = Ref::follow(Arr::stringKeyed($branch), $components);
+
+            if ($unresolved !== null) {
+                continue;
+            }
+
+            // An inline branch is written out once and so is walked once; a pointer can be written any
+            // number of times, and is folded on the first of them.
+            if ($where !== []) {
+                $pointer = Pointer::of($where);
+
+                if (isset($folded[$pointer])) {
+                    continue;
+                }
+
+                $folded[$pointer] = true;
+            }
+
+            [$theirs, $theirRequired] = self::fields($resolved, $components, $folded, $depth + 1);
+
+            $properties += $theirs;
+            $required = [...$required, ...$theirRequired];
+        }
+
+        return [$properties, $required];
+    }
+
+    /**
+     * Deduplicated by reference across the whole document, for the same reason
+     * {@see reportMediaType()} is by media type: one broken pointer shared by 40 operations is one
+     * defect, and 40 warnings would bury the other 39 diagnostics. It carries the route signature all
+     * the same — the first route to meet it is a place to go and look, which a media type has no
+     * equivalent of.
+     *
+     * @param  list<Diagnostic>  $diagnostics
+     */
+    private static function reportUnresolved(string $base, string $reference, string $signature, array &$diagnostics): void
+    {
+        foreach ($diagnostics as $diagnostic) {
+            if ($diagnostic->code === 'postman.body-unresolved' && str_contains($diagnostic->message, sprintf('`%s`', $reference))) {
+                return;
+            }
+        }
+
+        $diagnostics[] = new Diagnostic(
+            severity: Severity::Warning,
+            code: 'postman.body-unresolved',
+            message: sprintf(
+                'The %s body is documented as `%s`, which the document does not define, so the request is sent with no body.',
+                $base,
+                $reference,
+            ),
+            routeSignature: $signature,
+        );
     }
 
     /**

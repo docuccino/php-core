@@ -18,6 +18,9 @@ namespace Docuccino\Core\Examples;
  * never goes the other way — a name is only ever removed by deleting the file, because a run that
  * recorded no names may simply be a run that did not get to them.
  *
+ * Which is also the upgrade path: nothing writes an unnamed body any more ({@see RecordedExample}), and
+ * naming the assertion that produced one replaces it on the next run.
+ *
  * @internal
  */
 final readonly class ExampleRecording

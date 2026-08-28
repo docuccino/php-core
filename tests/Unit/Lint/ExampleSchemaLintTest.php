@@ -244,3 +244,79 @@ it('says nothing that would make one build differ from another', function () use
         ->and($findings[0]->message)->not->toContain('/home/somebody')
         ->and($findings[0]->message)->not->toContain('.php');
 });
+
+/*
+ * A `$ref` at a name the document never defines is a broken document, not an under-described one. The
+ * audit behind this lint used to walk past it, so every example under that node left the walk in
+ * silence; `ContractChecker` has always failed on the identical situation. Both halves now say the
+ * same thing, and the lint says it where the author will actually see it.
+ */
+it('reports a reference the document does not define, wherever it stands', function (callable $break, string $pointer, string $reference) use ($on): void {
+    $findings = lintDiagnostics(new ExampleSchemaLint($on), $break(lintDocument(['GET /api/widgets' => [
+        'responses' => ['200' => ['content' => ['application/json' => ['schema' => ['type' => 'object']]]]],
+    ]])));
+
+    expect($findings)->toHaveCount(1)
+        ->and($findings[0]->severity)->toBe(Severity::Warning)
+        ->and($findings[0]->code)->toBe('lint.unresolved-reference')
+        ->and($findings[0]->message)->toBe(sprintf('The node at %s is a `$ref` to `%s`, which the document does not define.', $pointer, $reference))
+        ->and($findings[0]->help)->toContain('Define the component the pointer names');
+})->with([
+    'a path item' => [
+        static function (array $document): array {
+            $document['paths']['/api/widgets'] = ['$ref' => '#/components/pathItems/Gone'];
+
+            return $document;
+        },
+        '/paths/~1api~1widgets',
+        '#/components/pathItems/Gone',
+    ],
+    'a response' => [
+        static function (array $document): array {
+            $document['paths']['/api/widgets']['get']['responses']['200'] = ['$ref' => '#/components/responses/Gone'];
+
+            return $document;
+        },
+        '/paths/~1api~1widgets/get/responses/200',
+        '#/components/responses/Gone',
+    ],
+    'a request body' => [
+        static function (array $document): array {
+            $document['paths']['/api/widgets']['get']['requestBody'] = ['$ref' => '#/components/requestBodies/Gone'];
+
+            return $document;
+        },
+        '/paths/~1api~1widgets/get/requestBody',
+        '#/components/requestBodies/Gone',
+    ],
+    'a webhook path item' => [
+        static function (array $document): array {
+            $document['webhooks'] = ['widget.made' => ['$ref' => '#/components/pathItems/Gone']];
+
+            return $document;
+        },
+        '/webhooks/widget.made',
+        '#/components/pathItems/Gone',
+    ],
+]);
+
+it('is silent about a reference that resolves', function () use ($on): void {
+    $document = lintDocument(['GET /api/widgets' => ['responses' => ['200' => ['$ref' => '#/components/responses/Ok']]]]);
+    $document['components']['responses']['Ok'] = ['description' => 'ok'];
+
+    expect(lintDiagnostics(new ExampleSchemaLint($on), $document))->toBe([]);
+});
+
+it('does not let the example allow-list silence a broken reference', function (): void {
+    // `lint.examples.allow` accepts an example a schema under-describes. A pointer at nothing is not an
+    // example anybody decided to keep, so it is raised before the list is consulted.
+    $document = lintDocument(['GET /api/widgets' => ['responses' => ['200' => ['$ref' => '#/components/responses/Gone']]]]);
+
+    $findings = lintDiagnostics(
+        new ExampleSchemaLint(new LintRuleOptions(enabled: true, allow: ['/paths/~1api~1widgets/get/responses/200'])),
+        $document,
+    );
+
+    expect($findings)->toHaveCount(1)
+        ->and($findings[0]->code)->toBe('lint.unresolved-reference');
+});

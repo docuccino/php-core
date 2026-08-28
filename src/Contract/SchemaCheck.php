@@ -72,6 +72,20 @@ final class SchemaCheck
     }
 
     /**
+     * Whether there is a schema at those segments to check anything against at all.
+     *
+     * {@see check()} answering with no violations means "nothing disagreed", which is also what it
+     * answers where the document put no schema there — and those are not the same claim. A caller that
+     * counts what it PROVED has to be able to tell them apart.
+     *
+     * @param  list<string>  $segments
+     */
+    public function has(array $segments): bool
+    {
+        return $this->subject($segments) !== null;
+    }
+
+    /**
      * The schema at those pointer segments, from the object graph. Booleans are schemas too. Anything
      * else — no node there, or an empty array standing for `{}` — means every value passes, which is
      * the answer `null` already produces.

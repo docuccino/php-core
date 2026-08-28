@@ -67,7 +67,7 @@ final class SavedExample
     {
         // A $ref'd response resolves first, so an error shape shared across operations yields the same
         // example wherever it is referenced.
-        $response = self::dereference($response, $components);
+        $response = Ref::follow($response, $components)[0];
 
         $content = Arr::stringKeyed(is_array($response['content'] ?? null) ? $response['content'] : []);
         $types = array_map(strval(...), array_keys($content));
@@ -120,7 +120,10 @@ final class SavedExample
         sort($names, SORT_STRING);
 
         foreach ($names as $name) {
-            $header = Arr::stringKeyed(is_array($declared[$name] ?? null) ? $declared[$name] : []);
+            // A header object may be written as a `$ref` exactly as the response around it may, and a
+            // header read off the pointer node has no `schema` — so it would drop out of the example
+            // for having been shared.
+            $header = Ref::follow(Arr::stringKeyed(is_array($declared[$name] ?? null) ? $declared[$name] : []), $components)[0];
             $member = $examples->member($header['schema'] ?? null, $components);
 
             // A header whose schema admits no value is a header the response cannot carry.
@@ -176,25 +179,5 @@ final class SavedExample
         }
 
         return [rtrim((new CanonicalJsonSerializer)->serialize($value[0] ?? new stdClass), "\n"), 'json'];
-    }
-
-    /**
-     * @param  array<string, mixed>  $response
-     * @param  array<string, mixed>  $components
-     * @return array<string, mixed>
-     */
-    private static function dereference(array $response, array $components): array
-    {
-        $ref = $response['$ref'] ?? null;
-
-        if (! is_string($ref) || ! str_starts_with($ref, '#/components/responses/')) {
-            return $response;
-        }
-
-        $name = substr($ref, strlen('#/components/responses/'));
-        $declared = Arr::stringKeyed(is_array($components['responses'] ?? null) ? $components['responses'] : []);
-        $target = $declared[$name] ?? null;
-
-        return is_array($target) ? Arr::stringKeyed($target) : $response;
     }
 }

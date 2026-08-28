@@ -33,6 +33,10 @@ use Docuccino\Core\Extensions\Ordering\Priorities;
  * A schema the validator will not read is reported as `lint.example-uncheckable` rather than thrown: a
  * lint runs on every build, so one that can end a build has taken the whole document hostage to a
  * check nobody asked for. It names the schema, which is the half to go and look at.
+ *
+ * A response or body the audit could not reach at all, because the `$ref` standing there names nothing
+ * the document defines, is `lint.unresolved-reference` — a defect in the document rather than in an
+ * example, and the one the author must fix first, since everything under that node went unread.
  */
 #[ExtensionOrder(priority: Priorities::LAST)]
 final class ExampleSchemaLint implements DocumentTransformer
@@ -54,6 +58,30 @@ final class ExampleSchemaLint implements DocumentTransformer
         $report = (new ExampleAudit(ContractIndex::fromArray($this->published($document->toArray()))))->run();
 
         foreach ($report->findings as $finding) {
+            // A finding with no example behind it: the audit went looking and the pointer named
+            // nothing. Saying an example failed its schema would describe something the document does
+            // not contain, and the reader's fix is a different one. It is also raised BEFORE the
+            // allow-list is consulted — that list accepts an example a schema under-describes, and a
+            // pointer at nothing is not an example anybody decided to keep. `diagnostics.accept` is
+            // where a code nobody can act on goes.
+            if ($finding->unresolvedRef !== null) {
+                $context->report(new Diagnostic(
+                    severity: Severity::Warning,
+                    code: 'lint.unresolved-reference',
+                    message: sprintf(
+                        'The node at %s is a `$ref` to `%s`, which the document does not define.',
+                        $finding->pointer,
+                        $finding->unresolvedRef,
+                    ),
+                    help: 'Nothing can read what that node promises — not a client generator, not a '
+                        .'viewer, not a contract test — so the schema and the examples under it went '
+                        .'unchecked too. Define the component the pointer names, or correct the '
+                        .'pointer; an overlay that renamed or removed a component is the usual cause.',
+                ));
+
+                continue;
+            }
+
             if ($this->options->silences($finding->pointer, $finding->label)) {
                 continue;
             }

@@ -28,6 +28,27 @@ final readonly class Violation
         return new self($location, '', $message, '', ProvenanceTrail::none());
     }
 
+    /**
+     * A `$ref` at a name the document does not define, wherever it is met: a path item, a response, a
+     * request body, a delivered body, a parameter, or the node an example audit went looking behind.
+     *
+     * One defect, one sentence, minted in one place. It had reached five callers as five hand-typed
+     * copies of the same string, which is how the halves of one product come to phrase a finding two
+     * ways — and a reader who has met it once should recognise it everywhere it can happen.
+     *
+     * @param  string  $schemaPointer  where the reference itself stands, for the callers that know
+     */
+    public static function unresolvedRef(string $reference, string $location = 'the response', string $schemaPointer = ''): self
+    {
+        return new self(
+            $location,
+            '',
+            sprintf('is documented at %s, which the contract does not define', $reference),
+            $schemaPointer,
+            ProvenanceTrail::none(),
+        );
+    }
+
     public function where(): string
     {
         return $this->pointer === '' ? $this->location : $this->location.' at '.$this->pointer;

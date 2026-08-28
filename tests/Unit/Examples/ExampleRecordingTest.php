@@ -47,6 +47,18 @@ it('ranks two object-shaped bodies apart, the same way it ranks two arrays', fun
         ->and($second->outranks($first))->toBeFalse();
 });
 
+it('breaks a tie on the bytes it will publish, not on the fingerprint that sorts them', function (): void {
+    // The same members in a different order — one model hydrated by create(), the same model hydrated
+    // by find(). `Json::stable` sorts an object's members on purpose, so these fingerprint alike; rank
+    // on that alone and they tie, and a tie is settled by which test ran first while the file each
+    // would write differs.
+    $created = RecordedExample::of('200', 'application/json', RecordedBody::decode('{"id":1,"title":"Intake"}'));
+    $found = RecordedExample::of('200', 'application/json', RecordedBody::decode('{"title":"Intake","id":1}'));
+
+    expect($created->outranks($found))->toBeTrue()
+        ->and($found->outranks($created))->toBeFalse();
+});
+
 it('leaves a committed body alone while its shape is unchanged', function (): void {
     $committed = RecordedExample::of('200', 'application/json', ['id' => 1, 'created_at' => '2026-01-01T00:00:00Z']);
     $recording = ExampleRecording::of('op:v1:abcdefgh12345678', 'GET /api/invoices', [$committed]);

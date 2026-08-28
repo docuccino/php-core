@@ -6,6 +6,7 @@ namespace Docuccino\Core\Emit\Postman;
 
 use Docuccino\Core\Canonical\Canonicalizer;
 use Docuccino\Core\Canonical\CanonicalJsonSerializer;
+use Docuccino\Core\Contract\Refs;
 use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
 use Docuccino\Core\Document\PathItem;
@@ -190,7 +191,15 @@ final readonly class CollectionEmitter implements ReportingEmitter
 
         $out = [];
         foreach ($templates as $template) {
-            $pathItem = Arr::stringKeyed(is_array($paths[$template] ?? null) ? $paths[$template] : []);
+            // A path item may be written as a `$ref`, and one describes the same requests as the same
+            // path item written inline — a collection missing a whole path because its shape was shared
+            // is not a smaller collection, it is a wrong one.
+            [$pathItem, , $unresolved] = Refs::follow($oas, Arr::stringKeyed(is_array($paths[$template] ?? null) ? $paths[$template] : []), []);
+
+            if ($unresolved !== null) {
+                continue;
+            }
+
             $shared = is_array($pathItem['parameters'] ?? null) ? array_values($pathItem['parameters']) : [];
 
             foreach (PathItem::METHODS as $method) {
@@ -467,8 +476,12 @@ final readonly class CollectionEmitter implements ReportingEmitter
      */
     private function body(array $operation, array $components, string $signature, array &$diagnostics): array
     {
-        $requestBody = is_array($operation['requestBody'] ?? null) ? Arr::stringKeyed($operation['requestBody']) : [];
-        $content = Arr::stringKeyed(is_array($requestBody['content'] ?? null) ? $requestBody['content'] : []);
+        $written = is_array($operation['requestBody'] ?? null) ? Arr::stringKeyed($operation['requestBody']) : [];
+        [$requestBody, , $unresolved] = Ref::follow($written, $components);
+
+        $content = $unresolved === null && is_array($requestBody['content'] ?? null)
+            ? Arr::stringKeyed($requestBody['content'])
+            : [];
 
         if ($content === []) {
             return ['body' => null, 'contentType' => null];
@@ -550,7 +563,12 @@ final readonly class CollectionEmitter implements ReportingEmitter
 
         $paths = Arr::stringKeyed(is_array($oas['paths'] ?? null) ? $oas['paths'] : []);
         $withCallbacks = [];
-        foreach ($paths as $template => $pathItem) {
+        foreach ($paths as $template => $written) {
+            // Followed for the same reason `operations()` follows it: a shared path item declares the
+            // same callbacks, and a warning that fired only for the inline spelling is a warning whose
+            // presence depends on how the document was written.
+            $pathItem = is_array($written) ? Refs::follow($oas, Arr::stringKeyed($written), [])[0] : null;
+
             foreach (PathItem::METHODS as $method) {
                 $operation = is_array($pathItem) && is_array($pathItem[$method] ?? null) ? $pathItem[$method] : null;
                 if ($operation !== null && is_array($operation['callbacks'] ?? null) && $operation['callbacks'] !== []) {

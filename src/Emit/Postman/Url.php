@@ -54,8 +54,19 @@ final readonly class Url
     {
         $merged = [];
 
-        foreach ([...$shared, ...$own] as $parameter) {
-            $parameter = $this->dereference($parameter, $components);
+        foreach ([...$shared, ...$own] as $written) {
+            if (! is_array($written)) {
+                continue;
+            }
+
+            [$parameter, , $unresolved] = Ref::follow(Arr::stringKeyed($written), $components);
+
+            // A reference landing nowhere says nothing about where a value goes, so the parameter is
+            // dropped: a query string named after a pointer would be worse than its absence.
+            if ($unresolved !== null) {
+                continue;
+            }
+
             $name = $parameter['name'] ?? null;
             $in = $parameter['in'] ?? null;
 
@@ -296,7 +307,7 @@ final readonly class Url
             $headers[] = ['key' => 'Content-Type', 'value' => $contentType];
         }
 
-        $accept = $this->accept($operation);
+        $accept = $this->accept($operation, $components);
         if ($accept !== null) {
             $headers[] = ['key' => 'Accept', 'value' => $accept];
         }
@@ -336,9 +347,15 @@ final readonly class Url
     }
 
     /**
+     * What the operation says it returns, from the lowest 2xx that declares any media type. The
+     * response is `$ref` followed first: a shape shared into `components.responses` describes the same
+     * payload as one written inline, and a request that carried an `Accept` only when the document
+     * happened not to share it would content-negotiate differently for the same endpoint.
+     *
      * @param  array<string, mixed>  $operation
+     * @param  array<string, mixed>  $components
      */
-    private function accept(array $operation): ?string
+    private function accept(array $operation, array $components): ?string
     {
         $responses = Arr::stringKeyed(is_array($operation['responses'] ?? null) ? $operation['responses'] : []);
 
@@ -349,8 +366,10 @@ final readonly class Url
         sort($codes, SORT_STRING);
 
         foreach ($codes as $code) {
-            $response = Arr::stringKeyed(is_array($responses[$code] ?? null) ? $responses[$code] : []);
-            $content = is_array($response['content'] ?? null) ? $response['content'] : [];
+            $written = Arr::stringKeyed(is_array($responses[$code] ?? null) ? $responses[$code] : []);
+            [$response, , $unresolved] = Ref::follow($written, $components);
+
+            $content = $unresolved === null && is_array($response['content'] ?? null) ? $response['content'] : [];
             $types = array_map(strval(...), array_keys($content));
 
             if ($types !== []) {
@@ -567,29 +586,5 @@ final readonly class Url
     private function describe(array $parameter): string
     {
         return Description::parameter($parameter);
-    }
-
-    /**
-     * @param  array<string, mixed>  $components
-     * @return array<string, mixed>
-     */
-    private function dereference(mixed $parameter, array $components): array
-    {
-        if (! is_array($parameter)) {
-            return [];
-        }
-
-        $parameter = Arr::stringKeyed($parameter);
-        $ref = $parameter['$ref'] ?? null;
-
-        if (! is_string($ref) || ! str_starts_with($ref, '#/components/parameters/')) {
-            return $parameter;
-        }
-
-        $name = substr($ref, strlen('#/components/parameters/'));
-        $declared = Arr::stringKeyed(is_array($components['parameters'] ?? null) ? $components['parameters'] : []);
-        $target = $declared[$name] ?? null;
-
-        return is_array($target) ? Arr::stringKeyed($target) : [];
     }
 }

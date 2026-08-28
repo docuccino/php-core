@@ -60,11 +60,14 @@ final class IdentityOverlap
 
         // Through the same resolver the pairing uses, or a document whose parameters are all `$ref`s looks
         // to carry no parameter identity at all and the warning goes quiet on the pairing failures it exists
-        // to flag.
+        // to flag. A path item spelled as a `$ref` is the same trap one level up: unresolved it states no
+        // operations, so every id under it is invisible here while the pairing pairs them.
         $refs = ComponentRefs::of($document);
 
         // Webhooks are paired as operations, so their ids are operation ids here as well.
         foreach ([...array_values($document->paths ?? []), ...array_values($document->webhooks ?? [])] as $item) {
+            [$item] = $refs->resolvePathItem($item);
+
             // A path item's parameters belong to the operations under it, and the pairing compares them
             // there, so they count as parameter identities here too.
             foreach ($item->operations as $operation) {
