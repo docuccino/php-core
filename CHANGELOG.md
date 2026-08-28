@@ -7,6 +7,18 @@ User-facing changes to `docuccino/core` — features, fixes, performance work an
 taken from the commit messages scoped `core`. Entries begin after v0.1.2; older history is in
 the [repository](https://github.com/docuccino/docuccino) git log.
 
+## v0.11.0
+
+### Breaking changes
+
+- gate contract coverage on documented responses, not operations ([#260](https://github.com/docuccino/docuccino/pull/260))
+  - `docuccino:coverage --min` is measured against documented responses rather than operations, so an existing floor will read lower. `CoverageReport::total()` and `exercisedCount()` are removed rather than silently re-meaning; `missing()` changes from "operations never exercised" to "operations with any unexercised response". `documentedStatuses()` renders in family order, so `{500, 5XX, 1XX}` reads `500, 1XX, 5XX` where it read `1XX, 500, 5XX`. `assertValidRequest()` no longer credits a response.
+
+### Features
+
+- hold the payload a webhook dispatches to its contract ([#262](https://github.com/docuccino/docuccino/pull/262))
+- check the response headers the document publishes ([#261](https://github.com/docuccino/docuccino/pull/261))
+
 ## v0.10.5
 
 ### Features
