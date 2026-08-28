@@ -61,4 +61,17 @@ final class FieldPath
     {
         return ! in_array('', self::segments($path), true);
     }
+
+    /**
+     * Whether `$path` names `$ancestor` itself or something inside it — one path answering for another.
+     * Compared segment by segment rather than with a string prefix, because `meta\.scoring` and
+     * `meta.scoring` share every character and name different things.
+     */
+    public static function isAtOrUnder(string $path, string $ancestor): bool
+    {
+        $under = self::segments($ancestor);
+        $of = self::segments($path);
+
+        return count($of) >= count($under) && array_slice($of, 0, count($under)) === $under;
+    }
 }

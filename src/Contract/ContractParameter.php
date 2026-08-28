@@ -31,30 +31,14 @@ final readonly class ContractParameter
         public ?string $danglingRef = null,
     ) {}
 
-    /** @return array<string, mixed>|null */
-    public function schema(): ?array
-    {
-        $schema = $this->definition['schema'] ?? null;
-
-        /** @var array<string, mixed>|null */
-        return is_array($schema) ? $schema : null;
-    }
-
     /**
-     * Whether the contract gives this a SCHEMA-SHAPED schema. A `content`-typed parameter or header,
-     * one documented with neither, and one whose `schema` is a string or a number cannot be checked —
-     * which the caller says out loud rather than passing in silence. A boolean counts, because `true`
-     * and `false` are schemas; so does `[]`, which is how associative decoding spells `{}`.
+     * What the contract gives this to be checked against — the whole answer ({@see ParameterSchemaKind}).
      *
-     * The member being PRESENT is not the question: a `schema` nothing can validate against is exactly
-     * as uncheckable as one that was never written, and reading presence alone let a mistyped one pass
-     * as though it had been checked.
+     * @internal
      */
-    public function hasSchema(): bool
+    public function schema(): ParameterSchema
     {
-        $schema = $this->definition['schema'] ?? null;
-
-        return is_array($schema) || is_bool($schema);
+        return ParameterSchema::of($this->definition);
     }
 
     /** @return list<string> */

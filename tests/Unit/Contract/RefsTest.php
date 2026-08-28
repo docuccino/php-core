@@ -67,3 +67,25 @@ it('stops following a cycle rather than recursing forever, and reports it as unr
 it('returns a node with no reference unchanged', function (): void {
     expect(Refs::follow([], ['type' => 'string'], ['x']))->toBe([['type' => 'string'], ['x'], null]);
 });
+
+/**
+ * `member()` answers null to "no such member" and to "a member no reader can follow" alike, and the
+ * two are different facts about the document — one promises nothing, the other promises something
+ * nobody could check. Every shape a member can hold is a row, so a reader that starts calling a
+ * written-but-unreadable member absent fails here rather than passing a check in silence.
+ */
+it('tells a member nobody wrote from one written in a shape it cannot follow', function (mixed $value, bool $malformed, bool $followed): void {
+    $node = $value === 'ABSENT' ? [] : ['requestBody' => $value];
+
+    expect(Refs::malformed($node, 'requestBody'))->toBe($malformed)
+        ->and(Refs::member([], $node, 'requestBody', ['x']) !== null)->toBe($followed);
+})->with([
+    'an object' => [['content' => []], false, true],
+    'an empty object, which is how associative decoding spells {}' => [[], false, true],
+    'no member at all' => ['ABSENT', false, false],
+    'a string' => ['a body, honest', true, false],
+    'a number' => [42, true, false],
+    // Written as null is still written, and it is still nothing a reader can follow.
+    'an explicit null' => [null, true, false],
+    'a boolean' => [true, true, false],
+]);

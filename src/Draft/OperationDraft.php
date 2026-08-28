@@ -175,6 +175,21 @@ final class OperationDraft
     }
 
     /**
+     * Every parameter this operation has a draft for, as its `in:name` key, byte-sorted for the same
+     * reason {@see responseStatuses()} is: what this answers must be a function of the parameters and
+     * never of the order the producers wrote them.
+     *
+     * @return list<string>
+     */
+    public function parameterKeys(): array
+    {
+        $keys = array_map(strval(...), array_keys($this->parameters));
+        sort($keys, SORT_STRING);
+
+        return $keys;
+    }
+
+    /**
      * Every status this operation has a response draft for, byte-sorted so the answer is a function of
      * the statuses rather than of the order the producers registered them.
      *

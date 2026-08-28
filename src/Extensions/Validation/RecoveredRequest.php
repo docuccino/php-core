@@ -40,6 +40,17 @@ final class RecoveredRequest
     private const READ_VERBS = ['get', 'head'];
 
     /**
+     * Whether this context's verb sends recovered rules to a request BODY rather than to query
+     * parameters — the same reading {@see apply()} branches on, asked from outside so nothing else has
+     * to list the verbs a second time. A guard that recognised a different set from the write it guards
+     * is a hole, and a declaration about a body is only about anything at all where a body is written.
+     */
+    public static function documentsBody(RouteContext $context): bool
+    {
+        return ! in_array($context->httpMethod(), self::READ_VERBS, true);
+    }
+
+    /**
      * Drain the schema's diagnostics and write it as a request body (write verbs) or query parameters
      * (read verbs), attributed to `integration:<producer>`. Pass the single class the body was
      * recovered from as `$sourceClass` so it can hoist; null (an inline `validate()`) stays inline.
@@ -61,7 +72,7 @@ final class RecoveredRequest
 
         $contribution = Contribution::integration($producer, $context->actionSource());
 
-        if (in_array($context->httpMethod(), self::READ_VERBS, true)) {
+        if (! self::documentsBody($context)) {
             $this->applyQueryParameters($operation, $result, $contribution);
 
             return;

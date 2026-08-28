@@ -217,7 +217,9 @@ it('writes a one-member type union as the plain type word it says', function ():
 
 it('reads back every type word a field carries, for a rule whose keyword depends on them', function (array $rules, string $bounds): void {
     // What a constraint rule asks when its keyword differs per type: a bound that is one keyword on an
-    // array and another on an object owes both to a value that may be either.
+    // array and another on an object owes both to a value that may be either. This is the ONLY reading
+    // of the field's type there is: a single-word accessor answered a union with null, indistinguishable
+    // from untyped, and three readers published a claim about a shape they could not see.
     $schema = (new DefaultValidationRulesToSchema(fakeTransformers()))
         ->convert(fakeRuleSet(['meta' => $rules]), ruleContext())->schema;
 
@@ -226,6 +228,11 @@ it('reads back every type word a field carries, for a rule whose keyword depends
     'a union' => [['pair', 'bound'], 'array+object'],
     'one type' => [['str', 'bound'], 'string'],
     'nothing typed yet' => [['bound'], ''],
+    // Null is a node flag the schema applies as it assembles, never a type word a rule reads back — so a
+    // rule running after `nullable` still sees what the field is, and neither gains a phantom `null`
+    // member nor loses the union underneath it.
+    'a nullable union' => [['pair', 'nullable', 'bound'], 'array+object'],
+    'a nullable scalar' => [['str', 'nullable', 'bound'], 'string'],
 ]);
 
 it('leaves an unhandled rule permissive and raises an info diagnostic', function (): void {

@@ -7,6 +7,22 @@ User-facing changes to `docuccino/core` — features, fixes, performance work an
 taken from the commit messages scoped `core`. Entries begin after v0.1.2; older history is in
 the [repository](https://github.com/docuccino/docuccino) git log.
 
+## v0.12.0
+
+### Breaking changes
+
+- say so when a parameter documents a schema no reader can take
+  - ContractParameter::schema() is `@internal` — nothing outside core called it, and the ParameterSchema it returns is core's reading of a declaration rather than a shape to freeze at v1.
+- tell an absent answer from an answer nobody can read
+  - ContractParameter::schema() returns a ParameterSchema rather than an array or null, and ContractParameter::hasSchema() is gone — the fact it stood in for is the kind on the returned value. Exchange::$headers is `array<string, list<string>>` and `Exchange::header()` returns a list, matching the response half; an adapter that passed one string per name passes a one-element list.
+- drop ValidationField::type(), which answers a union with null
+  - `ValidationField::type()` is removed from the rule-transformer surface a third-party `RuleTransformer` is handed. Use `types(): list<string>`, which answers every type word the field carries: one for a scalar type, several for a union, none where nothing has typed it yet. Null is never among the words — nullability is a flag the schema applies as it assembles, so a rule running after `nullable` still reads what the field is. `count($types) === 1 ? $types[0] : null` restores the old answer exactly, and restores the defect with it: branch on the words instead — `$types === []` is "nothing has typed this", and a field stating several is a case to handle, not one to fall through.
+
+### Bug fixes
+
+- report a #[Hidden] name that hid nothing instead of publishing the field
+- give the declared reading of a type string one way in
+
 ## v0.11.0
 
 ### Breaking changes
@@ -18,6 +34,14 @@ the [repository](https://github.com/docuccino/docuccino) git log.
 
 - hold the payload a webhook dispatches to its contract ([#262](https://github.com/docuccino/docuccino/pull/262))
 - check the response headers the document publishes ([#261](https://github.com/docuccino/docuccino/pull/261))
+- hold a security requirement to the schemes the document publishes ([#272](https://github.com/docuccino/docuccino/pull/272))
+
+### Bug fixes
+
+- read a parameter's type in the grammar the validator reads ([#266](https://github.com/docuccino/docuccino/pull/266))
+- read an ambiguous empty body as the container the contract accepts ([#267](https://github.com/docuccino/docuccino/pull/267))
+- follow a $ref wherever the grammar permits one ([#268](https://github.com/docuccino/docuccino/pull/268))
+- resolve a Reference Object before the diff decides what changed ([#273](https://github.com/docuccino/docuccino/pull/273))
 
 ## v0.10.5
 

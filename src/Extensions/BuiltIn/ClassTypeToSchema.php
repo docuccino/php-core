@@ -60,7 +60,12 @@ final class ClassTypeToSchema implements TypeToSchema
 
             $properties = [];
             $required = [];
+            // Every name the deny-list was weighed against, the hidden ones included — what a `#[Hidden]`
+            // that matched nothing is reported against below.
+            $considered = [];
             foreach ($metadata->properties as $property) {
+                $considered[] = $property->name;
+
                 if (in_array($property->name, $hidden, true) || SchemaIdentity::hidesProperty($fqcn, $property->name)) {
                     continue;
                 }
@@ -73,6 +78,10 @@ final class ClassTypeToSchema implements TypeToSchema
                 if (! ($property->type instanceof UnionT && $property->type->containsNull())) {
                     $required[] = $property->name;
                 }
+            }
+
+            foreach (SchemaIdentity::unmatchedHidden($fqcn, $considered) as $diagnostic) {
+                $context->diagnostic($diagnostic);
             }
 
             if ($properties === []) {

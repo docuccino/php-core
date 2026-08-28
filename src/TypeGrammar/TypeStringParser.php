@@ -14,6 +14,7 @@ use Docuccino\Core\Inference\DType\EnumT;
 use Docuccino\Core\Inference\DType\IntersectionT;
 use Docuccino\Core\Inference\DType\ListT;
 use Docuccino\Core\Inference\DType\LiteralT;
+use Docuccino\Core\Inference\DType\MapT;
 use Docuccino\Core\Inference\DType\NullT;
 use Docuccino\Core\Inference\DType\ScalarT;
 use Docuccino\Core\Inference\DType\UnionT;
@@ -41,9 +42,32 @@ use PHPStan\PhpDocParser\Ast\Type\UnionTypeNode;
  */
 final class TypeStringParser
 {
-    public function __construct(
-        private readonly PhpDocParserStack $stack = new PhpDocParserStack,
-    ) {}
+    /** Whether `object` is read as the author's word rather than the analyser's — {@see parseDeclared()}. */
+    private bool $declared = false;
+
+    public function __construct(private readonly PhpDocParserStack $stack = new PhpDocParserStack) {}
+
+    /**
+     * The same grammar, read as an AUTHOR wrote it rather than as an analyser inferred it from source.
+     * One word parts company: `object`. Inferred from PHP it means "an instance of something", whose wire
+     * shape a `JsonSerializable` may make anything, so {@see parse()} answers an open schema and stays
+     * honest. Written by hand in a `#[…]` declaration it is the JSON word, said about the wire by the one
+     * person who knows — and a declaration outranks inference, so it is taken at its word and reads as the
+     * free-form map `array<string, mixed>` already reads as, wherever in the type string it appears.
+     *
+     * `array` is deliberately NOT in here. Laravel's own vocabulary shows the ambiguity is real — a PHP
+     * array is a JSON array or a JSON object — so the word decides nothing an author could be held to,
+     * and `list<T>` or `array<string, T>` says which they meant.
+     */
+    public function parseDeclared(string $type, ?ImportContext $imports = null): DType
+    {
+        // The mode has one way in, and it is this method: nothing can construct a parser that already
+        // reads `object` the author's way, so no caller reaches that reading without asking for it.
+        $author = new self($this->stack);
+        $author->declared = true;
+
+        return $author->parse($type, $imports);
+    }
 
     public function parse(string $type, ?ImportContext $imports = null): DType
     {
@@ -89,7 +113,7 @@ final class TypeStringParser
             'array-key' => self::arrayKey(),
             'array', 'iterable', 'list' => new UnknownT('untyped array'),
             'mixed' => new UnknownT('mixed'),
-            'object' => new UnknownT('object'),
+            'object' => $this->declared ? new MapT(ScalarT::string(), new UnknownT('mixed')) : new UnknownT('object'),
             'void', 'never', 'callable', 'scalar' => new UnknownT($name),
             default => $this->classOrEnum($this->resolveClass($name, $imports)),
         };

@@ -46,3 +46,30 @@ it('calls a path well formed exactly when every segment names something', functi
     'a leading dot' => ['.meta', false],
     'a doubled dot' => ['a..b', false],
 ]);
+
+/*
+ * One path answering for another: the question a producer asks before it says a field's shape is
+ * undecided, when a declaration elsewhere may already have decided it. Compared segment by segment,
+ * because a string prefix cannot tell an escaped dot from a separator and would read `meta\.scoring` as
+ * something inside `meta`.
+ */
+it('says whether one path names another or something inside it', function (string $path, string $ancestor, bool $covers): void {
+    expect(FieldPath::isAtOrUnder($path, $ancestor))->toBe($covers);
+})->with([
+    'a path names itself' => ['meta', 'meta', true],
+    'a child names its parent' => ['meta.scoring', 'meta', true],
+    'a grandchild names its ancestor' => ['meta.scoring.scores', 'meta', true],
+    'a wildcard element names its container' => ['items.*', 'items', true],
+    'a deeper ancestor is matched too' => ['meta.scoring.scores', 'meta.scoring', true],
+    'a sibling does not' => ['meta.other', 'meta.scoring', false],
+    'a parent does not name its own child' => ['meta', 'meta.scoring', false],
+    'an unrelated name does not' => ['other', 'meta', false],
+    // The reason this is not `str_starts_with`: the two share every character.
+    'a name holding a dot is not inside the name before it' => ['meta\.scoring', 'meta', false],
+    'a name holding a dot answers for itself' => ['meta\.scoring', 'meta\.scoring', true],
+    // A prefix of a SEGMENT is not a segment: `met` is not an ancestor of `meta`.
+    'a shared segment prefix does not' => ['meta.scoring', 'met', false],
+    // The pair a string prefix gets wrong: `a\` is a name ending in a backslash, and `a\.b` is one
+    // field called `a.b` — so the second is not inside the first, however the characters line up.
+    'a trailing backslash is part of a name, not the start of an escape' => ['a\.b', 'a\\', false],
+]);

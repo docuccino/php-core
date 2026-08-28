@@ -182,8 +182,8 @@ final class ContractChecker
      * `name` and `in` ({@see ContractParameter}), so the two would otherwise each carry a copy of the
      * order those come in, and drift.
      *
-     * @param  list<mixed>  $values  every value sent under that name; a request parameter has at most
-     *                               one, a response may have sent a header several times
+     * @param  list<mixed>  $values  every value sent under that name; either half may have sent a
+     *                               header more than once
      * @param  string|null  $absent  what to say when nothing was sent, or null where absence is not a
      *                               violation
      * @return array{0: list<Violation>, 1: string|null}
@@ -218,18 +218,32 @@ final class ContractChecker
             )], null];
         }
 
-        if (! $parameter->hasSchema()) {
-            return [[], isset($parameter->definition['content'])
-                ? sprintf('%s is documented as a content object, which the check does not decode', $parameter->label())
-                : sprintf('the contract documents no schema for %s', $parameter->label())];
-        }
+        $schema = $parameter->schema();
 
+        return match ($schema->kind) {
+            ParameterSchemaKind::Schema => [$this->checkValues($parameter, $schema, $values), null],
+            ParameterSchemaKind::Content => [[], sprintf('%s is documented as a content object, which the check does not decode', $parameter->label())],
+            ParameterSchemaKind::Malformed => [[], sprintf('%s is documented with a declaration this check cannot read', $parameter->label())],
+            ParameterSchemaKind::Absent => [[], sprintf('the contract documents no schema for %s', $parameter->label())],
+        };
+    }
+
+    /**
+     * EVERY value the name carried, against the one schema the contract publishes for it — so a name
+     * sent twice cannot satisfy the contract with one value and violate it with the other. Several
+     * values label themselves apart (`header X-Trace (value 2)`); one reads as the parameter itself.
+     *
+     * @param  list<mixed>  $values
+     * @return list<Violation>
+     */
+    private function checkValues(ContractParameter $parameter, ParameterSchema $schema, array $values): array
+    {
         $violations = [];
         foreach ($values as $index => $value) {
             $label = count($values) === 1 ? $parameter->label() : sprintf('%s (value %d)', $parameter->label(), $index + 1);
 
             foreach ($this->validate(
-                ParameterValue::coerce($value, $parameter->schema(), $this->index->document()),
+                $schema->read($value, $this->index->document()),
                 $parameter->schemaSegments(),
                 $label,
             ) as $violation) {
@@ -237,7 +251,7 @@ final class ContractChecker
             }
         }
 
-        return [$violations, null];
+        return $violations;
     }
 
     /**
@@ -306,17 +320,20 @@ final class ContractChecker
         $notes = [];
 
         foreach ($operation->parameters as $parameter) {
-            $value = match ($parameter->in) {
-                'path' => $bound[$parameter->name] ?? null,
-                'query' => $exchange->query[$parameter->name] ?? null,
+            $values = match ($parameter->in) {
+                'path' => self::sent($bound[$parameter->name] ?? null),
+                'query' => self::sent($exchange->query[$parameter->name] ?? null),
+                // Every value, not the first: a request may send one name twice, and what the contract
+                // says the header looks like it says of each of them — the response half's rule,
+                // because it was never a rule about responses.
                 'header' => $exchange->header($parameter->name),
-                'cookie' => $exchange->cookies[$parameter->name] ?? null,
-                default => null,
+                'cookie' => self::sent($exchange->cookies[$parameter->name] ?? null),
+                default => [],
             };
 
             [$found, $note] = $this->checkParameter(
                 $parameter,
-                $value === null ? [] : [$value],
+                $values,
                 // A missing PATH parameter is not a contract violation: the request could not have
                 // matched this template without one, so its absence means the template did not bind.
                 $parameter->required && $parameter->in !== 'path'
@@ -336,12 +353,29 @@ final class ContractChecker
         return $violations === [] ? Outcome::passed(self::note(...$notes)) : Outcome::failed($violations);
     }
 
+    /**
+     * What the exchange carried at a location that can only ever have carried one thing — a path
+     * segment, a query key, a cookie — in the shape {@see checkParameter()} takes.
+     *
+     * @return list<mixed>
+     */
+    private static function sent(mixed $value): array
+    {
+        return $value === null ? [] : [$value];
+    }
+
     private function requestBody(ContractOperation $operation, Exchange $exchange): Outcome
     {
         $documented = $operation->requestBody($this->index->document());
 
         if ($documented === null) {
-            return Outcome::passed();
+            // Nothing written and something written this cannot read are both "no body was checked",
+            // and they are different facts: the first is an operation that promises nothing about a
+            // body, the second a promise nobody looked at. Passing both in silence is how the second
+            // reads as the first ({@see Refs::malformed()}).
+            return Refs::malformed($operation->operation, 'requestBody')
+                ? Outcome::passed('the contract documents a request body this check cannot read')
+                : Outcome::passed();
         }
 
         [$body, $segments, $dangling] = $documented;

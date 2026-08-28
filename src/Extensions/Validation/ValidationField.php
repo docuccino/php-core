@@ -44,22 +44,16 @@ final readonly class ValidationField
     }
 
     /**
-     * The field's `type` where exactly one is set, and null where none is — or where SEVERAL are, which
-     * is a legal state a rule can leave the field in ({@see setTypes()}). A rule that acts on the answer
-     * wants {@see types()}: reading a union as "untyped" here loses the very fact the union states, and
-     * every reader that has asked this question and then done something with it has had to be fixed.
-     */
-    public function type(): ?string
-    {
-        $type = $this->node->keywords['type'] ?? null;
-
-        return is_string($type) ? $type : null;
-    }
-
-    /**
-     * Every type word set on the field — one for a scalar type, several for a union, none where nothing
-     * has typed it yet. What a type-aware rule reads when its keyword differs per type: a bound that is
-     * `maxItems` on an array and `maxProperties` on an object owes both to a value that may be either.
+     * Every type word set on the field — one for a scalar type, several for a union ({@see setTypes()}),
+     * none where nothing has typed it yet. The ONLY reading of the field's type, because there is no
+     * single-word answer to give: a rule may legally leave a field stating several, so a reader asking
+     * for one word gets either a lie or a null indistinguishable from "untyped", and every reader that
+     * asked it that way has had to be fixed. Null is not among the words — nullability is a flag
+     * ({@see markNullable()}) the schema applies as it assembles, so a rule running after one still
+     * reads what the field actually is.
+     *
+     * What a type-aware rule reads when its keyword differs per type: a bound that is `maxItems` on an
+     * array and `maxProperties` on an object owes both to a value that may be either.
      *
      * @return list<string>
      */

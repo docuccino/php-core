@@ -7,6 +7,11 @@ namespace Docuccino\Core\Extensions\Schema;
 use Docuccino\Attributes\Hidden;
 use Docuccino\Attributes\SchemaId;
 use Docuccino\Attributes\SchemaName;
+use Docuccino\Core\Diagnostics\Diagnostic;
+use Docuccino\Core\Diagnostics\Severity;
+use Docuccino\Core\Provenance\ClassNames;
+use Docuccino\Core\Support\NameList;
+use Docuccino\Core\Support\PlainText;
 use ReflectionClass;
 
 /**
@@ -14,6 +19,13 @@ use ReflectionClass;
  * deny-list — class-level names and the per-property form — off a class. Every class-hoisting schema
  * mapper reads them through here, so the behaviour is identical whether the source is core's class
  * mapper, a spatie Data class, an API Resource or an Eloquent model.
+ *
+ * The class-level deny-list is the only half that can miss — the per-property form sits ON the property,
+ * so it has no name to get wrong — and a miss is silent in the worst direction: a name gone stale through
+ * a rename hides nothing, and the field the attribute was written to keep out is published.
+ * {@see unmatchedHidden()} is the one report for it, here rather than in each mapper, so a name is judged
+ * the same way whichever kind of class carried it. Which mappers may ask is stated there and pinned by a
+ * test over the callers, since nothing here can tell one caller from another.
  */
 final class SchemaIdentity
 {
@@ -35,6 +47,81 @@ final class SchemaIdentity
         }
 
         return $hidden;
+    }
+
+    /**
+     * The class-level `#[Hidden]` names that hid nothing: one diagnostic each, in the order they were
+     * written. `$published` is every property name the mapper weighed, INCLUDING the ones this deny-list
+     * removed — judging a name against what the mapper was left with would report every name that did
+     * its job.
+     *
+     * The message states only what is certain — that no property of this schema carries the name — and
+     * leaves the consequence to the help, because the two cases read alike from here: a name that was
+     * always wrong hid nothing and there is nothing to leak, while a name gone stale through a rename
+     * hid nothing and the field is published under the new spelling. Asserting the second of a
+     * declaration that is merely dead would be a report the reader can prove wrong.
+     *
+     * Only a mapper whose candidate set IS the class's own declaration may ask — core's class mapper and
+     * a Data class, whose properties are declared and recovered whole. An Eloquent model must not: its
+     * documented surface is recovered EVIDENCE (`@property` tags, `$casts`, `$fillable`), so a name
+     * outside it is far more often a column nobody documented than a name anyone typed wrong, and the
+     * action the report implies — deleting a deny-list entry — is the one that leaks the column the day
+     * somebody adds the tag. Measured on this repo, the single `#[Hidden]` written on a model would
+     * have reported falsely under two of the three engines that convert it.
+     *
+     * @param  list<string>  $published
+     * @return list<Diagnostic>
+     */
+    public static function unmatchedHidden(string $fqcn, array $published): array
+    {
+        // The name every diagnostic below names the class by — never the raw `class-string`, which for an
+        // ANONYMOUS class carries the build machine and a per-process counter ({@see ClassNames}).
+        $site = ClassNames::publishable($fqcn);
+
+        $diagnostics = [];
+        $reported = [];
+
+        foreach (self::hidden($fqcn) as $property) {
+            // Deduped: `#[Hidden('a', 'a')]` is one mistake, and saying it twice sends the reader looking
+            // for a second declaration.
+            if (in_array($property, $published, true) || in_array($property, $reported, true)) {
+                continue;
+            }
+
+            $reported[] = $property;
+
+            $diagnostics[] = new Diagnostic(
+                severity: Severity::Warning,
+                code: 'attribute.hidden-unmatched',
+                message: sprintf(
+                    "#[Hidden('%s')] on %s hid nothing: this schema publishes no property of that name. %s",
+                    PlainText::of($property),
+                    $site,
+                    self::publishing($published),
+                ),
+                help: 'Correct the name against that list, or delete the declaration. A property renamed since keeps its old spelling only in the attribute, and the field the declaration was written to keep out is then published under the new one. A Data class hides by the property\'s own name, not by the key `#[MapName]` publishes it under.',
+            );
+        }
+
+        return $diagnostics;
+    }
+
+    /**
+     * What the schema publishes, capped — the half of the report that is a remedy rather than a
+     * complaint, since the typo is only visible beside the spelling that works. Capping and escaping are
+     * {@see NameList}'s, which is where a diagnostic's list of names is made safe to print.
+     *
+     * @param  list<string>  $published
+     */
+    private static function publishing(array $published): string
+    {
+        $listing = NameList::of($published);
+
+        if ($listing === null) {
+            return 'It publishes no properties at all.';
+        }
+
+        return sprintf('It publishes %s.', $listing);
     }
 
     /** Whether the property carries its own `#[Hidden]`, the per-property half of the same deny-list. */

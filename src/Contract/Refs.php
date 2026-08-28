@@ -88,6 +88,22 @@ final class Refs
     }
 
     /**
+     * Whether the member is THERE and is not an object — a `requestBody` written as a string, say.
+     *
+     * {@see member()} answers null to that and to "no such member" alike, and the two want different
+     * answers: nothing written is a document with nothing to say, and a caller passes in silence
+     * because there is no promise to be held to. Something written that this cannot read is a promise
+     * nobody checked, which is a note ({@see ContractChecker}). Asked here rather than at the caller,
+     * so the member is read as an object by one grammar and not two.
+     *
+     * @param  array<string, mixed>  $node
+     */
+    public static function malformed(array $node, string $member): bool
+    {
+        return array_key_exists($member, $node) && ! is_array($node[$member]);
+    }
+
+    /**
      * The unescaped segments of a local pointer.
      *
      * @return list<string>

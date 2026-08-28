@@ -163,31 +163,121 @@ it('checks query, header and path parameters against their schemas', function (a
 
     expect(array_map(static fn ($v): string => $v->where().': '.$v->message, $result->request->violations))->toBe($expected);
 })->with([
-    'everything in order' => [['page' => '2', 'sort' => 'total'], ['X-Tenant' => 'acme'], '/api/invoices', []],
-    'a numeric string reads as the integer it is' => [['page' => '10'], ['X-Tenant' => 'acme'], '/api/invoices', []],
+    'everything in order' => [['page' => '2', 'sort' => 'total'], ['X-Tenant' => ['acme']], '/api/invoices', []],
+    'a numeric string reads as the integer it is' => [['page' => '10'], ['X-Tenant' => ['acme']], '/api/invoices', []],
     'a string that is not the documented type stays a string' => [
-        ['page' => 'first'], ['X-Tenant' => 'acme'], '/api/invoices',
+        ['page' => 'first'], ['X-Tenant' => ['acme']], '/api/invoices',
         ['?page: The data (string) must match the type: integer'],
     ],
     'a constraint on a coerced value still applies' => [
-        ['page' => '0'], ['X-Tenant' => 'acme'], '/api/invoices',
+        ['page' => '0'], ['X-Tenant' => ['acme']], '/api/invoices',
         ['?page: Number must be greater than or equal to 1'],
     ],
-    'a comma list becomes the array it stands for' => [['sort' => 'total,-total'], ['X-Tenant' => 'acme'], '/api/invoices', []],
+    'a comma list becomes the array it stands for' => [['sort' => 'total,-total'], ['X-Tenant' => ['acme']], '/api/invoices', []],
     'a value outside the documented enum' => [
-        ['sort' => 'total,name'], ['X-Tenant' => 'acme'], '/api/invoices',
+        ['sort' => 'total,name'], ['X-Tenant' => ['acme']], '/api/invoices',
         ['?sort at /1: The data should match one item from enum'],
     ],
     'a required header nobody sent' => [
         [], [], '/api/invoices',
         ['header X-Tenant: is documented as required, but the request did not send it'],
     ],
-    'the header name is matched case-insensitively' => [[], ['x-tenant' => 'acme'], '/api/invoices', []],
+    'the header name is matched case-insensitively' => [[], ['x-tenant' => ['acme']], '/api/invoices', []],
+]);
+
+it('checks every value a request sent under one header name, not just the first', function (array $sent, array $expected): void {
+    // A request is a message and a message may send one name twice — `Accept`, `Cookie`, an
+    // `X-Forwarded-For` a proxy appended to. The contract's claim about the header is a claim about
+    // each value, exactly as it is on the response half, so one good value cannot cover a bad one.
+    $result = checkContract(
+        contractExchange('GET', '/api/invoices', headers: $sent === [] ? [] : ['X-Tenant' => $sent], responseBody: '[]'),
+        static function (array $document): array {
+            $tenant = $document['paths']['/api/invoices']['get']['parameters'][2];
+            expect($tenant['name'])->toBe('X-Tenant');
+
+            // `type: string` passes anything a header can carry, so the fixture's own schema could not
+            // tell a checked value from an unread one.
+            $document['paths']['/api/invoices']['get']['parameters'][2]['schema'] = [
+                'type' => 'string',
+                'enum' => ['acme', 'globex'],
+            ];
+
+            return $document;
+        },
+    );
+
+    expect(array_map(static fn ($v): string => $v->where().': '.$v->message, $result->request->violations))->toBe($expected);
+})->with([
+    'sent once' => [['acme'], []],
+    'sent twice, both documented' => [['acme', 'globex'], []],
+    // The one the old model could not see. A first value that passes is not the contract being met.
+    'sent twice, the second outside the documented set' => [
+        ['acme', 'nope'],
+        ['header X-Tenant (value 2): The data should match one item from enum'],
+    ],
+    'sent twice, the first outside it' => [
+        ['nope', 'acme'],
+        ['header X-Tenant (value 1): The data should match one item from enum'],
+    ],
+    'sent twice, neither documented' => [
+        ['nope', 'worse'],
+        [
+            'header X-Tenant (value 1): The data should match one item from enum',
+            'header X-Tenant (value 2): The data should match one item from enum',
+        ],
+    ],
+    // One value still reads as the parameter itself: `(value 1)` of one is noise.
+    'sent once, outside it' => [['nope'], ['header X-Tenant: The data should match one item from enum']],
+    'not sent at all' => [[], ['header X-Tenant: is documented as required, but the request did not send it']],
+]);
+
+it('says out loud that a parameter with no schema member at all was not checked', function (): void {
+    // The sibling of the not-schema-shaped case below: nothing was written, rather than something no
+    // validator can take. Both pass, and both owe the reader a note saying so.
+    $result = checkContract(
+        contractExchange('GET', '/api/invoices', query: ['page' => 'zzz'], headers: ['X-Tenant' => ['acme']], responseBody: '[]'),
+        static function (array $document): array {
+            unset($document['paths']['/api/invoices']['get']['parameters'][0]['schema']);
+
+            return $document;
+        },
+    );
+
+    expect($result->request->ok())->toBeTrue()
+        ->and($result->notes())->toContain('the contract documents no schema for ?page');
+});
+
+/**
+ * The third answer, which a nullable schema folded into the second: something IS written where the
+ * check looks and no reader can take it. "Nothing was written" and "nobody could read what was" are
+ * different facts about the document — the distinction `requestBody` already draws
+ * ({@see Refs::malformed()}) — and telling a reader their parameter documents no schema when it
+ * documents one they mistyped sends them to the wrong place.
+ */
+it('says out loud that a parameter documented with something no reader can take was not checked', function (mixed $written, string $member): void {
+    $result = checkContract(
+        contractExchange('GET', '/api/invoices', query: ['page' => 'zzz'], headers: ['X-Tenant' => ['acme']], responseBody: '[]'),
+        static function (array $document) use ($written, $member): array {
+            unset($document['paths']['/api/invoices']['get']['parameters'][0]['schema']);
+            $document['paths']['/api/invoices']['get']['parameters'][0][$member] = $written;
+
+            return $document;
+        },
+    );
+
+    expect($result->request->ok())->toBeTrue()
+        ->and($result->notes())->toContain('?page is documented with a declaration this check cannot read')
+        ->and($result->notes())->not->toContain('the contract documents no schema for ?page');
+})->with([
+    'a type name where a schema belongs' => ['integer', 'schema'],
+    'a number where a schema belongs' => [42, 'schema'],
+    'an explicit null' => [null, 'schema'],
+    'a content member that is not a map of media types' => ['application/json', 'content'],
 ]);
 
 it('names the source of a parameter that disagrees with its schema', function (): void {
     $result = (new ContractChecker(contractIndex()))->check(
-        contractExchange('GET', '/api/invoices', query: ['page' => 'first'], headers: ['X-Tenant' => 'a'], responseBody: '[]'),
+        contractExchange('GET', '/api/invoices', query: ['page' => 'first'], headers: ['X-Tenant' => ['a']], responseBody: '[]'),
     );
 
     expect($result->request->violations[0]->provenance->lines())
@@ -478,7 +568,7 @@ it('degrades over a headers map that is not one, and over an entry that is not a
 
 it('says out loud that a parameter documented without a schema was not checked', function (): void {
     $result = checkContract(
-        contractExchange('GET', '/api/invoices', query: ['page' => '2'], headers: ['X-Tenant' => 'acme'], responseBody: '[]'),
+        contractExchange('GET', '/api/invoices', query: ['page' => '2'], headers: ['X-Tenant' => ['acme']], responseBody: '[]'),
         static function (array $document): array {
             unset($document['paths']['/api/invoices']['get']['parameters'][0]['schema']);
             $document['paths']['/api/invoices']['get']['parameters'][0]['content'] = [
@@ -538,7 +628,7 @@ it('fails a header whose declaration is a reference the contract does not define
 
 it('fails a request parameter documented behind a reference the contract does not define', function (): void {
     $result = checkContract(
-        contractExchange('GET', '/api/invoices', headers: ['X-Tenant' => 'acme'], responseBody: '[]'),
+        contractExchange('GET', '/api/invoices', headers: ['X-Tenant' => ['acme']], responseBody: '[]'),
         static function (array $document): array {
             $document['paths']['/api/invoices']['get']['parameters'][] = ['$ref' => '#/components/parameters/Cursor'];
 
@@ -550,6 +640,44 @@ it('fails a request parameter documented behind a reference the contract does no
         ->and($result->request->violations[0]->message)
         ->toContain('#/components/parameters/Cursor')
         ->and($result->request->violations[0]->message)->toContain('which the contract does not define');
+});
+
+it('says out loud that a request body written in a shape it cannot read was not checked', function (mixed $written): void {
+    // The third way this check answered "nothing here" for two different reasons. An operation with no
+    // `requestBody` promises nothing about one, and passing in silence is right; a `requestBody` that
+    // is not an object is a promise NOBODY LOOKED AT, and it read as the first — the payload below
+    // matches no documented body and was passing.
+    $result = checkContract(
+        contractExchange(
+            'POST',
+            '/api/invoices',
+            status: 201,
+            responseBody: '{"reference":"INV-1","total":1}',
+            requestBody: '{"nothing":"the documented body would accept"}',
+            responseHeaders: ['Location' => ['/api/invoices/42']],
+        ),
+        static function (array $document) use ($written): array {
+            $document['paths']['/api/invoices']['post']['requestBody'] = $written;
+
+            return $document;
+        },
+    );
+
+    expect($result->request->ok())->toBeTrue()
+        ->and($result->notes())->toContain('the contract documents a request body this check cannot read');
+})->with([
+    'a string where an object belongs' => ['a body, honest'],
+    'a number' => [42],
+    'an explicit null' => [null],
+]);
+
+it('still passes an operation that documents no request body in silence', function (): void {
+    // The other side of the note above: nothing was written, so there is no promise to have skipped,
+    // and a note here would fire on every GET in every suite.
+    $result = checkContract(contractExchange('GET', '/api/invoices', headers: ['X-Tenant' => ['acme']], responseBody: '[]'));
+
+    expect($result->request->ok())->toBeTrue()
+        ->and($result->notes())->toBe([]);
 });
 
 it('fails a request body documented behind a reference the contract does not define', function (): void {
@@ -587,32 +715,6 @@ it('fails a response documented behind a reference the contract does not define'
         ->and($result->response->violations[0]->message)->toContain('#/components/responses/Invoice');
 });
 
-it('says out loud that a schema which is not schema-shaped was not checked', function (mixed $schema): void {
-    // `schema` being PRESENT is not the question — a string, a number or a null there is as
-    // uncheckable as no schema at all, and reading presence alone passed the value in silence.
-    $result = checkContract(
-        contractExchange(
-            'GET',
-            '/api/invoices',
-            query: ['page' => 'zzz'],
-            headers: ['X-Tenant' => 'acme'],
-            responseBody: '[]',
-        ),
-        static function (array $document) use ($schema): array {
-            $document['paths']['/api/invoices']['get']['parameters'][0]['schema'] = $schema;
-
-            return $document;
-        },
-    );
-
-    expect($result->request->ok())->toBeTrue()
-        ->and($result->notes())->toContain('the contract documents no schema for ?page');
-})->with([
-    'a type name where a schema belongs' => ['integer'],
-    'a number' => [42],
-    'a null' => [null],
-]);
-
 it('keeps checking against a schema written as an empty object', function (): void {
     // Associative decoding spells `{}` as `[]`, and the empty schema accepts everything — so this
     // passes with nothing to say, which is the truth rather than a silence.
@@ -621,7 +723,7 @@ it('keeps checking against a schema written as an empty object', function (): vo
             'GET',
             '/api/invoices',
             query: ['page' => 'zzz'],
-            headers: ['X-Tenant' => 'acme'],
+            headers: ['X-Tenant' => ['acme']],
             responseBody: '[]',
         ),
         static function (array $document): array {
@@ -644,7 +746,7 @@ it('fails rather than crashing where a schema points at a definition nothing res
             'GET',
             '/api/invoices',
             query: ['page' => '2'],
-            headers: ['X-Tenant' => 'acme'],
+            headers: ['X-Tenant' => ['acme']],
             responseBody: '[]',
         ),
         static function (array $document) use ($ref): array {
@@ -742,7 +844,7 @@ it('checks a parameter whose type is behind a reference or a composition against
     // the type behind, because the validator it feeds does. A reader that saw only a literal `type`
     // handed the wire string to a schema that says `integer`, and every such request failed.
     $result = checkContract(
-        contractExchange('GET', '/api/invoices', query: ['page' => '2'], headers: ['X-Tenant' => 'acme'], responseBody: '[]'),
+        contractExchange('GET', '/api/invoices', query: ['page' => '2'], headers: ['X-Tenant' => ['acme']], responseBody: '[]'),
         static function (array $document) use ($schema): array {
             $document['components']['schemas']['PerPage'] = ['type' => 'integer', 'minimum' => 1];
             $document['paths']['/api/invoices']['get']['parameters'][0]['schema'] = $schema;
@@ -759,7 +861,7 @@ it('still fails a parameter that is not the documented type, whatever the type i
     // Negative half of the same table: widening the reader must not widen what passes. `?page=abc`
     // still has to read as the type problem it is rather than becoming the integer zero.
     $result = checkContract(
-        contractExchange('GET', '/api/invoices', query: ['page' => 'abc'], headers: ['X-Tenant' => 'acme'], responseBody: '[]'),
+        contractExchange('GET', '/api/invoices', query: ['page' => 'abc'], headers: ['X-Tenant' => ['acme']], responseBody: '[]'),
         static function (array $document) use ($schema): array {
             $document['components']['schemas']['PerPage'] = ['type' => 'integer', 'minimum' => 1];
             $document['paths']['/api/invoices']['get']['parameters'][0]['schema'] = $schema;

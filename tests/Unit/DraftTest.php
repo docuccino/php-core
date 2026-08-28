@@ -85,6 +85,34 @@ it('merges parameters by (in, name) rather than replacing the collection', funct
     expect($names)->toContain('status')->toContain('per_page');
 });
 
+/**
+ * The keys are a function of the parameters and never of the order the producers wrote them. That is
+ * not decoration: they reach a diagnostic that rides the fragment cache, so an order-dependent answer
+ * makes a warm build report something a cold one did not. {@see OperationDraft::responseStatuses()}
+ * has had a pin like this since it was written; this had none, and replacing its `sort()` with
+ * `array_reverse()` passed the entire unit suite.
+ */
+it('answers its parameter keys in byte order whatever order the producers wrote them', function (): void {
+    $registrations = [['query', 'status'], ['path', 'invoice'], ['query', 'per_page'], ['header', 'X-Tenant']];
+
+    $asWritten = new OperationDraft;
+    foreach ($registrations as [$in, $name]) {
+        $asWritten->parameter($in, $name);
+    }
+
+    // The same set met the other way round: neither order is the sorted one, so a producer order that
+    // travelled through would fail here whichever end it came out of.
+    $reversed = new OperationDraft;
+    foreach (array_reverse($registrations) as [$in, $name]) {
+        $reversed->parameter($in, $name);
+    }
+
+    $keys = ['header:X-Tenant', 'path:invoice', 'query:per_page', 'query:status'];
+
+    expect($asWritten->parameterKeys())->toBe($keys)
+        ->and($reversed->parameterKeys())->toBe($keys);
+});
+
 it('merges responses by status and content by media type', function (): void {
     $draft = new OperationDraft;
 

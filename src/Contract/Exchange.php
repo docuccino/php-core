@@ -16,10 +16,15 @@ final readonly class Exchange
     /**
      * @param  string  $path  the concrete request path, `/api/invoices/42`
      * @param  array<string, mixed>  $query  decoded query parameters, nesting preserved
-     * @param  array<string, string>  $headers  request headers; lookup is case-insensitive
+     * @param  array<string, list<string>>  $headers  every value sent under each name, for the same
+     *                                                reason the response half is a list: a MESSAGE may
+     *                                                send one name twice, and a request is a message.
+     *                                                `Accept`, `Cookie` and an `X-Forwarded-For` a
+     *                                                proxy appended to rather than replaced all arrive
+     *                                                that way. Keeping the first alone would let the
+     *                                                second violate the documented schema unseen
      * @param  array<string, string>  $cookies
-     * @param  array<string, list<string>>  $responseHeaders  every value sent under each name — a list,
-     *                                                        because a response may send one name twice
+     * @param  array<string, list<string>>  $responseHeaders  the same, for the response
      * @param  bool  $ambiguousEmptyRequestBody  whether whatever serialised `$requestBody` writes an
      *                                           empty list and an empty map as the same bytes, so `[]`
      *                                           on the wire is not evidence the sender meant a list.
@@ -45,26 +50,36 @@ final readonly class Exchange
         public array $responseHeaders = [],
     ) {}
 
-    public function header(string $name): ?string
+    /**
+     * Every value the REQUEST sent under this name, empty when it sent none.
+     *
+     * @return list<string>
+     */
+    public function header(string $name): array
     {
-        foreach ($this->headers as $header => $value) {
-            if (strcasecmp($header, $name) === 0) {
-                return $value;
-            }
-        }
-
-        return null;
+        return self::valuesUnder($this->headers, $name);
     }
 
     /**
-     * Every value the response sent under this name, empty when it sent none. Header names are
-     * case-insensitive, so the lookup is.
+     * The same for the response. The two halves answer alike because they are asked alike — one reader,
+     * so neither can start telling a caller less than the other.
      *
      * @return list<string>
      */
     public function responseHeader(string $name): array
     {
-        foreach ($this->responseHeaders as $header => $values) {
+        return self::valuesUnder($this->responseHeaders, $name);
+    }
+
+    /**
+     * Header names are case-insensitive, so the lookup is.
+     *
+     * @param  array<string, list<string>>  $headers
+     * @return list<string>
+     */
+    private static function valuesUnder(array $headers, string $name): array
+    {
+        foreach ($headers as $header => $values) {
             if (strcasecmp($header, $name) === 0) {
                 return $values;
             }

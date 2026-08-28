@@ -61,7 +61,7 @@ it('inherits path-item parameters, and lets an operation-level one of the same n
         return $document;
     })->match('GET', '/api/invoices/9');
 
-    expect($overridden?->parameters[0]->schema())->toBe(['type' => 'string'])
+    expect($overridden?->parameters[0]->definition['schema'] ?? null)->toBe(['type' => 'string'])
         ->and($overridden?->parameters)->toHaveCount(1);
 });
 

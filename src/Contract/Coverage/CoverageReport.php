@@ -88,6 +88,10 @@ final readonly class CoverageReport
         // row, keyed `delivery`, rather than one per documented response: its `responses` are what the
         // RECEIVER answers, and nothing in the sending application's suite can exercise those — counting
         // them would publish a floor nobody could ever meet. The delivery is what a sender can prove.
+        //
+        // So a webhook's id carries no status and the row reads it as the delivery itself: the sender
+        // records that id only where the payload was checked AGAINST the documented body and agreed,
+        // never for having asserted about one — the same rule the statuses above are credited on.
         foreach ($index->webhooks() as $webhook) {
             $reached = $webhook->id !== null && isset($touched[$webhook->id]);
 
