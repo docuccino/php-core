@@ -30,10 +30,14 @@ use Docuccino\Attributes\SchemaName;
 use Docuccino\Attributes\Security;
 use Docuccino\Attributes\Summary;
 use Docuccino\Attributes\Unauthenticated;
+use Docuccino\Attributes\Versioning\ApiVersionChange;
+use Docuccino\Attributes\Versioning\AppliesTo;
+use Docuccino\Attributes\Versioning\RenamedResponseField;
 use Docuccino\Attributes\Webhook;
 use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
 use Docuccino\Core\Provenance\ClassNames;
+use Docuccino\Core\Support\Fqcn;
 use ReflectionClass;
 
 /**
@@ -98,6 +102,8 @@ final class SchemaClassAttributes
      */
     public const array ELSEWHERE = [
         Abilities::class => 'on the action',
+        ApiVersionChange::class => 'on a version-change class',
+        AppliesTo::class => 'on a version-change class, to narrow it to some operations',
         CookieParameter::class => 'on the action',
         DeprecatedOperation::class => 'on the action',
         ErrorComponent::class => 'on the exception class whose body it names',
@@ -111,6 +117,7 @@ final class SchemaClassAttributes
         OptionallyAuthenticated::class => 'on the action',
         PathParameter::class => 'on the action',
         QueryParameter::class => 'on the action, or on a custom filter class',
+        RenamedResponseField::class => 'on a version-change class, beside its #[ApiVersionChange]',
         Response::class => 'on the action',
         ResponseHeader::class => 'on the action',
         RuleSchema::class => 'on the custom rule object it describes',
@@ -157,7 +164,7 @@ final class SchemaClassAttributes
             }
 
             $seen[$name] = true;
-            $short = substr($name, strlen(self::PREFIX));
+            $short = Fqcn::short($name);
 
             $diagnostics[] = new Diagnostic(
                 severity: Severity::Warning,
@@ -184,7 +191,7 @@ final class SchemaClassAttributes
     {
         $names = [];
         foreach (array_keys(self::HONOURED) as $attribute) {
-            $names[] = '#['.substr($attribute, strlen(self::PREFIX)).']';
+            $names[] = '#['.Fqcn::short($attribute).']';
         }
 
         $last = array_pop($names);

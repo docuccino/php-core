@@ -6,12 +6,17 @@ namespace Docuccino\Core\Diff\Policy;
 
 use Docuccino\Core\Diff\Changeset;
 use Docuccino\Core\Support\PlainText;
+use Docuccino\Core\Versioning\VersionOrder;
 
 /**
  * Date-based versioning, Stripe-style: versions are `YYYY-MM-DD` and a breaking changeset needs a
  * strictly later one. Non-breaking changesets pass on any date, unchanged included — additive changes
  * ship without a version cut. An unparseable date on either side is a violation. A trailing suffix
  * like `-preview` is ignored, so `2026-08-01` and `2026-08-01-rc1` compare equal.
+ *
+ * Reading a date version is {@see VersionOrder}'s job, not this class's: the same two versions are
+ * ordered again wherever an older document is derived, and one grammar read in two places is one that
+ * eventually answers two things.
  */
 final class DateVersionPolicy implements VersioningPolicy
 {
@@ -22,10 +27,9 @@ final class DateVersionPolicy implements VersioningPolicy
 
     public function evaluate(Changeset $changes, string $oldVersion, string $newVersion): PolicyVerdict
     {
-        $old = self::parse($oldVersion);
-        $new = self::parse($newVersion);
+        $delta = VersionOrder::date()->compare($oldVersion, $newVersion);
 
-        if ($old === null || $new === null) {
+        if ($delta === null) {
             return PolicyVerdict::violation(
                 $this->name(),
                 'invalid-date-version',
@@ -37,7 +41,7 @@ final class DateVersionPolicy implements VersioningPolicy
             return PolicyVerdict::ok($this->name());
         }
 
-        if ($new > $old) {
+        if ($delta < 0) {
             return PolicyVerdict::ok($this->name());
         }
 
@@ -46,13 +50,5 @@ final class DateVersionPolicy implements VersioningPolicy
             'new-date-required',
             sprintf('Breaking changes require a newer date version than %s (got %s).', PlainText::of($oldVersion), PlainText::of($newVersion)),
         );
-    }
-
-    /** The comparable `YYYY-MM-DD` prefix, or null when the string does not start with one. */
-    private static function parse(string $version): ?string
-    {
-        return preg_match('/^(\d{4})-(\d{2})-(\d{2})/', trim($version), $m) === 1
-            ? $m[1].'-'.$m[2].'-'.$m[3]
-            : null;
     }
 }

@@ -18,6 +18,9 @@ use Docuccino\Core\Support\Json;
  */
 final readonly class DocumentConfig
 {
+    /** The `info.version` a document that names none falls back to — a placeholder, never a real one. */
+    public const string DEFAULT_VERSION = '1.0.0';
+
     /**
      * @param  array<string, mixed>  $info  OAS info object (title, version, description …)
      * @param  list<array<string, mixed>>  $servers
@@ -393,6 +396,92 @@ final readonly class DocumentConfig
         $dir = $webhooks['dir'] ?? null;
 
         return self::configuredPath($dir);
+    }
+
+    /**
+     * Whether this document declares itself an API VERSION, by carrying an `api_version` bag at all.
+     * Which version it is, is {@see apiVersion()} — `info.version`, because a document's version is
+     * the one OAS already models and a second key naming it again could only ever disagree with it.
+     */
+    public function declaresApiVersion(): bool
+    {
+        return self::declaresVersion($this->raw);
+    }
+
+    /**
+     * The API version this document IS, or null when it declares none, or declares one and states no
+     * `info.version` at all. The build says so with a diagnostic rather than deriving a version from
+     * nothing.
+     */
+    public function apiVersion(): ?string
+    {
+        return self::statedVersion($this->raw);
+    }
+
+    /**
+     * Whether a document's raw config declares itself an API version.
+     *
+     * @param  array<string, mixed>  $raw
+     */
+    private static function declaresVersion(array $raw): bool
+    {
+        return is_array($raw['api_version'] ?? null);
+    }
+
+    /**
+     * The API version a document's raw config states, read off `info.version`. Static and public
+     * because the adapter reads the same fact off every configured document to enumerate the closed
+     * set of versions, and one rule about what counts as stated must answer both.
+     *
+     * Written or not written is the whole test, {@see DEFAULT_VERSION} included: an API whose first
+     * published version really is `1.0.0` is the likeliest first semver version there is, and a rule
+     * that read it as unstated would leave that application unable to use the feature at all. The
+     * shipped `api_version` block is commented out, so a document carrying one has said what it is.
+     *
+     * @param  array<string, mixed>  $raw
+     */
+    public static function statedVersion(array $raw): ?string
+    {
+        if (! self::declaresVersion($raw)) {
+            return null;
+        }
+
+        $version = Hydrate::map($raw['info'] ?? null)['version'] ?? null;
+        $version = is_string($version) ? trim($version) : '';
+
+        return $version === '' ? null : $version;
+    }
+
+    /**
+     * The directory the API version-change classes are discovered under, from
+     * `api_version.changes.dir`, or null when the document names none — in which case the version
+     * publishes the head shape. Confined against the app base path by the adapter, the same as
+     * {@see webhooksDir()}.
+     */
+    public function apiVersionChangesDir(): ?string
+    {
+        $changes = Hydrate::map($this->apiVersionConfig()['changes'] ?? null);
+
+        return self::configuredPath($changes['dir'] ?? null);
+    }
+
+    /**
+     * The request header a client pins a version with, from `api_version.header`. Defaults to
+     * `X-Api-Version`, which is what the document publishes on every operation.
+     */
+    public function apiVersionHeader(): string
+    {
+        $header = $this->apiVersionConfig()['header'] ?? null;
+
+        return is_string($header) && trim($header) !== '' ? trim($header) : 'X-Api-Version';
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function apiVersionConfig(): array
+    {
+        return Hydrate::map($this->raw['api_version'] ?? null);
     }
 
     /**

@@ -17,6 +17,10 @@ final class Fqcn
     /**
      * The last namespace segment of an FQCN (or the input, if unqualified).
      *
+     * It is also the name the AUTHOR wrote, which is why a diagnostic naming a class or an attribute
+     * comes here: anything in a sub-namespace is imported and then written short, so spelling the
+     * namespace back at them names nothing in their file.
+     *
      * An ANONYMOUS class ends at its `@anonymous` marker. `::class` continues past it with a NUL byte,
      * the ABSOLUTE file it was written in and a counter of the anonymous classes the PROCESS declared
      * first — and none of that is a namespace separator, so shortening alone would carry the whole tail

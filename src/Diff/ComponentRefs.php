@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Diff;
 
-use Docuccino\Core\Contract\Pointer;
+use Docuccino\Core\Document\DocumentGraph;
 use Docuccino\Core\Document\Parameter;
 use Docuccino\Core\Document\PathItem;
 use Docuccino\Core\Document\ResponseObject;
@@ -248,26 +248,14 @@ final readonly class ComponentRefs
     }
 
     /**
-     * The component a local pointer names. The RFC 6901 escapes are not decoration: a component name
-     * carrying a `/` or a `~` is spelled `~1`/`~0` in every pointer to it, so a resolver comparing the raw
-     * text finds nothing and calls a perfectly resolvable reference dangling. A token with a `/` still in
-     * it after that names something INSIDE a component rather than the component, which is not a node this
-     * resolver hands back — and not a name this document can be said to have left undeclared either.
+     * The component a local pointer names, when it names one in the section asked for. The pointer
+     * grammar — the RFC 6901 escapes included — is {@see DocumentGraph}'s, so a name this resolver calls
+     * dangling is one no reader in the product can open either.
      */
     private static function componentName(?string $ref, string $section): ?string
     {
-        $prefix = '#/components/'.$section.'/';
+        $parts = $ref === null ? null : DocumentGraph::componentParts($ref);
 
-        if ($ref === null || ! str_starts_with($ref, $prefix)) {
-            return null;
-        }
-
-        $token = substr($ref, strlen($prefix));
-
-        if ($token === '' || str_contains($token, '/')) {
-            return null;
-        }
-
-        return Pointer::unescape($token);
+        return $parts !== null && $parts[0] === $section ? $parts[1] : null;
     }
 }

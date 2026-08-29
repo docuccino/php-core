@@ -192,3 +192,20 @@ it('derives a response id that breaks on status and on media-type change', funct
     expect($base)->not->toBe($this->ids->responseId($op, '201', 'application/json'));
     expect($base)->not->toBe($this->ids->responseId($op, '200', 'application/xml'));
 });
+
+/*
+ * A parameter published as a component of its own — the API version header every operation shares. Keyed
+ * on the document and the parameter and NOT on the bytes it publishes, so an enum that gained a member
+ * is a change to one node rather than one node replaced by another; and never equal to the id the same
+ * parameter would carry on an operation, since those are two nodes in one document.
+ */
+it('derives a published-parameter id that breaks on document, location and name', function (): void {
+    $base = $this->ids->publishedParameterId('doc:v2026-06-01', 'header', 'X-Api-Version');
+
+    expect($base)->toBe($this->ids->publishedParameterId('doc:v2026-06-01', 'header', 'X-Api-Version'))
+        ->and($base)->not->toBe($this->ids->publishedParameterId('doc:v2026-09-01', 'header', 'X-Api-Version'))
+        ->and($base)->not->toBe($this->ids->publishedParameterId('doc:v2026-06-01', 'query', 'X-Api-Version'))
+        ->and($base)->not->toBe($this->ids->publishedParameterId('doc:v2026-06-01', 'header', 'Accept-Version'))
+        ->and($base)->not->toBe($this->ids->parameterId('doc:v2026-06-01', 'header', 'X-Api-Version'))
+        ->and($base)->toStartWith('par:v1:');
+});

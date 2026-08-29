@@ -35,7 +35,7 @@ function absentDependencyWarm(string $directory, string $dependency, Closure $be
     $cache = static fn (): FragmentCache => new FragmentCache(true, $directory, 'tool', '1.0.0', 'v1');
 
     $cold = $cache();
-    $key = $cold->key('GET /a', 'config', []);
+    $key = $cold->key('GET /a', 'doc:default', 'config', []);
     $cold->put($key, new OperationFragment('/a', 'get', (new OperationDraft)->freeze(), 'GET /a'), [$dependency]);
 
     $between();

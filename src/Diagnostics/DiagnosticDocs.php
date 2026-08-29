@@ -53,6 +53,7 @@ final class DiagnosticDocs
         'spatie-data' => 'package-integrations',
         'tags' => 'routes-operations-and-names',
         'validation' => 'responses-recovered-from-your-code',
+        'versioning' => 'api-versions',
         'webhook' => 'webhooks',
     ];
 

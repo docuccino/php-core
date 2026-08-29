@@ -10,12 +10,18 @@ namespace Docuccino\Core\Lint;
  * message prints) or as the URI fragment a `$ref` uses (`#/components/…`), so the leading `#` comes
  * off both the entry and the subject and all four combinations land.
  *
+ * An entry matches EXACTLY what it spells, and deliberately so: both callers are controls rather than
+ * conveniences — one silences a leakage finding, the other un-redacts a recorded value that credential
+ * matching flagged — and a control that quietly accepted a `*` would widen what an existing config
+ * entry silences without anybody having written a wildcard. {@see Docuccino\Core\Support\Glob} is the
+ * product's wildcard grammar, for the readers that document one.
+ *
  * @internal
  */
 final class LintSafelist
 {
     /**
-     * Whether any of the names a finding goes by is safelisted.
+     * Whether any of the names a subject goes by is named by one of the entries.
      *
      * @param  list<string>  $allow
      */

@@ -32,7 +32,7 @@ it('turns itself off for a directory no filesystem call can accept', function ()
 
 it('reads and writes nothing rather than raising on one', function (): void {
     $cache = new FragmentCache(true, sys_get_temp_dir()."/docuccino-frag\0ments", 'tool', '1.0.0', 'v1');
-    $key = $cache->key('GET /a', 'config', []);
+    $key = $cache->key('GET /a', 'doc:default', 'config', []);
 
     // Both directions: `put()` used to raise out of mkdir() and `get()` out of file_get_contents().
     $cache->put($key, unholdableFragment(), []);
@@ -45,7 +45,7 @@ it('still caches for a directory it can hold', function (): void {
     // caching would be this fix's own failure mode.
     $directory = sys_get_temp_dir().'/docuccino-holdable-'.bin2hex(random_bytes(6));
     $cache = new FragmentCache(true, $directory, 'tool', '1.0.0', 'v1');
-    $key = $cache->key('GET /a', 'config', []);
+    $key = $cache->key('GET /a', 'doc:default', 'config', []);
 
     $cache->put($key, unholdableFragment(), []);
     $warm = $cache->get($key);

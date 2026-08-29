@@ -18,7 +18,9 @@ use Docuccino\Core\Tests\Fixtures\MisreadDeclarationsNode;
 /**
  * Every attribute the package ships whose flags admit a class, derived from the package. By the
  * `#[Attribute]` FLAGS rather than by a source grep, because `TARGET_CLASS_CONSTANT` contains
- * `TARGET_CLASS` as a substring and a grep counts `#[CaseDescription]` as a class attribute.
+ * `TARGET_CLASS` as a substring and a grep counts `#[CaseDescription]` as a class attribute. The walk
+ * RECURSES, because a flat glob stops seeing the package the moment an attribute is declared in a
+ * sub-namespace — and a set derived short is a table that looks exhaustive and is not.
  *
  * @return list<class-string>
  */
@@ -26,9 +28,16 @@ function shippedClassTargetAttributes(): array
 {
     $shipped = [];
 
-    foreach (glob(dirname(__DIR__, 3).'/attributes/src/*.php') ?: [] as $file) {
+    $root = dirname(__DIR__, 3).'/attributes/src';
+    $files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS));
+    foreach ($files as $file) {
+        if (! $file instanceof SplFileInfo || ! $file->isFile() || $file->getExtension() !== 'php') {
+            continue;
+        }
+
+        $relative = substr($file->getPathname(), strlen($root) + 1, -strlen('.php'));
         /** @var class-string $class */
-        $class = 'Docuccino\\Attributes\\'.basename($file, '.php');
+        $class = 'Docuccino\\Attributes\\'.str_replace(DIRECTORY_SEPARATOR, '\\', $relative);
 
         foreach ((new ReflectionClass($class))->getAttributes(Attribute::class) as $marker) {
             /** @var Attribute $flags */
@@ -109,8 +118,10 @@ it('reports every unread declaration on a class, once each, and nothing else', f
     );
     sort($reported);
 
+    // The last segment, because the diagnostic names the attribute the way the author wrote it: one in a
+    // sub-namespace is imported and then written short.
     $expected = array_map(
-        static fn (string $attribute): string => substr($attribute, strlen('Docuccino\\Attributes\\')),
+        static fn (string $attribute): string => substr($attribute, (int) strrpos($attribute, '\\') + 1),
         array_keys(SchemaClassAttributes::ELSEWHERE),
     );
     sort($expected);

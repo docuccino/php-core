@@ -18,9 +18,14 @@ use JsonException;
  * output *except* the dependency files, then checks freshness by re-hashing the stored dependency
  * list. A hit reconstructs the fragment without ever invoking the type engine.
  *
- * key = sha256(tool ver ‖ spec ver ‖ identity-algo ver ‖ doc configHash ‖ resolved extension
- * signature (FQCNs + owning package versions) ‖ route cache-signature (method + URI + name +
- * resolved action + normalised middleware)). The entry also stores `sha256(each ActionAnalysis +
+ * key = sha256(tool ver ‖ spec ver ‖ identity-algo ver ‖ document id ‖ doc configHash ‖ resolved
+ * extension signature (FQCNs + owning package versions) ‖ route cache-signature (method + URI + name +
+ * resolved action + normalised middleware)). The document id is in there because a fragment carries
+ * ids MINTED from it, so two documents that shape their routes alike — the same config written twice
+ * under two `export` destinations, two API versions not yet given an `info.version` — would otherwise
+ * share entries, and the second would be served the first's identity tree. The configHash cannot stand
+ * in for it: it deliberately excludes `export`, and it is the document's PUBLISHED fingerprint, so
+ * widening it to separate these would move emitted bytes. The entry also stores `sha256(each ActionAnalysis +
  * out-of-band dependency file)`, so any changed or removed dependency invalidates it. TraceReport
  * and {@see RouteDependencies} files merge into that one list — {@see put()} is the seam.
  *
@@ -90,14 +95,16 @@ final readonly class FragmentCache
 
     /**
      * @param  string  $routeSignature  the route cache-signature ({@see RouteDescriptor::cacheSignature()})
+     * @param  string  $documentId  the document identity every id in the fragment was minted from
      * @param  list<string>  $extensionSignature  resolved extension class-strings paired with owning package versions
      */
-    public function key(string $routeSignature, string $configHash, array $extensionSignature): string
+    public function key(string $routeSignature, string $documentId, string $configHash, array $extensionSignature): string
     {
         return hash('sha256', implode("\0", [
             $this->toolVersion,
             $this->specVersion,
             $this->identityVersion,
+            $documentId,
             $configHash,
             implode(',', $extensionSignature),
             $routeSignature,

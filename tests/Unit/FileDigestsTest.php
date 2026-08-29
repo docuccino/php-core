@@ -45,7 +45,7 @@ it('gives one build one view of a dependency file, and the next build a fresh on
     file_put_contents($dependency, '<?php // v1');
 
     $build = new FragmentCache(true, $directory, 'tool', '1.0.0', 'v1');
-    $key = $build->key('GET /a', 'config', []);
+    $key = $build->key('GET /a', 'doc:default', 'config', []);
     $build->put($key, new OperationFragment('/a', 'get', (new OperationDraft)->freeze(), 'GET /a'), [$dependency]);
 
     file_put_contents($dependency, '<?php // v2');

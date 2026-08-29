@@ -307,6 +307,11 @@ it('keeps the subschema keyword set in one place, so no reader can carry a stale
         // What OpenAPI 3.0 does not define, which is a fact about 3.0 and not about a position. Held
         // against the vendored 3.0 meta-schema by OpenApi30DownlevelTest.
         'core/src/Emit/OpenApi30DownlevelEmitter.php::UNSUPPORTED_SCHEMA_KEYWORDS',
+        // Which applicators the example rewrite can walk a value in step with — a fact about that
+        // walk, not about the position. The complement is DERIVED from the table rather than listed
+        // beside it, so a keyword added there is undecidable until somebody teaches the walk to read
+        // it; RenamedFieldExamplesTest holds the derivation against the table in both directions.
+        'core/src/Document/RenamedFieldExamples.php::RESOLVED',
     ];
 
     $positioned = [
