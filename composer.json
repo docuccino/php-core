@@ -1,13 +1,16 @@
 {
     "name": "docuccino/core",
-    "description": "Framework-agnostic UIR model, canonicalizer, identity, validator and emitters.",
+    "description": "The framework-agnostic engine behind Docuccino: document model, canonicalizer, identities, OpenAPI 3.2/3.1 emitters and semantic diff.",
     "type": "library",
     "keywords": [
         "openapi",
+        "openapi-generator",
         "api-documentation",
         "uir",
         "swagger",
         "json-schema",
+        "openapi-diff",
+        "breaking-changes",
         "scramble-alternative"
     ],
     "homepage": "https://docuccino.app",
