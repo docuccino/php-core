@@ -7,6 +7,35 @@ User-facing changes to `docuccino/core` — features, fixes, performance work an
 taken from the commit messages scoped `core`. Entries begin after v0.1.2; older history is in
 the [repository](https://github.com/docuccino/docuccino) git log.
 
+## v0.13.0
+
+### Breaking changes
+
+- give one schema direction one verdict, wherever it was computed ([#312](https://github.com/docuccino/docuccino/pull/312))
+  - `docuccino:diff --enforce` now rejects changes it accepted before, all of them a widening on a RESPONSE: a type set that grew (`schema.type-widened`) or a `type` constraint that left (`schema.type-removed`); an `allOf` branch or the whole `allOf` removed; a `not` removed; a `contains` that was asserting something removed; a `minContains` lowered and a `maxContains` raised. An `$id` arriving on a schema is also breaking now, where before only a changed or removed one was. Requests are unaffected. Migrating a schema between `nullable: true` and `type: [T, null]` now reports nothing at all, where it previously reported a non-breaking `schema.type-widened`.
+- report a body declaration no operation could read ([#309](https://github.com/docuccino/docuccino/pull/309))
+  - `attribute.schema-class-unusable` is a new warning, so a pipeline running `--fail-on=warning` can newly fail on an application that binds a request type carrying `#[BodyParameter]` to read routes only. Delete the declaration, describe the parameters with `#[QueryParameter]` on the action, or accept the code via `diagnostics.accept`.
+- decide every keyword the draft model knows, so no repointed discriminator passes --enforce as safe ([#305](https://github.com/docuccino/docuccino/pull/305))
+  - `docuccino:diff --enforce` now rejects changes it previously accepted. A discriminator arriving, its tag property renamed, or a mapping entry removed or repointed is breaking on both sides; a mapping entry added, and the discriminator leaving, are breaking on a response, the same argument a value joining a response `enum` makes; a null withdrawn is breaking on both sides and one admitted is breaking on a response; and an `$id`, `$anchor` or `$schema` changed is breaking, because a pointer this diff does not resolve may name the old one and a changed dialect makes every comparison beside it a comparison of two languages. A pipeline gating on the diff may need a version bump it did not need before.
+- give every refinement keyword a direction, so no tightened bound passes --enforce as safe ([#304](https://github.com/docuccino/docuccino/pull/304))
+  - `docuccino:diff --enforce` now rejects changes it previously accepted. A refinement tightened (`schema.refinement-narrowed`) is breaking on both sides; one relaxed (`schema.refinement-widened`) is breaking on a response, the same argument a value joining a response `enum` makes; and one whose direction cannot be computed (`schema.refinement-changed`) is breaking, because a false alarm costs the author one look and a false "safe" costs the consumer a broken client. A pipeline gating on the diff may need a version bump it did not need before.
+- let a request type carry the declarations that are true of it ([#295](https://github.com/docuccino/docuccino/pull/295))
+  - a `#[BodyParameter]` on a request class used to document nothing and now patches that class's component, so an application that had written one emits a different request body. A class-target attribute a request type is not read for now raises `attribute.schema-class-unread` rather than being ignored, which a build run with warnings as failures will notice. And `RuleSetNormalizer::report()` no longer defaults its source-class argument, so a caller that omits it is refused by PHP rather than silently weighing one declaration site of the two — a signature break for anything outside this repository that calls it.
+- give every subschema position a polarity, so no composition narrowing passes --enforce as safe ([#294](https://github.com/docuccino/docuccino/pull/294))
+  - `docuccino:diff --enforce` now rejects changes it previously accepted — a narrowing under any composition or conditional keyword, and any change under `not`, `if` or a definition store. A pipeline that was green on such an edit will now fail, which is the gate telling the truth for the first time; the change is either honest under the document's `versioning` policy or it is not.
+- answer the values OpenAPI 3.2 added to a member's domain when downleveling ([#293](https://github.com/docuccino/docuccino/pull/293))
+  - A downleveled 3.1 or 3.0 document no longer carries a parameter whose location OpenAPI 3.2 alone defines, nor a `style` value it alone defines, and each loss raises a `downlevel.value-not-in-3.1` warning. The bytes those documents used to carry were invalid against the version they claimed, so a consumer's validator already refused them; a build gating on warnings will now see one where it previously saw none.
+
+### Bug fixes
+
+- key a security requirement the way every other diff identity is keyed ([#311](https://github.com/docuccino/docuccino/pull/311))
+- publish no path the scrubber could not account for ([#310](https://github.com/docuccino/docuccino/pull/310))
+- ask a recognised root how deep it is before attributing a run to it ([#308](https://github.com/docuccino/docuccino/pull/308))
+- reduce a bare path a brace or a backslash had refused, where a root already accounts for it ([#307](https://github.com/docuccino/docuccino/pull/307))
+- stop taking a compression wrapper as proof of a local file ([#306](https://github.com/docuccino/docuccino/pull/306))
+- read the two keywords that say what an example may not be ([#292](https://github.com/docuccino/docuccino/pull/292))
+- decide every registered stream wrapper, and guard the table against going short ([#291](https://github.com/docuccino/docuccino/pull/291))
+
 ## v0.12.0
 
 ### Breaking changes
