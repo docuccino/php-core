@@ -206,8 +206,8 @@ it('publishes a boolean at every slot a Schema Object hangs off something that i
  * document's `contentHash` moved, so `docuccino:diff` said the document had changed, named nothing and
  * raised no breaking verdict. At `properties` it did speak, and lied: the property was reported REMOVED
  * when it had been forbidden, and through the model's own hydration the same edit surfaced as
- * `schema.type-removed`, which is classed non-breaking — the strictest narrowing in the language
- * passing an `--enforce` release gate as safe.
+ * `schema.type-removed`, which was classed non-breaking on both sides at the time — the strictest
+ * narrowing in the language passing an `--enforce` release gate as safe.
  */
 
 /**
@@ -248,13 +248,19 @@ it('reports a boolean subschema arriving and going, and classes it the same on b
         'false → true' => [false, true, ['schema.always-invalid-removed' => false]],
         'false → absent' => [false, 'absent', ['schema.always-invalid-removed' => false]],
         // `true` IS the empty schema, so it is read as one rather than as a value of its own: losing a
-        // type widens, and two spellings of "anything" are not a change at all.
-        'typed → true' => [$typed, true, ['schema.type-removed' => false]],
+        // type widens, and two spellings of "anything" are not a change at all. A widening is safe for a
+        // writer and gates a RESPONSE — the slot used to promise a string and now promises nothing, so a
+        // reader typed against it meets a value it has no case for.
+        'typed → true' => [$typed, true, ['schema.type-removed' => false], ['schema.type-removed' => true]],
         'true → empty' => [true, [], []],
         'false → false' => [false, false, []],
     ];
 
-    foreach ($pairs as $label => [$old, $new, $expected]) {
+    // Most rows read the same either way; the fourth element is the response answer where they part,
+    // which is every widening now that a direction earns one verdict wherever it was computed.
+    foreach ($pairs as $label => $row) {
+        [$old, $new, $expected] = $row;
+
         foreach ([true, false] as $request) {
             $changes = (new SchemaComparator)->compare(
                 booleanSubschemaAt($keyword, $old),
@@ -271,7 +277,10 @@ it('reports a boolean subschema arriving and going, and classes it the same on b
                 $reported[$change->code] = $change->breaking;
             }
 
-            expect($reported)->toBe($expected, $keyword.' · '.$label.' · '.($request ? 'request' : 'response'));
+            expect($reported)->toBe(
+                $request ? $expected : ($row[3] ?? $expected),
+                $keyword.' · '.$label.' · '.($request ? 'request' : 'response'),
+            );
         }
     }
 })->with(booleanSubschemaDiffPositions());

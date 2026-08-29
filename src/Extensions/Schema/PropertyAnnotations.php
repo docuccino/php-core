@@ -229,6 +229,8 @@ final class PropertyAnnotations
     }
 
     /**
+     * The property's declarations, on the terms {@see ClassDeclarations} states for a class's own.
+     *
      * @template T of object
      *
      * @param  class-string<T>  $attribute
@@ -241,8 +243,7 @@ final class PropertyAnnotations
             try {
                 $instances[] = $declaration->newInstance();
             } catch (Throwable) {
-                // An argument the constructor rejects is already the adapter's `attribute.unreadable`
-                // story on an action; here there is no route to name, so it simply says nothing.
+                // Says nothing, for the reason {@see ClassDeclarations} gives.
             }
         }
 

@@ -426,3 +426,68 @@ it('answers no for a keyword its annotation-only set does not name', function ()
         ->and(SchemaKeywords::isAnnotationOnly(''))->toBeFalse()
         ->and(SchemaKeywords::annotationOnly())->not->toBeEmpty();
 });
+
+/*
+ * What a `contains` ASSERTS, which is a fact about the schema carrying it rather than about the keyword
+ * — the floor defaults to 1, `minContains: 0` drops the demand for a matching element, and a
+ * `maxContains` beside it still bounds how many may match. Both readers ask here: the example factory,
+ * deciding what array it may publish, and the diff, deciding whether an arriving `contains` narrows
+ * anything. A second reading of that default anywhere is a second answer to one question.
+ */
+it('reads what a contains asserts, bounds and all', function (array $schema, bool $asserts, int $atLeast, ?int $atMost): void {
+    expect(SchemaKeywords::containsAsserts($schema))->toBe($asserts)
+        ->and(SchemaKeywords::minContains($schema))->toBe($atLeast)
+        ->and(SchemaKeywords::maxContains($schema))->toBe($atMost);
+})->with([
+    // Bounds with no `contains` beside them bound nothing at all.
+    'no contains at all' => [['type' => 'array'], false, 1, null],
+    'bounds with no contains to bound' => [['type' => 'array', 'minContains' => 0, 'maxContains' => 3], false, 0, 3],
+    // Present, the keyword asserts a match unless the floor is explicitly dropped.
+    'contains with no bounds' => [['contains' => ['type' => 'string']], true, 1, null],
+    'contains at the floor it defaults to' => [['contains' => ['type' => 'string'], 'minContains' => 1], true, 1, null],
+    'contains with the demand dropped' => [['contains' => ['type' => 'string'], 'minContains' => 0], false, 0, null],
+    // The half a floor-only reading gets wrong: nothing has to match, and what may match is still capped.
+    'contains with the demand dropped and a cap left' => [
+        ['contains' => ['type' => 'string'], 'minContains' => 0, 'maxContains' => 2],
+        true,
+        0,
+        2,
+    ],
+    'contains capped at none' => [['contains' => ['type' => 'string'], 'maxContains' => 0], true, 1, 0],
+    'contains wanted more than once' => [['contains' => ['type' => 'string'], 'minContains' => 3], true, 3, null],
+    // Degradation: a bound that is no integer is no bound, so the floor is the keyword's own default and
+    // there is no cap — a cap read out of a string would bound a document nobody wrote.
+    'contains with bounds that are no numbers' => [
+        ['contains' => ['type' => 'string'], 'minContains' => '2', 'maxContains' => '2'],
+        true,
+        1,
+        null,
+    ],
+    // Presence is what the assertion turns on, and `false` is a subschema like any other.
+    'contains a boolean subschema' => [['contains' => false], true, 1, null],
+]);
+
+it('names every keyword that says nothing about the instance, and nothing that does', function (): void {
+    // The set backing this answers SUPERSESSION — which standing keywords a declared shape retracts —
+    // and a reader deciding whether one value satisfies a schema asks a different question of it. A
+    // constraining keyword joining that set would be read here as "nothing to check" and publish an
+    // example the schema forbids, so the two are held apart by classification rather than by hand.
+    $constraining = array_keys(array_filter(
+        SchemaKeywords::classification(),
+        static fn (string $family): bool => $family !== 'annotation',
+    ));
+
+    expect(array_values(array_intersect(SchemaKeywords::annotations(), $constraining)))->toBe([])
+        // Anti-vacuity: an empty set on either side would pass the intersection above forever.
+        ->and(count(SchemaKeywords::annotations()))->toBeGreaterThan(10)
+        ->and(count($constraining))->toBeGreaterThan(20);
+
+    foreach (SchemaKeywords::annotations() as $keyword) {
+        expect(SchemaKeywords::saysNothingAboutTheInstance($keyword))->toBeTrue();
+    }
+
+    // The guard EXECUTED: every one of these constrains an instance, and none may ever answer true.
+    foreach (['type', 'const', 'enum', 'pattern', 'maxLength', 'items', 'contains', 'not', 'required', 'x-vendor'] as $keyword) {
+        expect(SchemaKeywords::saysNothingAboutTheInstance($keyword))->toBeFalse();
+    }
+});

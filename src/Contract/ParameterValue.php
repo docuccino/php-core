@@ -329,6 +329,10 @@ final class ParameterValue
      * The JSON types of an `enum`'s own members. Anything a decoded document cannot hold at all reads
      * as `string`, which is the reading that converts nothing.
      *
+     * `SchemaExampleFactory::jsonType()` classifies a value too and answers differently ON PURPOSE —
+     * an integral float, and a value it cannot name — so neither may be unified into the other; that
+     * docblock states which way each goes and why.
+     *
      * @param  array<string, mixed>  $node
      * @return list<string>
      */

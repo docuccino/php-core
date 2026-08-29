@@ -26,6 +26,11 @@ use ReflectionClass;
  * {@see unmatchedHidden()} is the one report for it, here rather than in each mapper, so a name is judged
  * the same way whichever kind of class carried it. Which mappers may ask is stated there and pinned by a
  * test over the callers, since nothing here can tell one caller from another.
+ *
+ * It instantiates its own declarations rather than going through {@see ClassDeclarations}, whose
+ * silence is wrong for all three of these: a `#[Hidden]` PHP cannot construct would fall to publishing
+ * the property it was written to keep out, and a `#[SchemaName]`/`#[SchemaId]` to a name or an identity
+ * a diff reads as a different schema. Nothing published quietly on an argument nobody was told about.
  */
 final class SchemaIdentity
 {

@@ -305,7 +305,8 @@ it('keeps a boolean component schema the document references, so the $ref resolv
 /*
  * The differ half, at the two slots the model used to drop. `SchemaComparator` had already been taught
  * that a boolean is a Schema Object here, and was reading `[]` — so a parameter narrowed to "no value is
- * valid" surfaced as `schema.type-removed`, classed NON-BREAKING, and passed an `--enforce` release gate.
+ * valid" surfaced as `schema.type-removed`, classed NON-BREAKING as that code then was on both sides, and
+ * passed an `--enforce` release gate.
  * The comparator was faithful throughout: the boolean was gone before it ever saw it.
  */
 it('classes a schema slot narrowed to false as breaking, on both slots and both directions', function (): void {

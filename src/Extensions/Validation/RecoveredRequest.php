@@ -5,17 +5,22 @@ declare(strict_types=1);
 namespace Docuccino\Core\Extensions\Validation;
 
 use Docuccino\Attributes\BodyParameter;
+use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Draft\OperationDraft;
 use Docuccino\Core\Extensions\Context\RouteContext;
 use Docuccino\Core\Extensions\Schema\ClassAnnotations;
+use Docuccino\Core\Extensions\Schema\ClassDeclarations;
 use Docuccino\Core\Extensions\Schema\DeclarationFiles;
 use Docuccino\Core\Extensions\Schema\DocumentedDescriptions;
 use Docuccino\Core\Extensions\Schema\DocumentedExamples;
 use Docuccino\Core\Extensions\Schema\MockHints;
 use Docuccino\Core\Extensions\Schema\PropertyAnnotations;
+use Docuccino\Core\Extensions\Schema\SchemaClassAttributes;
 use Docuccino\Core\Extensions\Schema\SchemaIdentity;
+use Docuccino\Core\Extensions\Schema\UnusableBodyDeclarations;
 use Docuccino\Core\Inference\ClassRef;
 use Docuccino\Core\Patch\Contribution;
+use Docuccino\Core\Provenance\ClassNames;
 use Docuccino\Core\Support\Fqcn;
 
 /**
@@ -29,15 +34,26 @@ use Docuccino\Core\Support\Fqcn;
  * Hoisting (design §5): a body recovered from a single source class hoists to a `components.schemas`
  * entry the operation `$ref`s — named by class short name or `#[SchemaName]`, deduped so one class
  * across N operations is one component. Two cases stay inline: an inline `validate()`/
- * `Validator::make()` body, which has no class to name honestly, and an operation carrying
+ * `Validator::make()` body, which has no class to name honestly, and an OPERATION carrying
  * `#[BodyParameter]`, because that attribute patches individual body properties by reading
  * `schema.properties` — absent on a `$ref` — and dereferencing beats mutating the shared component.
  * Call-site partials (`include`/`exclude`/`only`/`except`) shape the response via query parameters,
  * not the body, so they never force it inline.
+ *
+ * A `#[BodyParameter]` written on the request TYPE is the other half of that attribute and does NOT
+ * force the body inline: it says the same thing about every operation that accepts the type, so the
+ * component is where it belongs and {@see withDeclarations()} writes it there, before the hoist. Which
+ * matters to the CONSUMER rather than to the author — a named component is what a client generator
+ * turns into a named type, and restating a fact about the type per action used to cost them the type on
+ * every action that said it, plus any agreement between two operations that accept the same shape.
  */
 final class RecoveredRequest
 {
     private const READ_VERBS = ['get', 'head'];
+
+    public function __construct(
+        private readonly DeclaredBodyFields $fields = new DeclaredBodyFields,
+    ) {}
 
     /**
      * Whether this context's verb sends recovered rules to a request BODY rather than to query
@@ -68,7 +84,7 @@ final class RecoveredRequest
             $context->components->addDiagnostic($diagnostic);
         }
 
-        $result = $this->withDeclarations($result, $context, $sourceClass, $keys);
+        [$result, $declaredRequired] = $this->withDeclarations($result, $context, $sourceClass, $keys);
 
         $contribution = Contribution::integration($producer, $context->actionSource());
 
@@ -78,7 +94,7 @@ final class RecoveredRequest
             return;
         }
 
-        $this->applyRequestBody($operation, $context, $result, $contribution, $sourceClass);
+        $this->applyRequestBody($operation, $context, $result, $contribution, $sourceClass, $declaredRequired);
     }
 
     /**
@@ -102,15 +118,22 @@ final class RecoveredRequest
      * four: a remapped field is the case where the two names differ, and looking under the wrong one
      * loses the declaration silently.
      *
+     * Returns the schema plus whether a declaration proved the BODY is required. A field a declaration
+     * marks required deep inside the body makes the body itself required, and only the root schema's
+     * `required` list is read for that — so a nested one has to travel out here or the document says a
+     * body carrying a required member may be left off entirely.
+     *
      * @param  array<string, string>  $keys
+     * @return array{0: ValidationSchema, 1: bool}
      */
-    private function withDeclarations(ValidationSchema $result, RouteContext $context, ?string $sourceClass, array $keys): ValidationSchema
+    private function withDeclarations(ValidationSchema $result, RouteContext $context, ?string $sourceClass, array $keys): array
     {
         if ($sourceClass === null) {
-            return $result;
+            return [$result, false];
         }
 
         $context->recordDependencyFiles(DeclarationFiles::of($sourceClass));
+        $this->observe($sourceClass, $context);
 
         $metadata = $context->engine->classMetadata(new ClassRef($sourceClass));
         $context->recordDependencyFiles($metadata->dependencyFiles);
@@ -122,16 +145,88 @@ final class RecoveredRequest
         [$schema, $diagnostics] = PropertyAnnotations::apply($schema, $sourceClass, $keys);
         [$schema, $hintDiagnostics] = MockHints::apply($schema, $sourceClass, $keys);
 
-        foreach ([...$diagnostics, ...$hintDiagnostics] as $diagnostic) {
+        [$schema, $declaredRequired, $fieldDiagnostics] = $this->fields->apply(
+            $schema,
+            self::declaredOn($sourceClass, $context),
+            $context->converter(),
+            ClassNames::publishable($sourceClass),
+        );
+
+        foreach ([...$diagnostics, ...$hintDiagnostics, ...$fieldDiagnostics, ...$this->unread($sourceClass, $context)] as $diagnostic) {
             $context->components->addDiagnostic($diagnostic);
         }
 
-        return new ValidationSchema($schema, $result->mediaType);
+        return [new ValidationSchema($schema, $result->mediaType), $declaredRequired];
     }
 
-    private function applyRequestBody(OperationDraft $operation, RouteContext $context, ValidationSchema $result, Contribution $contribution, ?string $sourceClass): void
+    /**
+     * The `#[BodyParameter]` declarations a request source class writes about ITSELF — the type-level
+     * half of the attribute, read here so every recoverer that converges on this class gets it at once
+     * rather than one vendor integration's DTOs getting it and resources, models and Form Requests not.
+     *
+     * Three things make the list empty, and each is a decision rather than a shortcut:
+     *
+     * - no class, so there is no type anything could be declared about;
+     * - a read verb, where the same rules become QUERY parameters ({@see documentsBody()}) and a
+     *   declaration about a body reaches nothing — the reading `validation.container-undecided`'s
+     *   stand-down already takes, so the guard and the write see the same set;
+     * - the source class IS the route's action, where ONE declaration site serves both roles and the
+     *   route attribute bag already reads it. Nothing was ever dropped there, and the operation-level
+     *   meaning it has today — patch the body, inline it — is the one that already exists. The defect
+     *   this reads for is a declaration on a class the bag never sees, which is exactly a source class
+     *   that is not the action.
+     *
+     * What it reads on the class is {@see ClassDeclarations}'s: the class's own declarations, and
+     * silence for one whose constructor rejects its arguments.
+     *
+     * @return list<BodyParameter>
+     */
+    public static function declaredOn(?string $sourceClass, RouteContext $context): array
     {
-        $required = is_array($result->schema['required'] ?? null) && $result->schema['required'] !== [];
+        if ($sourceClass === null || ! self::documentsBody($context)) {
+            return [];
+        }
+
+        if ($sourceClass === $context->actionRef->class) {
+            return [];
+        }
+
+        return ClassDeclarations::of($sourceClass, BodyParameter::class);
+    }
+
+    /**
+     * What the source class declares that nothing reads on a type ({@see SchemaClassAttributes}) —
+     * reported here because this is the one place a class is known to be a request TYPE and not the
+     * action, which is the whole difference between a declaration the route bag reads and one it never
+     * sees.
+     *
+     * @return list<Diagnostic>
+     */
+    private function unread(string $sourceClass, RouteContext $context): array
+    {
+        return $sourceClass === $context->actionRef->class ? [] : SchemaClassAttributes::unread($sourceClass);
+    }
+
+    /**
+     * Record what this route saw about the type's `#[BodyParameter]` — read here, or read at a verb
+     * that documents no body ({@see UnusableBodyDeclarations}). The verdict is the document's to reach,
+     * so only the observation is made here.
+     *
+     * The same stand-down {@see unread()} takes for a source class that IS the action: one declaration
+     * site serves both roles there, and the route attribute bag reads it whatever the verb.
+     */
+    private function observe(string $sourceClass, RouteContext $context): void
+    {
+        if ($sourceClass === $context->actionRef->class) {
+            return;
+        }
+
+        UnusableBodyDeclarations::observe($context, $sourceClass, self::documentsBody($context));
+    }
+
+    private function applyRequestBody(OperationDraft $operation, RouteContext $context, ValidationSchema $result, Contribution $contribution, ?string $sourceClass, bool $declaredRequired = false): void
+    {
+        $required = $declaredRequired || (is_array($result->schema['required'] ?? null) && $result->schema['required'] !== []);
 
         $schema = $this->bodySchema($context, $result, $sourceClass);
 
@@ -166,7 +261,12 @@ final class RecoveredRequest
         return $context->components->reference($name, $result->schema, $id);
     }
 
-    /** Whether `#[BodyParameter]` patches this body — which forces it inline; see the class header. */
+    /**
+     * Whether an OPERATION's own `#[BodyParameter]` patches this body — which forces it inline; see the
+     * class header. The bag holds what the route's action and its controller class declare, never what
+     * the request type does, so a type-level declaration cannot reach here and does not deviate: it is
+     * already in the component every operation `$ref`s.
+     */
     private function deviates(RouteContext $context): bool
     {
         return $context->attributes->all(BodyParameter::class) !== [];

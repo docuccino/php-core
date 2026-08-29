@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Docuccino\Core\Emit;
 
 use Docuccino\Core\Canonical\Canonicalizer;
+use Docuccino\Core\Draft\SchemaKeywords;
 use Docuccino\Core\Support\Arr;
 use Docuccino\Core\Support\FormatSamples;
 use Docuccino\Core\Support\JsonValue;
@@ -27,6 +28,30 @@ use stdClass;
  * `array{mixed}|null` throughout, `null` meaning "nothing validates here" rather than "the value is
  * null". Every position decides what that means for itself ({@see subschema()}), because an example a
  * schema forbids is the one thing worse than no example: a consumer copies it verbatim and sends it.
+ *
+ * Two keywords say what a value may NOT be, and both are read here rather than left for a consumer to
+ * discover by sending: `not` forbids whatever its subschema admits, and `contains` forbids an array with
+ * no element matching its subschema. Neither is satisfiable by construction, so both ask {@see admits()}
+ * — and where that cannot PROVE the constraint met, the value is absent rather than published beside a
+ * schema that rejects it.
+ *
+ * Those two are in scope because they can refuse a value built faithfully from the members beside them,
+ * with the schema saying nothing contradictory: `{type: string, not: {const: 'x'}}` and
+ * `{items: {type: string}, contains: {const: 'wanted'}}` are both consistent, and what runs into the
+ * constraint is a CHOICE THIS FACTORY MADE — which sample a format gets, that an array is built one
+ * element long. `not` is minted by a producer (a `not_in:` rule) and `contains` by none, so the second
+ * is here on the mechanism rather than on a count: they are the same single-position assertion, one
+ * about the value and one about a list's elements, and either is author-writable through an overlay
+ * (a first-class input at precedence 45) or a hand-authored component.
+ *
+ * The other nine subschema positions are deliberately not read, and the same line is what excludes
+ * them, so the next reader inherits a decision rather than an oversight. Two cannot refuse anything
+ * this factory publishes at all: `unevaluatedProperties` and `unevaluatedItems` are satisfied by a
+ * value built out of declared members. The remaining seven — `patternProperties`, `propertyNames`,
+ * `prefixItems`, `dependentSchemas`, `if`, `then`, `else` — can refuse one, but only where the author
+ * wrote a schema contradicting the members beside it: a `propertyNames` refusing a name `properties`
+ * declares, a `prefixItems` refusing what `items` produces. There the document already lies to its
+ * consumer before any example is built, and no example this factory withholds fixes that.
  *
  * @internal
  */
@@ -81,12 +106,35 @@ final readonly class SchemaExampleFactory
     }
 
     /**
+     * The candidate the schema's shape produces, held to the one keyword that speaks about whatever that
+     * turns out to be. `not` is read here rather than inside {@see byType()} for exactly that reason: it
+     * refuses a stated `const` and a `$ref`'s resolved value the same way it refuses a built one.
+     *
      * @param  array<string, mixed>  $schema
      * @param  array<string, mixed>  $components
      * @param  list<string>  $stack
      * @return array{mixed}|null null where NO value validates
      */
     private function candidate(array $schema, array $components, int $depth, array $stack): ?array
+    {
+        $candidate = $this->unconstrained($schema, $components, $depth, $stack);
+
+        if ($candidate === null || ! array_key_exists('not', $schema)) {
+            return $candidate;
+        }
+
+        // A `not` the value provably ESCAPES constrains nothing. Anything else — the value satisfies it,
+        // or this factory cannot tell — and there is no value here it can honestly publish.
+        return $this->admits($schema['not'], $candidate[0]) === false ? $candidate : null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $schema
+     * @param  array<string, mixed>  $components
+     * @param  list<string>  $stack
+     * @return array{mixed}|null null where NO value validates
+     */
+    private function unconstrained(array $schema, array $components, int $depth, array $stack): ?array
     {
         if ($depth > self::MAX_DEPTH) {
             return [$this->empty($schema)];
@@ -316,7 +364,7 @@ final readonly class SchemaExampleFactory
     {
         return match ($this->type($schema)) {
             'object' => $this->object($schema, $components, $depth, $stack),
-            'array' => [$this->list($schema, $components, $depth, $stack)],
+            'array' => $this->list($schema, $components, $depth, $stack),
             'string' => [$this->string($schema)],
             'integer', 'number' => [$this->number($schema)],
             'boolean' => [true],
@@ -400,19 +448,222 @@ final readonly class SchemaExampleFactory
      * @param  array<string, mixed>  $schema
      * @param  array<string, mixed>  $components
      * @param  list<string>  $stack
-     * @return list<mixed>
+     * @return array{list<mixed>}|null null where NO array validates
      */
-    private function list(array $schema, array $components, int $depth, array $stack): array
+    private function list(array $schema, array $components, int $depth, array $stack): ?array
     {
-        if (! array_key_exists('items', $schema)) {
-            return [];
+        $item = array_key_exists('items', $schema)
+            ? $this->subschema($schema['items'], $components, $depth + 1, $stack)
+            : null;
+
+        if (SchemaKeywords::containsAsserts($schema)) {
+            return $this->matching($schema, $item, $components, $depth, $stack);
         }
 
-        $item = $this->subschema($schema['items'], $components, $depth + 1, $stack);
-
         // Exactly one item, whatever `minItems` says: an example is a shape, not a load test. Where no
-        // element can validate — `items: false` — the empty list is the only array that does.
-        return $item === null ? [] : [$item[0]];
+        // element can validate — `items: false`, or no `items` at all — the empty list is the only array
+        // this factory knows validates.
+        return [$item === null ? [] : [$item[0]]];
+    }
+
+    /**
+     * The one-element array that satisfies `contains`, or null where this factory can build none — an
+     * array with no matching element is exactly the request the server rejects.
+     *
+     * One element is the only length this factory builds, so the keyword's own bounds decide before any
+     * element does. A floor above 1 wants an array of repeats, which is exactly what a `uniqueItems`
+     * beside it forbids — and this factory does not read `uniqueItems`, so it cannot prove such an array
+     * validates. A cap below 1 forbids the one match it could prove and leaves only an array whose
+     * elements provably do NOT match — where the elements come from `items` and from `contains` itself,
+     * the two shapes it can prove nothing of the sort about, and the empty array that would satisfy the
+     * cap shows a consumer no shape at all. Between the two, ONE proven match answers every bound there
+     * is: never fewer than a floor of 0 or 1, never more than a cap of 1 or above.
+     *
+     * The `items` element is tried first: `items` speaks about every element, so that one is admissible
+     * by construction, and where it also matches `contains` the array is the one the shape would have
+     * produced anyway. Otherwise the element is built from `contains` itself, and published only where
+     * `items` is known to admit it.
+     *
+     * @param  array<string, mixed>  $schema
+     * @param  array{mixed}|null  $item  the element `items` produced, or null where it admits none
+     * @param  array<string, mixed>  $components
+     * @param  list<string>  $stack
+     * @return array{list<mixed>}|null
+     */
+    private function matching(array $schema, ?array $item, array $components, int $depth, array $stack): ?array
+    {
+        $atMost = SchemaKeywords::maxContains($schema);
+
+        if (SchemaKeywords::minContains($schema) > 1 || ($atMost !== null && $atMost < 1)) {
+            return null;
+        }
+
+        $contains = $schema['contains'] ?? null;
+
+        if ($item !== null && $this->admits($contains, $item[0]) === true) {
+            return [[$item[0]]];
+        }
+
+        $match = $this->subschema($contains, $components, $depth + 1, $stack);
+
+        // A `contains` this factory cannot build a provable match for — `false`, or a constraint it does
+        // not check — leaves no array it can publish.
+        if ($match === null || $this->admits($contains, $match[0]) !== true) {
+            return null;
+        }
+
+        // `items` speaks about every element, so the match ships only where it is PROVABLY admitted
+        // there — undecidable reads as refusal here exactly as it does at every other position.
+        return ! array_key_exists('items', $schema) || $this->admits($schema['items'], $match[0]) === true
+            ? [[$match[0]]]
+            : null;
+    }
+
+    /**
+     * Whether `$subschema` admits `$value`: true where every keyword it states is one this factory checks
+     * and none refuses, false where one provably refuses, null where it states a keyword this factory
+     * does not check.
+     *
+     * Deliberately three-valued and deliberately shallow. `not` and `contains` both need to know whether
+     * ONE value satisfies ONE subschema, and answering that in general is a validator, which this is not
+     * — so undecidable is a common answer, and both callers read it the same way they read "refuses":
+     * absent, never a value the document forbids.
+     */
+    private function admits(mixed $subschema, mixed $value): ?bool
+    {
+        if (is_bool($subschema)) {
+            return $subschema;
+        }
+
+        // Anything that is no schema at all widens to `{}`, exactly as {@see subschema()} widens it, and
+        // the empty schema admits everything.
+        if (! is_array($subschema)) {
+            return true;
+        }
+
+        $decided = true;
+
+        foreach (Arr::stringKeyed($subschema) as $keyword => $constraint) {
+            $verdict = $this->keyword($keyword, $constraint, $value);
+
+            if ($verdict === false) {
+                return false;
+            }
+
+            $decided = $decided && $verdict === true;
+        }
+
+        return $decided ? true : null;
+    }
+
+    /**
+     * ONE keyword's verdict on one value. A schema is a conjunction, so a single refusal settles the
+     * whole subschema whatever else stands beside it — which is what makes these three enough for the
+     * cases that occur: a value set (`not_in:` writes `not: {enum: […]}`) and a type that cannot be the
+     * value's type. Everything else is undecidable, bar a keyword that says nothing about the instance
+     * at all ({@see SchemaKeywords::saysNothingAboutTheInstance()}).
+     */
+    private function keyword(string $keyword, mixed $constraint, mixed $value): ?bool
+    {
+        return match ($keyword) {
+            'type' => $this->typed($constraint, $value),
+            'const' => $this->equal($constraint, $value),
+            'enum' => $this->listed($constraint, $value),
+            default => SchemaKeywords::saysNothingAboutTheInstance($keyword) ? true : null,
+        };
+    }
+
+    /**
+     * Whether the value is one of an `enum`'s members. One member it provably equals settles it; short of
+     * that every member has to be provably different, or the answer is that this factory cannot tell.
+     */
+    private function listed(mixed $constraint, mixed $value): ?bool
+    {
+        if (! is_array($constraint) || $constraint === []) {
+            return null;
+        }
+
+        $decided = true;
+
+        foreach ($constraint as $member) {
+            $verdict = $this->equal($member, $value);
+
+            if ($verdict === true) {
+                return true;
+            }
+
+            $decided = $decided && $verdict === false;
+        }
+
+        return $decided ? false : null;
+    }
+
+    /**
+     * Whether the value's JSON type is one `type` names. An integral number is an `integer` in JSON
+     * Schema and every integer is also a `number`, so the value's type is matched as the set it belongs
+     * to rather than as one word.
+     */
+    private function typed(mixed $constraint, mixed $value): ?bool
+    {
+        $named = match (true) {
+            is_string($constraint) => [$constraint],
+            is_array($constraint) => array_values(array_filter($constraint, is_string(...))),
+            default => [],
+        };
+
+        $actual = $this->jsonType($value);
+
+        if ($named === [] || $actual === null) {
+            return null;
+        }
+
+        return array_intersect($actual === 'integer' ? ['integer', 'number'] : [$actual], $named) !== [];
+    }
+
+    /**
+     * Whether two JSON values are the same instance, or null where this factory will not say. Numbers
+     * compare by value, because `1` and `1.0` are one JSON instance. Two composites are never compared:
+     * object member order is not an authored fact, and a wrong "different" here publishes a value the
+     * schema forbids — while a composite against a scalar is different whatever is inside it.
+     */
+    private function equal(mixed $a, mixed $b): ?bool
+    {
+        $composite = static fn (mixed $value): bool => is_array($value) || is_object($value);
+
+        if ($composite($a) || $composite($b)) {
+            return $composite($a) && $composite($b) ? null : false;
+        }
+
+        if ((is_int($a) || is_float($a)) && (is_int($b) || is_float($b))) {
+            return (float) $a === (float) $b;
+        }
+
+        return $a === $b;
+    }
+
+    /**
+     * The JSON type of a value this factory built. The empty object is a {@see stdClass} here and never
+     * `[]` ({@see JsonValue}), so a keyed array is an object and every other array a list.
+     *
+     * `ParameterValue::enumTypes()` asks the same question of an authored `enum` and answers it
+     * differently ON PURPOSE, so neither may be unified into the other: an integral float is an
+     * `integer` here because JSON Schema's `type` is what the answer is held against, and a `number`
+     * there because a PHP float is what the coercion has to produce; a value no JSON document can hold
+     * is `null` here, because a type this cannot name may not be proven to satisfy anything, and
+     * `string` there, because that is the reading that converts nothing.
+     */
+    private function jsonType(mixed $value): ?string
+    {
+        return match (true) {
+            $value === null => 'null',
+            is_bool($value) => 'boolean',
+            is_int($value) => 'integer',
+            is_float($value) => is_finite($value) && $value === floor($value) ? 'integer' : 'number',
+            is_string($value) => 'string',
+            is_array($value) => array_is_list($value) ? 'array' : 'object',
+            $value instanceof stdClass => 'object',
+            default => null,
+        };
     }
 
     /**

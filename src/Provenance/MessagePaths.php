@@ -24,17 +24,34 @@ namespace Docuccino\Core\Provenance;
  *
  * 1. **Exclusions.** A run behind a `#` is a URI fragment, a `/` behind a `\` is an escape, a POSIX
  *    run carrying a backslash is a regex or a JSON string, a run carrying a brace is a URI template.
- *    None of those reaches the ladder at all.
+ *    None of those reaches the ladder at all, unless proof opened the run or a root already accounts
+ *    for the text in front of the character objected to. What they refuse is the PATH RUN and not
+ *    the sentence it sits in: a match crosses an interior space, so one routinely spans a template
+ *    AND the file named after it, and refusing all of it published the file ({@see rewrite()}).
  * 2. **Proof.** A local stream wrapper (`phar://`), a Windows drive and a UNC share cannot be
- *    anything but a filesystem path, so those are always reduced.
+ *    anything but a filesystem path, so those are always reduced. All three are proof from the first
+ *    character, and nothing a template is spelled with opens that way — a route signature, a path
+ *    template and a JSON pointer all start at a `/` or a `#` — so a run that OPENS with one is a path
+ *    even where it also carries a brace, and the braces are a shell glob rather than a placeholder.
+ *    What a wrapper proves stops at the first character of its tail, though — the compression
+ *    wrappers filter another STREAM, so `compress.zlib://http://…` names a host. {@see WRAPPERS}
+ *    holds that decision.
  * 3. **Attribution.** Where the ladder recognised a root — the base path, or a `composer.json`
  *    ancestor — the answer is a prefix strip, and a prefix strip cannot invent text. Asking whether
  *    it recognised one takes {@see PROBE}: the answer alone cannot say, since a root one segment up
- *    leaves the same bare name a root it never found leaves.
+ *    leaves the same bare name a root it never found leaves. The root also has to be deep enough to
+ *    be a machine word ({@see deeplyRooted()}), which is the same question asked one segment EARLY,
+ *    of the text an exclusion objects to, where it is the only thing that admits a run no proof
+ *    opened ({@see anchored()}) — all a bare `/Users/…/{a,b}/*.php` has to be reduced by.
  * 4. **File shape.** A run the ladder could not attribute is reduced only when its last segment
  *    names a file (`Reader.php`). `/api/forms` and `/docs/reference/configuration` keep every
  *    character they had, because nothing here established they were ever paths. How far such a run
- *    reaches through a space is {@see pathRun()}.
+ *    reaches through a space is {@see pathRun()}. A braced run reaches this rung only behind proof:
+ *    shape cannot tell `/api/users/{user}.json` from a file, so a braced POSIX run no root accounted
+ *    for is published whole — a leak, taken knowingly, because the other direction is the one that
+ *    must be impossible. A run under a root too shallow for reason 3 arrives here too, and so keeps
+ *    its strip wherever shape says it was a path at all: {@see relativise()} goes back to the same
+ *    ladder, so the second signal costs a shallow-rooted file nothing.
  *
  * Machine words that no path grammar reaches — the `include_path='…'` tail PHP appends to a failed
  * include, a temp directory — are redacted literally afterwards, by the prefixes this process can
@@ -69,16 +86,69 @@ final readonly class MessagePaths
     private const BS = '\\\\';
 
     /**
-     * Stream wrappers that name a file on THIS machine, so a run bearing one is a path by proof
-     * rather than by shape. A URL scheme names a host instead and is not here; `php://` and `data://`
-     * name no file at all.
+     * A URL scheme and its separator, as RFC 3986 spells the scheme. It is what tells a wrapper's
+     * tail apart from a path, and two readers spell it the same way. The PATTERN is the one that
+     * decides: declining to open a run on a nested URL is what leaves `compress.zlib://http://…`
+     * whole, so no run the matcher produces reaches {@see couldBeAPath()} carrying one. {@see
+     * wrapper()} asks again anyway, because it is the fold's own reader and is called on strings the
+     * matcher never produced — a candidate cut at a space, a run handed straight to {@see resolve()}
+     * — and a second reader that read fewer shapes than the pattern would be a hole rather than a
+     * conservative default.
      */
-    private const LOCAL_WRAPPERS = ['file', 'phar', 'zip', 'compress.zlib', 'compress.bzip2'];
+    private const NESTED_SCHEME = '[A-Za-z][A-Za-z0-9+.\\-]*://';
+
+    /**
+     * Every stream wrapper a decision has been taken about, and whether it is proof: true says a run
+     * bearing it can name nothing but a file on THIS machine, so the run is a path by proof rather
+     * than by shape. False is the decision that it is not one, and it is the half that has to be
+     * taken by hand — an over-scrub is the direction that must be impossible — so what the reduction
+     * reads is this table and never what the machine happens to have loaded. `stream_get_wrappers()`
+     * is the source of truth for what is REGISTERED, and it is read by the guard in the tests, which
+     * fails when a registered scheme is decided in neither direction.
+     *
+     * @var array<string, bool>
+     */
+    private const array WRAPPERS = [
+        // Proof: nothing but a file on this machine. A glob names a filesystem pattern and nothing
+        // else, so the absolute prefix in front of its wildcard is the machine word every other path
+        // here carries.
+        'file' => true,
+        'phar' => true,
+        'zip' => true,
+        'glob' => true,
+        // Proof of the LOCAL form only. These two filter another STREAM rather than naming a file,
+        // so where the four above take a path they take a URL: `compress.zlib://http://host/x.gz`
+        // reads a HOST, and reducing it would state an address the application never wrote. So proof
+        // stops at the first character of the tail — a tail that is itself a scheme
+        // ({@see NESTED_SCHEME}) is not a path, and the run is left whole, which is what a bare
+        // `http://` URL already gets. A nest is left whole for the same reason rather than unwrapped:
+        // it may still end at a host, and PHP opens no nest anyway (the inner stream must be castable
+        // to a descriptor). Every proof scheme reads the narrowing, because one rule is cheaper than
+        // an exception and the four above lose nothing by it.
+        //
+        // Demoting the pair to false is the alternative and is worse, not safer: the pattern would
+        // stop opening on them and the POSIX branch cannot pick the path up behind `zlib://`, whose
+        // `/` sits against another `/` — so `compress.zlib:///home/alice/cache.gz` would leak whole.
+        'compress.zlib' => true,
+        'compress.bzip2' => true,
+        // A host, not a file: reducing one states an address the application never wrote.
+        'http' => false,
+        'https' => false,
+        'ftp' => false,
+        'ftps' => false,
+        // No file at all — a stream of the process's own, a message's own bytes, and a field on an
+        // open database connection.
+        'php' => false,
+        'data' => false,
+        'sqlsrv' => false,
+    ];
 
     /**
      * What introduces a route signature rather than a file. `/api/forms` is already left alone for
      * having no filename, but `/api/users.json` has one, and a format suffix is an ordinary way to
-     * spell a route.
+     * spell a route. The methods the document itself carries are the source of truth, so the test
+     * derives its rows from there rather than spelling them again: a method missing here reduces a
+     * signature to its last segment, which is the direction that must be impossible.
      */
     private const METHODS = ['GET ', 'PUT ', 'HEAD ', 'POST ', 'PATCH ', 'TRACE ', 'QUERY ', 'DELETE ', 'OPTIONS '];
 
@@ -99,17 +169,19 @@ final readonly class MessagePaths
 
     public function relative(string $message): string
     {
-        return $this->redact($this->scrub($this->classNames->inText($message)));
+        // Bounded again after the class-name pass, which is the one thing here that can make the text
+        // longer than it arrived: what the run pass reads is what {@see PublishableText} allows.
+        return $this->redact($this->scrub(PublishableText::bounded($this->classNames->inText($message))));
     }
 
     /** The run pass. Recurses on the tail of a match, which is always strictly shorter. */
     private function scrub(string $text): string
     {
-        return preg_replace_callback(
+        return PublishableText::orRefused(preg_replace_callback(
             $this->run,
             fn (array $match): string => $this->rewrite($match[0]),
             $text,
-        ) ?? $text;
+        ));
     }
 
     private function rewrite(string $match): string
@@ -117,8 +189,13 @@ final readonly class MessagePaths
         $run = rtrim($match);
         $trailing = substr($match, strlen($run));
 
-        if (! self::couldBeAPath($run)) {
-            return $match;
+        if (! $this->couldBeAPath($run)) {
+            // An exclusion refuses a PATH RUN, not the sentence around it. {@see pathRun()} is where
+            // one ends, so the refused text keeps every character and what follows goes back through
+            // the same pass — and since that answer is never empty, the recursion still shortens.
+            $refused = self::pathRun($run);
+
+            return $refused.$this->scrub(substr($run, strlen($refused)).$trailing);
         }
 
         foreach (self::candidates($run) as $candidate) {
@@ -138,43 +215,139 @@ final readonly class MessagePaths
     }
 
     /**
-     * The exclusions. A brace makes a run a URI template rather than a file anyone named, and a
-     * backslash inside a POSIX run makes it an escaped string — a `regex:` rule, a JSON pointer in a
-     * quoted message — not a path with a separator.
+     * The exclusions, and the two things that open ahead of them. A brace makes a run a URI template
+     * rather than a file anyone named, and a backslash inside a POSIX run makes it an escaped string —
+     * a `regex:` rule, a JSON pointer in a quoted message — not a path with a separator.
+     *
+     * Proof outranks both, whichever shape carries it (reason 2): a wrapper scheme, a Windows drive
+     * and a UNC share are each proof from the first character, and nothing a template is spelled with
+     * opens that way — a route signature, a path template and a JSON pointer all start at a `/` or a
+     * `#`. So the braces in `glob://…/{Support,Http}/*.php` and in `C:\checkout\{a,b}\x.php` are a
+     * shell glob, and refusing those runs over them keeps the machine word in front of them.
+     *
+     * A bare POSIX run has no such proof, so both exclusions still refuse it — unless a root the
+     * ladder recognised already accounts for the text in FRONT of the character they object to
+     * ({@see anchored()}), which is reason 3 asked one segment early. A run has to clear every
+     * exclusion it trips, so carrying both takes an anchor in front of both.
      */
-    private static function couldBeAPath(string $run): bool
+    private function couldBeAPath(string $run): bool
     {
-        if (str_contains($run, '{') || str_contains($run, '}')) {
+        if (self::opening($run) !== null) {
+            // Proof, or nothing: a run opening with a wrapper whose tail is another URL is a stream
+            // address rather than a path, and shape must not get a second go at it — its last segment
+            // names a file (`archive.gz`) exactly as a real path's does.
+            return self::wrapper($run) !== null;
+        }
+
+        if (self::proven($run)) {
+            return true;
+        }
+
+        if ((str_contains($run, '{') || str_contains($run, '}')) && ! $this->anchored($run, '{}')) {
             return false;
         }
 
-        return self::proven($run) || ! str_contains($run, '\\');
+        return ! str_contains($run, '\\') || $this->anchored($run, '\\');
+    }
+
+    /**
+     * Whether a root the ladder recognised accounts for the run in front of the character an
+     * exclusion objects to. That is reason 3's question asked before the rewrite rather than during
+     * it, and it is the only thing a bare POSIX run has instead of proof: the prefix is a directory
+     * this machine was configured from, so the text in front of the brace or the backslash is a
+     * machine word whatever the rest of the run turns out to be, and removing it is a strip of text
+     * the ladder matched rather than a guess at where a path ends.
+     */
+    private function anchored(string $run, string $objection): bool
+    {
+        return $this->deeplyRooted(substr($run, 0, strcspn($run, $objection)));
+    }
+
+    /**
+     * Whether the ladder recognised a root for this path AND the root is deep enough to be a machine
+     * word ({@see deepEnoughForAMachine()}). Both halves are the same question — is this prefix
+     * something only a machine would be spelling — and this is the one place it is asked of the
+     * ladder, because reason 3 and the exclusions in front of it must not disagree about which roots
+     * count.
+     *
+     * What a shallow root loses is only reason 3: the run carries on to reason 4, so a path that
+     * names a file still relativises through the same ladder and `/app/src/Foo.php` is unchanged.
+     * A path that names none (`/app/storage`) keeps its machine word, and that is the trade —
+     * knowingly a leak, and a leak is the direction that may be traded.
+     */
+    private function deeplyRooted(string $path): bool
+    {
+        $path = rtrim(str_replace('\\', '/', $path), '/');
+        $under = $this->stripped($path);
+
+        if ($under === null) {
+            return false;
+        }
+
+        return self::deepEnoughForAMachine(rtrim(substr($path, 0, strlen($path) - strlen($under)), '/'));
+    }
+
+    /**
+     * Whether a prefix is deep enough that only a machine could be spelling it. A one-segment prefix
+     * is not: `/app` is a container's checkout and equally a prefix an application mounts routes
+     * under, so trusting it turned `Unknown route /app/users/profile` into `Unknown route
+     * users/profile` — a route nobody wrote, in a diagnostic somebody will act on — and `/tmp` is a
+     * word our own sentences spell, which is why {@see machineRoots()} will not redact it literally
+     * either. Two segments is the line, and it is drawn once so the ladder's roots and this process's
+     * own cannot come to disagree about it.
+     */
+    private static function deepEnoughForAMachine(string $root): bool
+    {
+        return substr_count($root, '/') >= 2;
     }
 
     /** A wrapper scheme, a Windows drive or a UNC share — shapes nothing but a path has. */
     private static function proven(string $run): bool
     {
-        if (str_starts_with($run, '\\\\')) {
-            return true;
-        }
-
-        if (preg_match('#^[A-Za-z]:[\\\\/]#', $run) === 1) {
-            return true;
-        }
-
-        return self::wrapper($run) !== null;
+        return self::windowsRooted($run) || self::wrapper($run) !== null;
     }
 
-    /** The wrapper scheme a run carries, if it is one we can prove names a local file. */
-    private static function wrapper(string $run): ?string
+    /**
+     * A Windows drive or a UNC share: the two shapes that spell a separator with a backslash, and so
+     * the only two whose backslashes {@see stripped()} may rewrite.
+     */
+    private static function windowsRooted(string $run): bool
     {
-        foreach (self::LOCAL_WRAPPERS as $scheme) {
-            if (str_starts_with($run, $scheme.'://')) {
+        return str_starts_with($run, '\\\\') || preg_match('#^[A-Za-z]:[\\\\/]#', $run) === 1;
+    }
+
+    /**
+     * The schemes {@see WRAPPERS} decided are proof, in the order it spells them.
+     *
+     * @return list<string>
+     */
+    private static function localWrappers(): array
+    {
+        return array_keys(array_filter(self::WRAPPERS));
+    }
+
+    /** The proof scheme a run opens with, whatever follows it. */
+    private static function opening(string $run): ?string
+    {
+        foreach (self::WRAPPERS as $scheme => $proof) {
+            if ($proof && str_starts_with($run, $scheme.'://')) {
                 return $scheme;
             }
         }
 
         return null;
+    }
+
+    /** The wrapper scheme a run carries, if it is one we can prove names a local file. */
+    private static function wrapper(string $run): ?string
+    {
+        $scheme = self::opening($run);
+
+        if ($scheme === null || preg_match('%^'.self::NESTED_SCHEME.'%', substr($run, strlen($scheme) + 3)) === 1) {
+            return null;
+        }
+
+        return $scheme;
     }
 
     /** Whether the run's last segment names a file, which is the only thing left that says "path". */
@@ -228,10 +401,10 @@ final readonly class MessagePaths
         return $run;
     }
 
-    /** The relative form, but only where the ladder recognised a root. */
+    /** The relative form, but only where the ladder recognised a root {@see deeplyRooted()} counts. */
     private function attributed(string $run): ?string
     {
-        return $this->stripped(self::pathPart($run)) === null ? null : $this->resolve($run);
+        return $this->deeplyRooted(self::pathPart($run)) ? $this->resolve($run) : null;
     }
 
     /**
@@ -268,18 +441,35 @@ final readonly class MessagePaths
         return $this->stripped($path) ?? $this->paths->relative($path);
     }
 
-    /** The path under the root the ladder recognised, or null where it recognised none. */
+    /**
+     * The path under the root the ladder recognised, or null where it recognised none.
+     *
+     * The ladder is asked in one spelling — a backslash is a separator to it — but what comes back is
+     * PUBLISHED, and only a Windows run may keep that spelling: there the two ways of writing one path
+     * have to emit the same bytes, and everywhere else a backslash is a character the application
+     * wrote, in a filename or in a regex it quoted. Normalisation is 1:1 in length, so the same count
+     * of characters off the end of the ORIGINAL is the strip, said in the author's own hand.
+     */
     private function stripped(string $path): ?string
     {
-        $answer = $this->paths->relative(rtrim(str_replace('\\', '/', $path), '/').'/'.self::PROBE);
+        $normalised = rtrim(str_replace('\\', '/', $path), '/');
+        $answer = $this->paths->relative($normalised.'/'.self::PROBE);
 
         if ($answer === self::PROBE) {
             return '';
         }
 
-        return str_ends_with($answer, '/'.self::PROBE)
-            ? substr($answer, 0, -strlen('/'.self::PROBE))
-            : null;
+        if (! str_ends_with($answer, '/'.self::PROBE)) {
+            return null;
+        }
+
+        $under = substr($answer, 0, -strlen('/'.self::PROBE));
+
+        // A ladder that answered something other than the run's own tail has invented text, so there
+        // is nothing to take the original's spelling from: publish what it said and nothing more.
+        return $under === '' || self::windowsRooted($path) || ! str_ends_with($normalised, $under)
+            ? $under
+            : substr(substr($path, 0, strlen($normalised)), -strlen($under));
     }
 
     /** Where the archive ends and the path inside it begins, or null when the run names no archive. */
@@ -307,16 +497,10 @@ final readonly class MessagePaths
     private function redact(string $message): string
     {
         foreach ($this->machineRoots as $root) {
-            $message = str_replace($root.'/', '', $message);
-
-            // A bare root, not a prefix of anything: only where it is deep enough that no sentence of
-            // ours could be spelling it, so `/tmp` in prose survives and an install prefix does not.
-            // TWO segments is that line, not three: PHP's failed-include tail names every entry BARE,
-            // so a three-segment threshold published a two-segment prefix (`/opt/php`) whole while
-            // hiding a deeper one — the same code emitting different bytes for the machine it ran on.
-            if (substr_count($root, '/') >= 2) {
-                $message = str_replace($root, '', $message);
-            }
+            // Both forms: PHP's failed-include tail names every entry BARE as well as using it as a
+            // prefix. Which prefixes may go at all is decided in {@see machineRoots()}, by the same
+            // depth the ladder's roots answer to.
+            $message = str_replace([$root.'/', $root], '', $message);
         }
 
         return $message;
@@ -336,7 +520,9 @@ final readonly class MessagePaths
         foreach ($roots as $root) {
             $root = rtrim(str_replace('\\', '/', trim($root)), '/');
 
-            if ($root !== '' && str_starts_with($root, '/') && str_contains(substr($root, 1), '/')) {
+            // Redaction is a literal replace with nothing to tell a machine word from a sentence of
+            // ours, so only a prefix deep enough to be one gets in at all.
+            if (str_starts_with($root, '/') && self::deepEnoughForAMachine($root)) {
                 $absolute[$root] = strlen($root);
             }
         }
@@ -352,13 +538,15 @@ final readonly class MessagePaths
         $segments = '(?:'.$body.'*/)*'.$body.'*';
         $windows = '(?:'.$body.'*[/'.self::BS.'])*'.$body.'*';
         $schemes = implode('|', array_map(
-            static fn (string $scheme): string => str_replace('.', '\\.', $scheme),
-            self::LOCAL_WRAPPERS,
+            static fn (string $scheme): string => preg_quote($scheme, '%'),
+            self::localWrappers(),
         ));
 
         return '%'
-            // A local stream wrapper: proof, whatever follows it.
-            .'(?<![\\w:/])(?:'.$schemes.')://'.$segments
+            // A local stream wrapper: proof, unless what follows is itself a URL, which is the one
+            // thing a wrapper's tail can be besides a path. Declining to open there leaves a nested
+            // run whole and lets the rest of the message scrub as usual.
+            .'(?<![\\w:/])(?:'.$schemes.')://(?!'.self::NESTED_SCHEME.')'.$segments
             // A UNC share: two backslashes, a host and at least one more segment.
             .'|'.self::BS.self::BS.'[^\\s'.self::BS.'/]+'.self::BS.$windows
             // A Windows drive. The forward-slash form needs a boundary so `http://` cannot pose as

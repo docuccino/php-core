@@ -4,19 +4,23 @@ declare(strict_types=1);
 
 use Docuccino\Attributes\BodyParameter;
 use Docuccino\Core\Draft\OperationDraft;
+use Docuccino\Core\Extensions\BuiltIn\DefaultTypeMappers;
 use Docuccino\Core\Extensions\Context\AttributeSet;
 use Docuccino\Core\Extensions\Context\DocumentConfig;
 use Docuccino\Core\Extensions\Context\RepresentationPolicy;
 use Docuccino\Core\Extensions\Context\RouteContext;
 use Docuccino\Core\Extensions\Context\RouteDescriptor;
+use Docuccino\Core\Extensions\ResolvedExtensions;
 use Docuccino\Core\Extensions\Schema\ComponentRegistry;
 use Docuccino\Core\Extensions\Validation\RecoveredRequest;
 use Docuccino\Core\Extensions\Validation\RequestSchemaBuilder;
 use Docuccino\Core\Extensions\Validation\ValidationSchema;
 use Docuccino\Core\Inference\ActionRef;
 use Docuccino\Core\Inference\NullTypeEngine;
+use Docuccino\Core\Tests\Fixtures\ExampledRequestClass;
 use Docuccino\Core\Tests\Fixtures\MockedRequestClass;
 use Docuccino\Core\Tests\Fixtures\PinnedRequestClass;
+use Docuccino\Core\Tests\Fixtures\UnreadableRequestClass;
 
 /**
  * A POST route context sharing an explicit component registry so successive applies dedupe against
@@ -32,6 +36,9 @@ function requestContext(ComponentRegistry $components, array $attributes = [], s
         attributes: new AttributeSet($attributes),
         engine: new NullTypeEngine,
         document: new DocumentConfig('default', []),
+        // The mappers the pipeline always resolves: a declaration naming a type is written through the
+        // converter, so a context without them would document a declared `string` as no type at all.
+        extensions: new ResolvedExtensions(typeToSchema: DefaultTypeMappers::all()),
         components: $components,
     );
 }
@@ -308,4 +315,39 @@ it('reports a source class\'s unusable #[Mock] against the build', function (): 
 
     expect(array_map(static fn ($d): string => $d->code, $components->diagnostics()))
         ->toBe(['attribute.mock-unknown-property', 'attribute.mock-unknown-property']);
+});
+
+it('publishes the example a type-level declaration gives its field', function (): void {
+    // The sample a consumer sends, beside the constraints — it is the one thing a declaration says that
+    // no validation rule can answer, so a body recovered from rules alone never carries one.
+    $components = new ComponentRegistry;
+
+    (new RecoveredRequest)->apply(
+        new OperationDraft,
+        requestContext($components),
+        objectSchema(['nickname' => ['type' => 'string']]),
+        'form-request',
+        ExampledRequestClass::class,
+    );
+
+    expect($components->schemas()['ExampledRequestClass']['properties']['nickname'])
+        ->toBe(['type' => 'string', 'example' => 'Ada']);
+});
+
+it('says nothing about a type-level declaration whose arguments its constructor rejects', function (): void {
+    // No route bag collected it, so there is nothing to report it against: it documents no field, the
+    // healthy declaration beside it still does, and the build carries on.
+    $components = new ComponentRegistry;
+
+    (new RecoveredRequest)->apply(
+        new OperationDraft,
+        requestContext($components),
+        objectSchema(['nickname' => ['type' => 'string']]),
+        'form-request',
+        UnreadableRequestClass::class,
+    );
+
+    expect($components->schemas()['UnreadableRequestClass']['properties'])
+        ->toBe(['nickname' => ['type' => 'string'], 'note' => ['type' => 'string']])
+        ->and($components->diagnostics())->toBe([]);
 });

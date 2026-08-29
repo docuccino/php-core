@@ -50,7 +50,7 @@ use JsonException;
 final readonly class FragmentCache
 {
     /** The entry format {@see get()} will read. An entry stamped anything else is a miss. */
-    public const FORMAT = 6;
+    public const FORMAT = 7;
 
     /**
      * The manifest's stand-ins for the two things a digest cannot be. Neither can be mistaken for one:

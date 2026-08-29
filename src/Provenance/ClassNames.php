@@ -53,12 +53,14 @@ final readonly class ClassNames
      */
     public function inText(string $text): string
     {
-        $rewritten = preg_replace_callback(
+        // Bounded first and refused rather than handed back: `.+?` backtracks, and a pass that gives
+        // up must not publish the absolute file inside the marker. {@see PublishableText} owns both.
+        $bounded = PublishableText::bounded($text);
+
+        return PublishableText::orRefused(preg_replace_callback(
             '/\0(?<file>.+?):(?<line>\d+)\$[0-9a-f]+/',
             fn (array $match): string => ' declared in '.$this->paths->relative($match['file']).':'.$match['line'],
-            $text,
-        );
-
-        return $rewritten ?? $text;
+            $bounded,
+        ));
     }
 }

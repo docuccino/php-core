@@ -226,6 +226,7 @@ final class DocumentDiffer
 
     /**
      * Canonical key → requirement, so added/removed are set differences insensitive to ordering.
+     * Keyed through {@see ValueKey}, which keeps two requirements JSON cannot spell apart.
      *
      * @return array<string, array<string, mixed>>
      */
@@ -236,8 +237,7 @@ final class DocumentDiffer
         foreach ($op->security ?? [] as $requirement) {
             $canonical = $requirement;
             ksort($canonical);
-            $key = json_encode($canonical);
-            $out[is_string($key) ? $key : ''] = $requirement;
+            $out[ValueKey::of($canonical)] = $requirement;
         }
 
         return $out;

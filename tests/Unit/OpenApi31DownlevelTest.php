@@ -6,8 +6,10 @@ use Docuccino\Core\Document\UirDocument;
 use Docuccino\Core\Emit\EmitOptions;
 use Docuccino\Core\Emit\Formats;
 use Docuccino\Core\Emit\OpenApi31DownlevelEmitter;
+use Docuccino\Core\Tests\Support\EmittedReferences;
 use Docuccino\Core\Tests\Support\OpenApiMemberDelta;
 use Docuccino\Core\Tests\Support\OpenApiMetaSchema;
+use Docuccino\Core\Tests\Support\OpenApiValueDelta;
 
 /**
  * Every member OpenAPI 3.2 added, and how this emitter accounts for it. The KEYS are checked against the
@@ -55,6 +57,104 @@ function accountedFor32Members(): array
         // 3.1 reaches a shared path item through `path-item-or-reference`, so a `$ref` here is 3.1's too;
         // 3.0 has no bucket for one and the 3.0 emitter inlines it (`downlevel.component-path-items`).
         'path-item.$ref' => 'legal-in-3.1',
+    ];
+}
+
+/**
+ * Every VALUE 3.2 added to a member's domain, and how this emitter answers it. The KEYS are checked
+ * against the set derived from the vendored meta-schemas ({@see OpenApiValueDelta}) in both directions, so
+ * a value 3.2 widened a domain with and nothing here answers fails — which is the hole `querystring` came
+ * through: the member axis cannot see it, because `in` is declared by every version and only the value is
+ * 3.2's.
+ *
+ * @return array<string, string>
+ */
+function accountedFor32Values(): array
+{
+    return [
+        // The value is the parameter's whole reason to exist — the raw query string as ONE value, taking
+        // `content` rather than `schema` — so the parameter goes with it.
+        'parameter.in.querystring' => 'downlevel.value-not-in-3.1',
+        // Only the member has no 3.1 spelling: `form` is the one cookie style 3.1 knows, and it is also
+        // 3.1's default there, so the parameter stands — and stands alone, since both styles default
+        // `explode` to true and no `explode` reproduces RFC 6265 escaping regardless.
+        'parameter.style.cookie' => 'downlevel.value-not-in-3.1',
+    ];
+}
+
+/**
+ * A 3.2 document carrying a `querystring` parameter at every position one can stand — a path item's own
+ * list, an operation's list, the shared bucket, a `$ref` naming it, and a second `$ref` reaching it through
+ * another name — plus the cookie `style` 3.2 added over both a primitive and an object, and the query and
+ * cookie parameters 3.1 spells the same way as the control.
+ *
+ * Inline rather than a fixture FILE: the UIR schema's own `in` enum stops at 3.1's four locations, so a
+ * file carrying one would be a UIR document the product is right to refuse, and the corpus-wide guards
+ * would fail on it rather than on the emitter. An emitter's contract is over the document it is HANDED.
+ *
+ * At most one `querystring` parameter per effective list and never beside a `query` one, since 3.2 forbids
+ * both: a subject illegal at the version it is emitted as would measure the wrong thing.
+ *
+ * @return array<string, mixed>
+ */
+function documentWith32OnlyValues(): array
+{
+    $raw = static fn (string $name): array => [
+        'name' => $name,
+        'in' => 'querystring',
+        'content' => ['application/json' => ['schema' => ['type' => 'string']]],
+    ];
+
+    $ok = static fn (string $reference): array => [
+        'operationId' => 'op.'.$reference,
+        'parameters' => [['$ref' => '#/components/parameters/'.$reference]],
+        'responses' => ['200' => ['description' => 'Matching tickets.']],
+    ];
+
+    return [
+        'uir' => '1.0.0',
+        'openapi' => '3.2.0',
+        'info' => ['title' => 'API', 'version' => '1.0.0'],
+        'paths' => [
+            // A path item's own list, which the drop empties.
+            '/search' => [
+                'parameters' => [$raw('search')],
+                'get' => ['operationId' => 'search.index', 'responses' => ['200' => ['description' => 'Results.']]],
+            ],
+            // An operation's list, with the 3.2 cookie style standing beside it.
+            '/events' => [
+                'get' => [
+                    'operationId' => 'events.index',
+                    'parameters' => [
+                        $raw('events'),
+                        ['name' => 'session', 'in' => 'cookie', 'style' => 'cookie', 'schema' => ['type' => 'string']],
+                        // And once over an object, the only shape `explode` is not inert on: this is the
+                        // subject that would catch the drop minting an `explode` beside the fallback style.
+                        ['name' => 'prefs', 'in' => 'cookie', 'style' => 'cookie', 'schema' => [
+                            'type' => 'object',
+                            'properties' => ['theme' => ['type' => 'string']],
+                        ]],
+                    ],
+                    'responses' => ['200' => ['description' => 'Events.']],
+                ],
+            ],
+            // A `$ref` naming the shared parameter, and one reaching it through another name.
+            '/tickets' => ['get' => $ok('RawQuery'), 'post' => $ok('AliasedQuery')],
+            // The control: everything here is 3.1's too, and must come through untouched.
+            '/pages' => ['get' => [
+                'operationId' => 'pages.index',
+                'parameters' => [
+                    ['$ref' => '#/components/parameters/Page'],
+                    ['name' => 'tz', 'in' => 'cookie', 'style' => 'form', 'schema' => ['type' => 'string']],
+                ],
+                'responses' => ['200' => ['description' => 'Pages.']],
+            ]],
+        ],
+        'components' => ['parameters' => [
+            'RawQuery' => $raw('q'),
+            'AliasedQuery' => ['$ref' => '#/components/parameters/RawQuery'],
+            'Page' => ['name' => 'page', 'in' => 'query', 'schema' => ['type' => 'integer']],
+        ]],
     ];
 }
 
@@ -348,4 +448,171 @@ it('drops a mock hint entirely when no faker key is configured', function (): vo
     ]);
 
     expect($this->emitter->emit($document))->not->toContain('safeEmail');
+});
+
+/*
+ * The second axis. #224 closed "a member 3.2 added" and derived the set from the meta-schemas so the table
+ * could not go short — and a `querystring` parameter still emitted verbatim into 3.1 and 3.0, because the
+ * member (`in`) exists in every version and it is the VALUE that does not. A member-shaped guard is blind
+ * to that by construction, so the value domains are derived the same way.
+ */
+it('accounts for every value 3.2 added, as the meta-schemas define that set', function (): void {
+    $derived = [];
+
+    foreach (OpenApiValueDelta::added32() as $slot => $values) {
+        foreach ($values as $value) {
+            $derived[] = $slot.'.'.$value;
+        }
+    }
+
+    $accounted = array_keys(accountedFor32Values());
+
+    sort($derived);
+    sort($accounted);
+
+    // Two assertions with one answer each. The count pins what 3.2 widened, so a third value cannot arrive
+    // unnoticed; the position count is the anti-vacuity floor, so a reader that stopped recognising a
+    // declaration shape reports "no additions" AND far fewer positions, and fails here rather than agreeing
+    // with an empty table forever.
+    expect(count(OpenApiValueDelta::domains32()))->toBeGreaterThanOrEqual(5, 'positions 3.2 pins a value domain at')
+        ->and($derived)->toHaveCount(2, 'values 3.2 adds, per the vendored schemas')
+        ->and($accounted)->toBe($derived, 'every value 3.2 added is accounted for, and nothing else is');
+});
+
+it('keeps every 3.2-only value at 3.2 and answers each below it', function (string $format, bool $kept): void {
+    $result = Formats::emit($format, UirDocument::fromArray(documentWith32OnlyValues()), new EmitOptions);
+    $decoded = json_decode($result->output, flags: JSON_THROW_ON_ERROR);
+    $codes = array_map(static fn ($d): string => $d->code, $result->report->diagnostics);
+
+    expect(OpenApiMetaSchema::findings($format, $decoded))->toBe([], $format.' meta-schema')
+        ->and(EmittedReferences::dangling($decoded))->toBe([], $format.' references')
+        ->and(str_contains($result->output, 'querystring'))->toBe($kept, $format.' querystring')
+        ->and(str_contains($result->output, '"style": "cookie"'))->toBe($kept, $format.' cookie style')
+        ->and(in_array('downlevel.value-not-in-3.1', $codes, true))->toBe(! $kept, $format.' diagnostic')
+        // The control, at every version: a query parameter and a cookie parameter 3.1 spells the same way.
+        ->and($result->output)->toContain('"page"')->toContain('"tz"');
+})->with([
+    'openapi-3.2' => ['openapi-3.2', true],
+    'openapi-3.1' => ['openapi-3.1', false],
+    'openapi-3.0' => ['openapi-3.0', false],
+]);
+
+it('reports each lost parameter once, at the position that lost it', function (string $format): void {
+    $result = Formats::emit($format, UirDocument::fromArray(documentWith32OnlyValues()), new EmitOptions);
+
+    $messages = array_map(
+        static fn ($d): string => $d->message,
+        array_values(array_filter(
+            $result->report->warnings(),
+            static fn ($d): bool => $d->code === 'downlevel.value-not-in-3.1',
+        )),
+    );
+
+    // Six, and the two `$ref` use sites are not among them: a shared parameter is reported where it is
+    // DEFINED, the way a dropped security scheme is, rather than again at every operation naming it.
+    expect($messages)->toHaveCount(6, $format)
+        ->and($messages[0])->toContain('`search`')->toContain('#/paths/~1search/parameters/0')
+        ->and($messages[1])->toContain('`events`')->toContain('#/paths/~1events/get/parameters/0')
+        ->and($messages[2])->toContain('`style: cookie`')->toContain('#/paths/~1events/get/parameters/1/style')
+        ->and($messages[3])->toContain('`style: cookie`')->toContain('#/paths/~1events/get/parameters/2/style')
+        ->and($messages[4])->toContain('shared parameter `RawQuery`')->toContain('every `$ref` naming it')
+        ->and($messages[5])->toContain('shared parameter `AliasedQuery`')
+        ->toContain('resolves through `#/components/parameters/RawQuery`');
+})->with(['openapi-3.1', 'openapi-3.0']);
+
+it('takes the parameter member the drop emptied rather than publishing it empty', function (string $format): void {
+    $decoded = json_decode(
+        Formats::emit($format, UirDocument::fromArray(documentWith32OnlyValues()), new EmitOptions)->output,
+        true,
+        flags: JSON_THROW_ON_ERROR,
+    );
+
+    expect($decoded['paths']['/search'])->not->toHaveKey('parameters', $format)
+        ->and($decoded['paths']['/tickets']['get'])->not->toHaveKey('parameters', $format)
+        ->and($decoded['paths']['/tickets']['post'])->not->toHaveKey('parameters', $format)
+        // The cookie parameters kept their list, minus the style member and the parameter beside them —
+        // and minus nothing else and PLUS nothing else. The object one is the assertion that matters:
+        // `explode` is where a fallback style could be compensated for, both versions default it to true
+        // over `form` and `cookie` alike, and no `explode` value reproduces RFC 6265 escaping, so the
+        // honest answer is to write none. An `explode` appearing here is the emitter having guessed.
+        ->and($decoded['paths']['/events']['get']['parameters'])
+        // Canonical order, not source order — the canonicalizer sorts a parameter list.
+        ->toBe([
+            ['name' => 'prefs', 'in' => 'cookie', 'schema' => [
+                'type' => 'object',
+                'properties' => ['theme' => ['type' => 'string']],
+            ]],
+            ['name' => 'session', 'in' => 'cookie', 'schema' => ['type' => 'string']],
+        ], $format)
+        ->and(array_keys($decoded['components']['parameters']))->toBe(['Page'], $format);
+})->with(['openapi-3.1', 'openapi-3.0']);
+
+it('empties the shared bucket, and the components object with it, rather than leaving either a list', function (string $format): void {
+    $document = UirDocument::fromArray([
+        'uir' => '1.0.0',
+        'openapi' => '3.2.0',
+        'info' => ['title' => 'API', 'version' => '1.0.0'],
+        'paths' => ['/a' => ['get' => [
+            'operationId' => 'a.get',
+            'parameters' => [['$ref' => '#/components/parameters/RawQuery']],
+            'responses' => ['200' => ['description' => 'ok']],
+        ]]],
+        'components' => ['parameters' => ['RawQuery' => [
+            'name' => 'q',
+            'in' => 'querystring',
+            'content' => ['application/json' => ['schema' => ['type' => 'string']]],
+        ]]],
+    ]);
+
+    $output = Formats::emit($format, $document, new EmitOptions)->output;
+
+    expect(OpenApiMetaSchema::findings($format, json_decode($output, flags: JSON_THROW_ON_ERROR)))->toBe([], $format)
+        ->and($output)->toContain('"components": {}')->not->toContain('parameters');
+})->with(['openapi-3.1', 'openapi-3.0']);
+
+/*
+ * The guard executed rather than asserted. Every `toBe([])` above would read the same whether the emitter
+ * dropped anything or not, so here is the case the oracle has to refuse: the 3.2 emission, which carries
+ * every one of these values, relabelled as the older version and handed to that version's own meta-schema.
+ */
+it('emits at 3.2 a document the older meta-schemas refuse', function (string $format, string $version): void {
+    $document = json_decode(
+        Formats::emit('openapi-3.2', UirDocument::fromArray(documentWith32OnlyValues()), new EmitOptions)->output,
+        flags: JSON_THROW_ON_ERROR,
+    );
+    $document->openapi = $version;
+
+    $findings = OpenApiMetaSchema::findings($format, $document);
+
+    expect($findings)->not->toBe([], $format.' accepted a document carrying 3.2-only values')
+        ->and(implode("\n", $findings))->toContain('/parameters/0/in');
+})->with([
+    'openapi-3.1' => ['openapi-3.1', '3.1.0'],
+    'openapi-3.0' => ['openapi-3.0', '3.0.4'],
+]);
+
+it('ends a shared-parameter $ref cycle rather than following it', function (): void {
+    // Nothing 3.1 objects to is anywhere in this document; the pair only proves the chain walk stops. A
+    // guard that recognised fewer shapes than the chain it protects would hang here instead.
+    $document = UirDocument::fromArray([
+        'uir' => '1.0.0',
+        'openapi' => '3.2.0',
+        'info' => ['title' => 'API', 'version' => '1.0.0'],
+        'paths' => ['/a' => ['get' => [
+            'operationId' => 'a.get',
+            'parameters' => [['$ref' => '#/components/parameters/A']],
+            'responses' => ['200' => ['description' => 'ok']],
+        ]]],
+        'components' => ['parameters' => [
+            'A' => ['$ref' => '#/components/parameters/B'],
+            'B' => ['$ref' => '#/components/parameters/A'],
+        ]],
+    ]);
+
+    $result = Formats::emit('openapi-3.1', $document, new EmitOptions);
+    $decoded = json_decode($result->output, true, flags: JSON_THROW_ON_ERROR);
+
+    expect(array_keys($decoded['components']['parameters']))->toBe(['A', 'B'])
+        ->and($decoded['paths']['/a']['get']['parameters'])->toBe([['$ref' => '#/components/parameters/A']])
+        ->and($result->report->diagnostics)->toBe([]);
 });

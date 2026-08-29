@@ -8,8 +8,6 @@ use Docuccino\Attributes\Description;
 use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Extensions\Contracts\SchemaContext;
 use Docuccino\Core\Provenance\ClassNames;
-use ReflectionClass;
-use Throwable;
 
 /**
  * Reads the class-target prose a class declares about ITSELF — `#[Description]` — and writes it as the
@@ -22,8 +20,8 @@ use Throwable;
  * consumer of an emitted document cannot see — and a description that misinforms costs a reader more
  * than an absent one. The attribute says, unambiguously, "publish this sentence".
  *
- * The declaration is read off the class the schema is FOR, not off its parents: a base DTO's sentence
- * describes the base, and inheriting it would put one description on every shape below it.
+ * The declaration is read off the class the schema is FOR, on {@see ClassDeclarations}'s terms — its
+ * own, never a parent's.
  */
 final class ClassAnnotations
 {
@@ -63,7 +61,7 @@ final class ClassAnnotations
 
         $diagnostics = [];
         $text = null;
-        foreach (self::all($fqcn) as $description) {
+        foreach (ClassDeclarations::of($fqcn, Description::class) as $description) {
             $candidate = DescribedText::of($description, $site, "a schema's description", $diagnostics);
             $text ??= $candidate;
         }
@@ -73,26 +71,5 @@ final class ClassAnnotations
         }
 
         return [$schema, $diagnostics];
-    }
-
-    /**
-     * The class's own `#[Description]` declarations, in source order.
-     *
-     * @param  class-string  $fqcn
-     * @return list<Description>
-     */
-    private static function all(string $fqcn): array
-    {
-        $instances = [];
-        foreach ((new ReflectionClass($fqcn))->getAttributes(Description::class) as $declaration) {
-            try {
-                $instances[] = $declaration->newInstance();
-            } catch (Throwable) {
-                // An argument the constructor rejects is the adapter's `attribute.unreadable` story on an
-                // action; here there is no route to name, so it simply says nothing.
-            }
-        }
-
-        return $instances;
     }
 }

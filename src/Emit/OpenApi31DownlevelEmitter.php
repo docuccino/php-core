@@ -23,7 +23,9 @@ use stdClass;
  * - the 3.2-only `query` HTTP method is dropped (warning);
  * - the 3.2-only `additionalOperations` path-item member is dropped (warning);
  * - the 3.2-only tag members `summary`, `parent` and `kind` are dropped (a warning each);
- * - every other member 3.2 added is dropped where it stands ({@see MEMBERS_32}, one shared warning).
+ * - every other member 3.2 added is dropped where it stands ({@see MEMBERS_32}, one shared warning);
+ * - every VALUE 3.2 added to a member's domain is answered where it stands ({@see VALUES_32}, one
+ *   shared warning).
  *
  * The rest of 3.2 is compatible with 3.1's JSON Schema dialect and passes through unchanged.
  *
@@ -32,6 +34,15 @@ use stdClass;
  * 3.2-only on a Server and original on a Parameter, and `encoding` is 3.2-only on an Encoding Object
  * and original on the Media Type holding it. So the drop runs off a descent that knows what each node
  * IS ({@see CHILDREN}), and dropping by name alone would strip original members from four objects.
+ *
+ * A member 3.2 ADDED and a domain 3.2 WIDENED are two axes of one loss, and a member-shaped table sees
+ * only the first: `in` exists in every version and it is the value `querystring` that does not, so a
+ * parameter carrying it emitted verbatim into documents whose own meta-schemas reject it.
+ * {@see VALUES_32} is the second axis, derived from the same two vendored meta-schemas the member table
+ * is checked against (`OpenApiValueDelta`), so a value the next version widens is found without a report.
+ *
+ * @phpstan-type ValueLoss array{member: string, value: string, through: string|null}
+ * @phpstan-type PrePass array{mediaTypes: array<string, mixed>, parameters: array<string, ValueLoss>}
  *
  * @internal
  */
@@ -118,6 +129,49 @@ final readonly class OpenApi31DownlevelEmitter implements ReportingEmitter
         self::OAUTH_FLOWS => ['deviceAuthorization'],
     ];
 
+    /** A 3.2-only value the object cannot be expressed without: the whole object goes. */
+    private const string DROP_NODE = 'node';
+
+    /** A 3.2-only value in an optional member: the member goes and the object stands. */
+    private const string DROP_MEMBER = 'member';
+
+    /**
+     * Every VALUE OpenAPI 3.2 added to a member's domain, by the object and member carrying it, with what
+     * the loss costs and the help that states it.
+     *
+     * `DROP_NODE` where the value is the object's whole reason to exist: an `in: querystring` parameter
+     * carries the raw query string as ONE value and takes `content` rather than `schema`, so 3.1 has no
+     * other spelling for it and the parameter itself goes. `DROP_MEMBER` where the member is optional and
+     * the older version's own default is the nearest true thing: 3.1 spells only `form` for a cookie
+     * parameter's `style`, which is what every 3.1 cookie parameter already says.
+     *
+     * `DROP_MEMBER` writes NOTHING in the dropped member's place, and `explode` is the near miss that says
+     * why. 3.2 defaults it to true for `style: cookie` exactly as 3.1 does for the `form` a cookie
+     * parameter falls back to, so the drop moves it nowhere; and no `explode` would reproduce `cookie`
+     * anyway, since `form` percent-encodes where `cookie` escapes nothing and joins an exploded value on
+     * `&` rather than `; `. Pinning one would trade a lost spelling for a false one. Read that default off
+     * the PROSE — the vendored meta-schemas annotate `explode` false for any style not literally `form`,
+     * contradicting 3.2's own text, and a JSON Schema `default` is an annotation nothing applies.
+     *
+     * @var array<string, array<string, array<string, array{string, string}>>>
+     */
+    private const array VALUES_32 = [
+        self::PARAMETER => [
+            'in' => [
+                'querystring' => [
+                    self::DROP_NODE,
+                    'Keep the 3.2 artifact for consumers that need this input: OpenAPI 3.1 has no way to describe the raw query string as one value, and a `query` parameter is a different contract rather than the same one renamed.',
+                ],
+            ],
+            'style' => [
+                'cookie' => [
+                    self::DROP_MEMBER,
+                    'The parameter stands at `form`, the only cookie style OpenAPI 3.1 spells and its default there, and nothing is written in the dropped member\'s place: both styles default `explode` to true, so an exploded value stays exploded. What the older artifacts cannot say is the rest of RFC 6265 — `form` percent-encodes where `cookie` escapes nothing, and joins an exploded array or object on `&` rather than `; `. Keep the 3.2 artifact for consumers that need the cookie wire format.',
+                ],
+            ],
+        ],
+    ];
+
     /**
      * What each member of each object IS, so the descent reaches every position {@see MEMBERS_32} names.
      * A member dropped by that table needs no line here — `mediaTypes` and the two 3.2-only encoding
@@ -177,6 +231,9 @@ final readonly class OpenApi31DownlevelEmitter implements ReportingEmitter
 
     /** Where a `$ref` into the 3.2-only shared media types points; 3.1 has no bucket for it to reach. */
     private const string SHARED_MEDIA_TYPE_REF = '#/components/mediaTypes/';
+
+    /** Where a `$ref` into the shared parameters bucket points. */
+    private const string SHARED_PARAMETER_REF = '#/components/parameters/';
 
     public function __construct(
         private OpenApi32Emitter $oas32 = new OpenApi32Emitter,
@@ -239,26 +296,30 @@ final readonly class OpenApi31DownlevelEmitter implements ReportingEmitter
             $array['jsonSchemaDialect'] = self::DIALECT_31;
         }
 
-        // The shared media types are read while inlining the `$ref`s that name them, so they are taken
-        // from the document before anything else walks it.
-        $shared = $this->sharedMediaTypes($array);
+        // Two things are read off the document before anything walks it, because a `$ref` has to be
+        // answered at its USE site: the shared media types get inlined where one names them, and a shared
+        // parameter 3.1 cannot express goes, taking every `$ref` that named it.
+        $read = [
+            'mediaTypes' => $this->sharedMediaTypes($array),
+            'parameters' => $this->inexpressibleParameters($array),
+        ];
 
         if (isset($array['tags']) && is_array($array['tags'])) {
             $array['tags'] = $this->downlevelTags($array['tags'], $diagnostics, isset($array['x-tagGroups']));
         }
 
         if (isset($array['servers']) && is_array($array['servers'])) {
-            $array['servers'] = $this->walkList(self::SERVER, $array['servers'], '#/servers', $shared, $diagnostics);
+            $array['servers'] = $this->walkList(self::SERVER, $array['servers'], '#/servers', $read, $diagnostics);
         }
 
         foreach (['paths', 'webhooks'] as $bucket) {
             if (isset($array[$bucket]) && is_array($array[$bucket])) {
-                $array[$bucket] = $this->downlevelPathMap($array[$bucket], JsonPointer::child('#', $bucket), $shared, $diagnostics);
+                $array[$bucket] = $this->downlevelPathMap($array[$bucket], JsonPointer::child('#', $bucket), $read, $diagnostics);
             }
         }
 
         if (isset($array['components']) && is_array($array['components'])) {
-            $array['components'] = $this->walkObject(self::COMPONENTS, Arr::stringKeyed($array['components']), '#/components', $shared, $diagnostics);
+            $array['components'] = $this->walkObject(self::COMPONENTS, Arr::stringKeyed($array['components']), '#/components', $read, $diagnostics);
         }
 
         return $array;
@@ -278,6 +339,86 @@ final readonly class OpenApi31DownlevelEmitter implements ReportingEmitter
         $bucket = $components['mediaTypes'] ?? null;
 
         return is_array($bucket) ? Arr::stringKeyed($bucket) : [];
+    }
+
+    /**
+     * The `components.parameters` entries no 3.1 document can carry, by name, with the loss that decided
+     * it. A `$ref` chain inside the bucket is followed to its target, so a name reaching an inexpressible
+     * parameter through another name goes too: the alternative is a `$ref` left pointing at a component
+     * the 3.1 artifact no longer has.
+     *
+     * @param  array<string, mixed>  $array
+     * @return array<string, ValueLoss>
+     */
+    private function inexpressibleParameters(array $array): array
+    {
+        $components = is_array($array['components'] ?? null) ? Arr::stringKeyed($array['components']) : [];
+        $bucket = is_array($components['parameters'] ?? null) ? Arr::stringKeyed($components['parameters']) : [];
+
+        $found = [];
+
+        foreach (array_keys($bucket) as $name) {
+            $loss = $this->parameterChainLoss((string) $name, $bucket);
+
+            if ($loss !== null) {
+                $found[(string) $name] = $loss;
+            }
+        }
+
+        return $found;
+    }
+
+    /**
+     * The loss that makes one shared parameter inexpressible, following the `$ref` chain from it and
+     * stopping at a name already seen, so a cycle ends rather than resolving.
+     *
+     * @param  array<string, mixed>  $bucket
+     * @param  list<string>  $seen
+     * @return ValueLoss|null
+     */
+    private function parameterChainLoss(string $name, array $bucket, array $seen = []): ?array
+    {
+        if (in_array($name, $seen, true) || ! is_array($bucket[$name] ?? null)) {
+            return null;
+        }
+
+        $parameter = Arr::stringKeyed($bucket[$name]);
+        $loss = $this->inexpressibleValue(self::PARAMETER, $parameter, self::DROP_NODE);
+
+        if ($loss !== null) {
+            return $loss;
+        }
+
+        $ref = $parameter['$ref'] ?? null;
+
+        if (! is_string($ref) || ! str_starts_with($ref, self::SHARED_PARAMETER_REF)) {
+            return null;
+        }
+
+        $target = substr($ref, strlen(self::SHARED_PARAMETER_REF));
+        $loss = $this->parameterChainLoss($target, $bucket, [...$seen, $name]);
+
+        return $loss === null ? null : ['member' => $loss['member'], 'value' => $loss['value'], 'through' => $ref];
+    }
+
+    /**
+     * The first member of one object stating a value 3.2 added and $how says the object cannot survive,
+     * or null when it states none.
+     *
+     * @param  array<string, mixed>  $node
+     * @return ValueLoss|null
+     */
+    private function inexpressibleValue(string $kind, array $node, string $how): ?array
+    {
+        foreach (self::VALUES_32[$kind] ?? [] as $member => $values) {
+            $stated = $node[$member] ?? null;
+
+            if (is_string($stated) && ($values[$stated][0] ?? null) === $how) {
+                return ['member' => $member, 'value' => $stated, 'through' => null];
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -324,11 +465,11 @@ final readonly class OpenApi31DownlevelEmitter implements ReportingEmitter
 
     /**
      * @param  array<mixed, mixed>  $paths
-     * @param  array<string, mixed>  $shared
+     * @param  PrePass  $read
      * @param  list<Diagnostic>  $diagnostics
      * @return array<string, mixed>
      */
-    private function downlevelPathMap(array $paths, string $pointer, array $shared, array &$diagnostics): array
+    private function downlevelPathMap(array $paths, string $pointer, array $read, array &$diagnostics): array
     {
         $out = [];
 
@@ -336,7 +477,7 @@ final readonly class OpenApi31DownlevelEmitter implements ReportingEmitter
             $template = (string) $template;
 
             if (is_array($item)) {
-                $out[$template] = $this->downlevelPathItem($template, $item, JsonPointer::child($pointer, $template), $shared, $diagnostics);
+                $out[$template] = $this->downlevelPathItem($template, $item, JsonPointer::child($pointer, $template), $read, $diagnostics);
 
                 continue;
             }
@@ -349,11 +490,11 @@ final readonly class OpenApi31DownlevelEmitter implements ReportingEmitter
 
     /**
      * @param  array<mixed, mixed>  $item
-     * @param  array<string, mixed>  $shared
+     * @param  PrePass  $read
      * @param  list<Diagnostic>  $diagnostics
      * @return array<string, mixed>
      */
-    private function downlevelPathItem(string $template, array $item, string $pointer, array $shared, array &$diagnostics): array
+    private function downlevelPathItem(string $template, array $item, string $pointer, array $read, array &$diagnostics): array
     {
         if (isset($item['query'])) {
             unset($item['query']);
@@ -380,16 +521,23 @@ final readonly class OpenApi31DownlevelEmitter implements ReportingEmitter
         $item = Arr::stringKeyed($item);
 
         if (isset($item['servers']) && is_array($item['servers'])) {
-            $item['servers'] = $this->walkList(self::SERVER, $item['servers'], JsonPointer::child($pointer, 'servers'), $shared, $diagnostics);
+            $item['servers'] = $this->walkList(self::SERVER, $item['servers'], JsonPointer::child($pointer, 'servers'), $read, $diagnostics);
         }
 
         if (isset($item['parameters']) && is_array($item['parameters'])) {
-            $item['parameters'] = $this->walkList(self::PARAMETER, $item['parameters'], JsonPointer::child($pointer, 'parameters'), $shared, $diagnostics);
+            $arrived = $item['parameters'];
+            $item['parameters'] = $this->walkList(self::PARAMETER, $arrived, JsonPointer::child($pointer, 'parameters'), $read, $diagnostics);
+
+            // Emptied by the drop, so gone — the invariant {@see walkObject()} states for every other
+            // parameter position.
+            if ($item['parameters'] === [] && $arrived !== []) {
+                unset($item['parameters']);
+            }
         }
 
         foreach (PathItem::METHODS as $method) {
             if (isset($item[$method]) && is_array($item[$method])) {
-                $item[$method] = $this->walkObject(self::OPERATION, Arr::stringKeyed($item[$method]), JsonPointer::child($pointer, $method), $shared, $diagnostics);
+                $item[$method] = $this->walkObject(self::OPERATION, Arr::stringKeyed($item[$method]), JsonPointer::child($pointer, $method), $read, $diagnostics);
             }
         }
 
@@ -400,7 +548,8 @@ final readonly class OpenApi31DownlevelEmitter implements ReportingEmitter
      * One object: its 3.2-only members dropped, then each member the position knows about descended
      * into. A `$ref` node is left alone bar its own 3.2-only members — there is nothing else in it.
      *
-     * An object THIS PASS empties comes back as {@see stdClass}, so it is still published as `{}`. The
+     * An object THIS PASS empties — by a member drop, or by the parameter member a node drop emptied —
+     * comes back as {@see stdClass}, so it is still published as `{}`. The
      * canonicaliser answers that from position for every object it knows ({@see Canonicalizer}), but an
      * Encoding Object and an OAuth Flows Object are read generically there, and `[]` at either is a
      * document no validator accepts — the loss must not turn an object into a list on the way out. Only
@@ -408,15 +557,15 @@ final readonly class OpenApi31DownlevelEmitter implements ReportingEmitter
      * reads this same intermediate and has its own answer for an operation written `{}`.
      *
      * @param  array<string, mixed>  $node
-     * @param  array<string, mixed>  $shared
+     * @param  PrePass  $read
      * @param  list<Diagnostic>  $diagnostics
      * @return array<string, mixed>|stdClass
      */
-    private function walkObject(string $kind, array $node, string $pointer, array $shared, array &$diagnostics): array|stdClass
+    private function walkObject(string $kind, array $node, string $pointer, array $read, array &$diagnostics): array|stdClass
     {
         $arrived = $node;
         $node = $this->dropMembers32($kind, $node, $pointer, $diagnostics);
-        $emptied = $node === [] && $arrived !== [];
+        $node = $this->dropValues32($kind, $node, $pointer, $diagnostics);
 
         foreach (self::CHILDREN[$kind] ?? [] as $member => [$shape, $childKind]) {
             if (! isset($node[$member]) || ! is_array($node[$member])) {
@@ -427,15 +576,22 @@ final readonly class OpenApi31DownlevelEmitter implements ReportingEmitter
             $value = $node[$member];
 
             $node[$member] = match ($shape) {
-                self::ONE => $this->walkObject($childKind, Arr::stringKeyed($value), $child, $shared, $diagnostics),
-                self::LIST => $this->walkList($childKind, $value, $child, $shared, $diagnostics),
-                self::PATH_ITEMS => $this->downlevelPathMap($value, $child, $shared, $diagnostics),
-                self::CALLBACKS => $this->walkMap($childKind, $value, $child, $shared, $diagnostics, callbacks: true),
-                default => $this->walkMap($childKind, $value, $child, $shared, $diagnostics),
+                self::ONE => $this->walkObject($childKind, Arr::stringKeyed($value), $child, $read, $diagnostics),
+                self::LIST => $this->walkList($childKind, $value, $child, $read, $diagnostics),
+                self::PATH_ITEMS => $this->downlevelPathMap($value, $child, $read, $diagnostics),
+                self::CALLBACKS => $this->walkMap($childKind, $value, $child, $read, $diagnostics, callbacks: true),
+                default => $this->walkMap($childKind, $value, $child, $read, $diagnostics),
             };
+
+            // A parameter member the drop emptied goes with it. `parameters: []` and an empty component
+            // bucket are both legal and neither is a shape any document the product writes carries, so
+            // leaving one would publish evidence of the loss instead of the loss itself.
+            if ($childKind === self::PARAMETER && $node[$member] === [] && $value !== []) {
+                unset($node[$member]);
+            }
         }
 
-        return $emptied ? new stdClass : $node;
+        return $node === [] && $arrived !== [] ? new stdClass : $node;
     }
 
     /**
@@ -470,37 +626,126 @@ final readonly class OpenApi31DownlevelEmitter implements ReportingEmitter
     }
 
     /**
+     * The members of one object whose 3.2-only VALUE costs the member and no more, gone with a warning
+     * each. The object itself stands: {@see VALUES_32} says which of the two answers each value takes,
+     * and the ones that take the object are answered by whatever HOLDS it ({@see walkList()},
+     * {@see walkMap()}), since nothing can remove itself from its own container.
+     *
+     * @param  array<string, mixed>  $node
+     * @param  list<Diagnostic>  $diagnostics
+     * @return array<string, mixed>
+     */
+    private function dropValues32(string $kind, array $node, string $pointer, array &$diagnostics): array
+    {
+        foreach (self::VALUES_32[$kind] ?? [] as $member => $values) {
+            $stated = $node[$member] ?? null;
+
+            if (! is_string($stated) || ($values[$stated][0] ?? null) !== self::DROP_MEMBER) {
+                continue;
+            }
+
+            unset($node[$member]);
+            $diagnostics[] = new Diagnostic(
+                severity: Severity::Warning,
+                code: 'downlevel.value-not-in-3.1',
+                message: sprintf(
+                    'Dropped the OpenAPI 3.2 `%s: %s` value (%s), which OpenAPI 3.1 and below do not define.',
+                    $member,
+                    $stated,
+                    JsonPointer::child($pointer, $member),
+                ),
+                help: $values[$stated][1],
+            );
+        }
+
+        return $node;
+    }
+
+    /**
      * @param  array<mixed, mixed>  $list
-     * @param  array<string, mixed>  $shared
+     * @param  PrePass  $read
      * @param  list<Diagnostic>  $diagnostics
      * @return list<mixed>
      */
-    private function walkList(string $kind, array $list, string $pointer, array $shared, array &$diagnostics): array
+    private function walkList(string $kind, array $list, string $pointer, array $read, array &$diagnostics): array
     {
         $out = [];
 
         foreach (array_values($list) as $index => $item) {
-            $out[] = is_array($item)
-                ? $this->walkObject($kind, Arr::stringKeyed($item), JsonPointer::child($pointer, (string) $index), $shared, $diagnostics)
-                : $item;
+            if (! is_array($item)) {
+                $out[] = $item;
+
+                continue;
+            }
+
+            $item = Arr::stringKeyed($item);
+            $child = JsonPointer::child($pointer, (string) $index);
+
+            if ($kind === self::PARAMETER && $this->parameterIsDropped($item, $read, $child, $diagnostics)) {
+                continue;
+            }
+
+            $out[] = $this->walkObject($kind, $item, $child, $read, $diagnostics);
         }
 
         return $out;
     }
 
     /**
+     * Whether one member of a parameter list has to go: it states a value 3.1 has no word for, or it is a
+     * `$ref` naming a shared parameter that does. Only the first warns — a shared parameter is reported
+     * once where it is DEFINED ({@see walkMap()}), the way a dropped security scheme is, rather than again
+     * at every use site.
+     *
+     * @param  array<string, mixed>  $parameter
+     * @param  PrePass  $read
+     * @param  list<Diagnostic>  $diagnostics
+     */
+    private function parameterIsDropped(array $parameter, array $read, string $pointer, array &$diagnostics): bool
+    {
+        $ref = $parameter['$ref'] ?? null;
+
+        if (is_string($ref) && str_starts_with($ref, self::SHARED_PARAMETER_REF)) {
+            return isset($read['parameters'][substr($ref, strlen(self::SHARED_PARAMETER_REF))]);
+        }
+
+        $loss = $this->inexpressibleValue(self::PARAMETER, $parameter, self::DROP_NODE);
+
+        if ($loss === null) {
+            return false;
+        }
+
+        $diagnostics[] = new Diagnostic(
+            severity: Severity::Warning,
+            code: 'downlevel.value-not-in-3.1',
+            message: sprintf(
+                'Dropped the parameter `%s` (%s), whose OpenAPI 3.2 `%s: %s` value OpenAPI 3.1 and below do not define.',
+                is_string($parameter['name'] ?? null) ? $parameter['name'] : '(unnamed)',
+                $pointer,
+                $loss['member'],
+                $loss['value'],
+            ),
+            help: self::VALUES_32[self::PARAMETER][$loss['member']][$loss['value']][1],
+        );
+
+        return true;
+    }
+
+    /**
      * A map keyed by names the application chose. `$callbacks` says its members are themselves maps of
-     * Path Items rather than objects of `$kind`.
+     * Path Items rather than objects of `$kind`. The one map a member can leave entirely is
+     * `components.parameters`: a shared parameter 3.1 cannot express is reported here, where it is
+     * defined, and {@see parameterIsDropped()} takes the `$ref`s that named it.
      *
      * @param  array<mixed, mixed>  $map
-     * @param  array<string, mixed>  $shared
+     * @param  PrePass  $read
      * @param  list<Diagnostic>  $diagnostics
      * @return array<string, mixed>
      */
-    private function walkMap(string $kind, array $map, string $pointer, array $shared, array &$diagnostics, bool $callbacks = false): array
+    private function walkMap(string $kind, array $map, string $pointer, array $read, array &$diagnostics, bool $callbacks = false): array
     {
         if ($kind === self::MEDIA_TYPE) {
-            return $this->walkMediaTypeMap($map, $pointer, $shared, $diagnostics);
+            return $this->walkMediaTypeMap($map, $pointer, $read, $diagnostics);
         }
 
         $out = [];
@@ -515,12 +760,52 @@ final readonly class OpenApi31DownlevelEmitter implements ReportingEmitter
                 continue;
             }
 
+            if ($kind === self::PARAMETER && isset($read['parameters'][$name])) {
+                $this->reportDroppedParameter($name, $read['parameters'][$name], $child, $diagnostics);
+
+                continue;
+            }
+
             $out[$name] = $callbacks
-                ? $this->downlevelPathMap($member, $child, $shared, $diagnostics)
-                : $this->walkObject($kind, Arr::stringKeyed($member), $child, $shared, $diagnostics);
+                ? $this->downlevelPathMap($member, $child, $read, $diagnostics)
+                : $this->walkObject($kind, Arr::stringKeyed($member), $child, $read, $diagnostics);
         }
 
         return $out;
+    }
+
+    /**
+     * One shared parameter leaving the document, said once. `through` is the `$ref` it resolved along when
+     * the parameter itself states nothing 3.1 objects to and the component it points at does.
+     *
+     * @param  ValueLoss  $loss
+     * @param  list<Diagnostic>  $diagnostics
+     */
+    private function reportDroppedParameter(string $name, array $loss, string $pointer, array &$diagnostics): void
+    {
+        $through = $loss['through'];
+
+        $diagnostics[] = new Diagnostic(
+            severity: Severity::Warning,
+            code: 'downlevel.value-not-in-3.1',
+            message: $through === null
+                ? sprintf(
+                    'Dropped the shared parameter `%s` (%s), whose OpenAPI 3.2 `%s: %s` value OpenAPI 3.1 and below do not define, along with every `$ref` naming it.',
+                    $name,
+                    $pointer,
+                    $loss['member'],
+                    $loss['value'],
+                )
+                : sprintf(
+                    'Dropped the shared parameter `%s` (%s), which resolves through `%s` to an OpenAPI 3.2 `%s: %s` value OpenAPI 3.1 and below do not define, along with every `$ref` naming it.',
+                    $name,
+                    $pointer,
+                    $through,
+                    $loss['member'],
+                    $loss['value'],
+                ),
+            help: self::VALUES_32[self::PARAMETER][$loss['member']][$loss['value']][1],
+        );
     }
 
     /**
@@ -529,11 +814,11 @@ final readonly class OpenApi31DownlevelEmitter implements ReportingEmitter
      * reach; one that resolves to nothing is left as written rather than replaced with a guess.
      *
      * @param  array<mixed, mixed>  $map
-     * @param  array<string, mixed>  $shared
+     * @param  PrePass  $read
      * @param  list<Diagnostic>  $diagnostics
      * @return array<string, mixed>
      */
-    private function walkMediaTypeMap(array $map, string $pointer, array $shared, array &$diagnostics): array
+    private function walkMediaTypeMap(array $map, string $pointer, array $read, array &$diagnostics): array
     {
         $out = [];
 
@@ -551,14 +836,14 @@ final readonly class OpenApi31DownlevelEmitter implements ReportingEmitter
             $ref = $member['$ref'] ?? null;
 
             if (is_string($ref) && str_starts_with($ref, self::SHARED_MEDIA_TYPE_REF)) {
-                $target = $shared[substr($ref, strlen(self::SHARED_MEDIA_TYPE_REF))] ?? null;
+                $target = $read['mediaTypes'][substr($ref, strlen(self::SHARED_MEDIA_TYPE_REF))] ?? null;
 
                 if (is_array($target)) {
                     $member = Arr::stringKeyed($target);
                 }
             }
 
-            $out[$name] = $this->walkObject(self::MEDIA_TYPE, $member, $child, $shared, $diagnostics);
+            $out[$name] = $this->walkObject(self::MEDIA_TYPE, $member, $child, $read, $diagnostics);
         }
 
         return $out;

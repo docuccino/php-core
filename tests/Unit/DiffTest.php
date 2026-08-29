@@ -386,6 +386,28 @@ it('classifies a removed enum value as breaking', function (): void {
     expect($changes['schema.enum-value-removed']->breaking)->toBeTrue();
 });
 
+it('classifies an enum introduced as breaking on both sides', function (): void {
+    // A closed set arriving where there was none rejects every value outside it, so a writer's valid
+    // request stops being accepted; on a response the `request` flag can under-state the audience — a
+    // shared component serves both directions — and standing this down green-lights exactly that.
+    $old = diffBase();
+    $new = $old;
+    $new['paths']['/api/v1/forms/{id}']['get']['parameters'][0]['schema']['enum'] = [1, 2, 3];
+    $new['paths']['/api/v1/forms/{id}']['get']['responses']['200']['content']['application/json']['schema']['properties']['title']['enum'] = ['a', 'b'];
+
+    $paths = [];
+    foreach (diffOf($old, $new)->changes as $change) {
+        if ($change->code === 'schema.enum-added') {
+            $paths[$change->path] = $change->breaking;
+        }
+    }
+
+    expect($paths)->toBe([
+        'GET /api/v1/forms/{id} parameters path:id schema.enum' => true,
+        'GET /api/v1/forms/{id} responses 200 application/json schema.properties.title.enum' => true,
+    ]);
+});
+
 it('classifies a response enum value added as breaking', function (): void {
     $old = diffBase();
     $old['paths']['/api/v1/forms/{id}']['get']['responses']['200']['content']['application/json']['schema']['properties']['status'] = ['type' => 'string', 'enum' => ['draft', 'published']];
@@ -628,6 +650,26 @@ it('is insensitive to security scheme-map key order', function (): void {
     $new['paths']['/api/v1/forms/{id}']['get']['security'] = [['oauth2' => ['read'], 'apiKey' => []]];
 
     expect(diffOf($old, $new)->isEmpty())->toBeTrue();
+});
+
+it('tells two requirements apart when JSON cannot spell either of them', function (): void {
+    // A scope name that is not valid UTF-8 makes `json_encode()` answer false, and a fallback that
+    // gave every un-encodable requirement one key would read the dropped scope as still present.
+    $wide = ['oauth2' => ["read-\xB1"]];
+    $narrow = ['oauth2' => ["write-\xB1"]];
+
+    $old = diffBase();
+    $old['paths']['/api/v1/forms/{id}']['get']['security'] = [$wide, $narrow];
+    $new = diffBase();
+    $new['paths']['/api/v1/forms/{id}']['get']['security'] = [$wide];
+
+    $changes = changesByCode(diffOf($old, $new));
+
+    expect($changes)->toHaveKey('operation.security-removed')
+        ->and($changes['operation.security-removed']->fields[0]->old)->toBe($narrow)
+        ->and($changes)->not->toHaveKey('operation.security-added')
+        // …and the two are still ONE requirement each: neither side reports a change against itself.
+        ->and(diffOf($old, $old)->isEmpty())->toBeTrue();
 });
 
 it('classifies a property removed from a response schema as breaking', function (): void {
@@ -2883,24 +2925,29 @@ function annotationKeywordEdits(): array
 
 /**
  * Every keyword that lives in {@see SchemaKeywords}'s SUPERSESSION annotations and deliberately not in
- * its annotation-only set, with an edit for each. The reasons are the ones stated there; the test below
- * holds this list to the difference between the two sets, so a new annotation cannot land in neither.
+ * its annotation-only set, with an edit for each and the codes that edit reports. The reasons are the
+ * ones stated there; the test below holds this list to the difference between the two sets, so a new
+ * annotation cannot land in neither.
  *
- * @return array<string, array{0: string, 1: mixed, 2: mixed}>
+ * @return array<string, array{0: string, 1: mixed, 2: mixed, 3: list<string>}>
  */
 function contractBearingKeywordEdits(): array
 {
     return [
-        'default' => ['default', 'draft', 'published'],
-        'deprecated' => ['deprecated', false, true],
-        'readOnly' => ['readOnly', false, true],
-        'writeOnly' => ['writeOnly', false, true],
-        '$defs' => ['$defs', ['Inner' => ['type' => 'string']], ['Inner' => ['type' => 'integer']]],
-        'definitions' => ['definitions', ['Inner' => ['type' => 'string']], ['Inner' => ['type' => 'integer']]],
-        '$id' => ['$id', 'https://forms.test/schemas/a', 'https://forms.test/schemas/b'],
-        '$anchor' => ['$anchor', 'formA', 'formB'],
-        '$schema' => ['$schema', 'https://json-schema.org/draft/2020-12/schema', 'http://json-schema.org/draft-07/schema#'],
-        'x-docuccino' => ['x-docuccino', ['id' => 'sch:v1:aaaaaaaaaaaaaaaa'], ['id' => 'sch:v1:bbbbbbbbbbbbbbbb']],
+        'default' => ['default', 'draft', 'published', []],
+        'deprecated' => ['deprecated', false, true, []],
+        'readOnly' => ['readOnly', false, true, []],
+        'writeOnly' => ['writeOnly', false, true, []],
+        // The two definition stores ARE compared, conditionally: a `$ref` can name any member, so a
+        // member's polarity is whatever the refs naming it are worth ({@see SchemaPolarity}).
+        '$defs' => ['$defs', ['Inner' => ['type' => 'string']], ['Inner' => ['type' => 'integer']], ['schema.type-changed']],
+        'definitions' => ['definitions', ['Inner' => ['type' => 'string']], ['Inner' => ['type' => 'integer']], ['schema.type-changed']],
+        // A name a `$ref` may resolve, and the dialect the keywords beside it are written in — read by
+        // {@see SchemaReading}, which is where their reasons are stated.
+        '$id' => ['$id', 'https://forms.test/schemas/a', 'https://forms.test/schemas/b', ['schema.identity-changed']],
+        '$anchor' => ['$anchor', 'formA', 'formB', ['schema.identity-changed']],
+        '$schema' => ['$schema', 'https://json-schema.org/draft/2020-12/schema', 'http://json-schema.org/draft-07/schema#', ['schema.dialect-changed']],
+        'x-docuccino' => ['x-docuccino', ['id' => 'sch:v1:aaaaaaaaaaaaaaaa'], ['id' => 'sch:v1:bbbbbbbbbbbbbbbb'], []],
     ];
 }
 
@@ -2920,12 +2967,14 @@ it('reports an annotation keyword as a non-breaking change that gates under no p
     }
 })->with(annotationKeywordEdits());
 
-it('never classifies a contract-bearing keyword as an annotation', function (string $keyword, mixed $before, mixed $after): void {
-    // Nothing compares any of these today, so the changeset is empty — pinned as `[]` rather than as
-    // "not an annotation", because that is the fact a comparator arriving for one of them would move,
-    // and a comparator that classed it as an annotation would be the mistake this row exists to catch.
+it('never classifies a contract-bearing keyword as an annotation', function (string $keyword, mixed $before, mixed $after, array $codes): void {
+    // What each edit reports is pinned rather than only "not an annotation", because that is the fact a
+    // comparator arriving for one of them moves — and a comparator that classed one as an annotation
+    // would be the mistake this row exists to catch. `[]` means the keyword is still compared by
+    // nothing; whatever the row says, `schema.annotation-changed` is the one code it may never be.
     expect(SchemaKeywords::isAnnotationOnly($keyword))->toBeFalse()
-        ->and(diffCodes(diffOfSchemaKeyword($keyword, $before, $after)))->toBe([]);
+        ->and(diffCodes(diffOfSchemaKeyword($keyword, $before, $after)))->toBe($codes)
+        ->and($codes)->not->toContain('schema.annotation-changed');
 })->with(contractBearingKeywordEdits());
 
 /**
