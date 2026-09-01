@@ -189,7 +189,7 @@ final class Assembler
 
         $doc = $this->stampContentHash($doc);
 
-        return new AssemblyResult($doc, $diagnostics);
+        return new AssemblyResult($doc, $diagnostics, $this->schemaSources($components));
     }
 
     /**
@@ -572,6 +572,27 @@ final class Assembler
         $doc['components'] = $components;
 
         return $doc;
+    }
+
+    /**
+     * Which class each published component schema was recovered from, keyed by the node identity the
+     * document carries — {@see AssemblyResult::$schemaSources}.
+     *
+     * Read off the finished registry rather than as each route registers, which is what makes it the
+     * same on a warm cache hit: a restored fragment re-registers its components under the identities it
+     * was cached with, so the map is a function of the build's components and not of what ran.
+     *
+     * @return array<string, string>
+     */
+    private function schemaSources(ComponentRegistry $components): array
+    {
+        $sources = [];
+
+        foreach ($components->schemaIds() as $publishedId) {
+            $sources[$this->identity->namedSchemaId($publishedId)] = $publishedId;
+        }
+
+        return $sources;
     }
 
     /**

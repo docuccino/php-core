@@ -453,16 +453,28 @@ final readonly class DocumentConfig
     }
 
     /**
-     * The directory the API version-change classes are discovered under, from
-     * `api_version.changes.dir`, or null when the document names none — in which case the version
-     * publishes the head shape. Confined against the app base path by the adapter, the same as
-     * {@see webhooksDir()}.
+     * The directories the API version-change classes are discovered under, from `api_version.changes`
+     * — empty when the document names none, in which case the version publishes the head shape.
+     *
+     * A LIST of glob patterns rather than one directory, read exactly as {@see $overlays} is: a
+     * modular application keeps code in `app/` and in `modules/<Name>/`, so its change classes belong
+     * beside the modules that own them and `modules/*` has to be spellable. The adapter resolves,
+     * globs and confines each entry against the app base path ({@see webhooksDir()} is the
+     * single-directory shape one key over).
+     *
+     * Order is the order they are configured in — the order their author reads them in, and the one
+     * the scaffold command writes into the first of. What a change class OUTRANKS is never decided
+     * here: the collector sorts the whole set by version and class name, so which directory a class
+     * came out of cannot move it.
+     *
+     * @return list<string>
      */
-    public function apiVersionChangesDir(): ?string
+    public function apiVersionChangeDirs(): array
     {
-        $changes = Hydrate::map($this->apiVersionConfig()['changes'] ?? null);
-
-        return self::configuredPath($changes['dir'] ?? null);
+        return array_values(array_filter(
+            Hydrate::stringList($this->apiVersionConfig()['changes'] ?? null),
+            static fn (string $pattern): bool => $pattern !== '' && ConfinedPath::holdable($pattern) !== null,
+        ));
     }
 
     /**

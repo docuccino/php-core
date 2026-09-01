@@ -17,10 +17,15 @@ final readonly class GenerationResult
 {
     /**
      * @param  list<Diagnostic>  $diagnostics
+     * @param  array<string, string>  $schemaSources  {@see AssemblyResult::$schemaSources} — carried
+     *                                                through because the emitted document keeps node
+     *                                                ids and nothing else, so a reader that has to name
+     *                                                the class behind a schema has no other way back
      */
     public function __construct(
         public UirDocument $document,
         public array $diagnostics = [],
+        public array $schemaSources = [],
     ) {}
 
     public function has(Severity $severity): bool
