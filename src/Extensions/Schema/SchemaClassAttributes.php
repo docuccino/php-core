@@ -32,6 +32,10 @@ use Docuccino\Attributes\Summary;
 use Docuccino\Attributes\Unauthenticated;
 use Docuccino\Attributes\Versioning\ApiVersionChange;
 use Docuccino\Attributes\Versioning\AppliesTo;
+use Docuccino\Attributes\Versioning\MadeRequestFieldOptional;
+use Docuccino\Attributes\Versioning\MadeResponseFieldOptional;
+use Docuccino\Attributes\Versioning\MadeResponseFieldRequired;
+use Docuccino\Attributes\Versioning\RemovedResponseField;
 use Docuccino\Attributes\Versioning\RenamedResponseField;
 use Docuccino\Attributes\Webhook;
 use Docuccino\Core\Diagnostics\Diagnostic;
@@ -114,9 +118,13 @@ final class SchemaClassAttributes
         IgnoreResponse::class => 'on the action',
         InDocs::class => 'on the action',
         Internal::class => 'on the action',
+        MadeRequestFieldOptional::class => 'on a version-change class, beside its #[ApiVersionChange]',
+        MadeResponseFieldOptional::class => 'on a version-change class, beside its #[ApiVersionChange]',
+        MadeResponseFieldRequired::class => 'on a version-change class, beside its #[ApiVersionChange]',
         OptionallyAuthenticated::class => 'on the action',
         PathParameter::class => 'on the action',
         QueryParameter::class => 'on the action, or on a custom filter class',
+        RemovedResponseField::class => 'on a version-change class, beside its #[ApiVersionChange]',
         RenamedResponseField::class => 'on a version-change class, beside its #[ApiVersionChange]',
         Response::class => 'on the action',
         ResponseHeader::class => 'on the action',

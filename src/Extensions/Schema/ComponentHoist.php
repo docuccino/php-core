@@ -52,7 +52,7 @@ final class ComponentHoist
      */
     public function hoist(SchemaContext $context, string $fqcn, callable $build, ?string $schemaName = null, ?string $schemaId = null): SchemaResult
     {
-        $id = $schemaId ?? SchemaIdentity::id($fqcn) ?? $fqcn;
+        $id = $schemaId ?? SchemaIdentity::publishedId($fqcn);
         $name = $schemaName ?? SchemaIdentity::name($fqcn) ?? Fqcn::short($fqcn);
 
         // Adding a `#[Description]` has to invalidate the fragment that published without one.

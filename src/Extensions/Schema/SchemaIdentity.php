@@ -156,6 +156,23 @@ final class SchemaIdentity
         return null;
     }
 
+    /**
+     * The diff identity a class's schema is published under: the `#[SchemaId]` it pins, or its own
+     * name. `$facet` qualifies a shape that is not the class's plain one — `request` for the body a
+     * client SENDS, and the pagination envelopes over it — so a class published on both sides of the
+     * wire never dedupes one shape into the other.
+     *
+     * One mint, because the qualifier is a fact several producers and every reader have to agree on:
+     * a version change resolving `Foo#request` where the recovery chain wrote something else would
+     * find no schema and report that the document publishes none.
+     */
+    public static function publishedId(string $fqcn, string $facet = ''): string
+    {
+        $id = self::id($fqcn) ?? $fqcn;
+
+        return $facet === '' ? $id : $id.'#'.$facet;
+    }
+
     /** The `#[SchemaId]` identity, else null (caller defaults to the FQCN). */
     public static function id(string $fqcn): ?string
     {

@@ -81,7 +81,7 @@ final class EnumSchema implements TypeToSchema
         // pin, so it stays inline, as does everything when the policy is off.
         if ($context->representation()->enumComponents && enum_exists($type->fqcn)) {
             $name = SchemaIdentity::name($type->fqcn) ?? Fqcn::short($type->fqcn);
-            $id = SchemaIdentity::id($type->fqcn) ?? $type->fqcn;
+            $id = SchemaIdentity::publishedId($type->fqcn);
 
             return new SchemaResult($context->reference($name, $schema, $id), 0.95);
         }

@@ -2,8 +2,10 @@
 
 declare(strict_types=1);
 
+use Docuccino\Core\Extensions\Schema\SchemaIdentity;
 use Docuccino\Core\Identity\Base32;
 use Docuccino\Core\Identity\IdentityGenerator;
+use Docuccino\Core\Tests\Fixtures\PinnedRequestClass;
 
 beforeEach(function (): void {
     $this->ids = new IdentityGenerator;
@@ -209,3 +211,28 @@ it('derives a published-parameter id that breaks on document, location and name'
         ->and($base)->not->toBe($this->ids->parameterId('doc:v2026-06-01', 'header', 'X-Api-Version'))
         ->and($base)->toStartWith('par:v1:');
 });
+
+/*
+ * The diff identity a class's schema is published under, and the qualifier that tells one of its
+ * published shapes from another. It is one mint because several producers write these ids and the
+ * version-change vocabulary READS them back: a reader with its own copy of the qualifier finds nothing
+ * the day a producer's copy moves, and reports that the document publishes no such schema.
+ *
+ * Stated here rather than asked of the code that mints it — a guard that asks the code for its own
+ * rule agrees with whatever the code does.
+ */
+it('publishes a class under the identity it pinned, or under its own name', function (): void {
+    expect(SchemaIdentity::publishedId(PinnedRequestClass::class))->toBe('thing.v1')
+        ->and(SchemaIdentity::publishedId(IdentityTestUnpinnedClass::class))->toBe(IdentityTestUnpinnedClass::class);
+});
+
+it('qualifies a shape that is not the class plain, and only that one', function (): void {
+    expect(SchemaIdentity::publishedId(PinnedRequestClass::class, 'request'))->toBe('thing.v1#request')
+        ->and(SchemaIdentity::publishedId(IdentityTestUnpinnedClass::class, 'request'))
+        ->toBe(IdentityTestUnpinnedClass::class.'#request')
+        ->and(SchemaIdentity::publishedId(PinnedRequestClass::class, ''))
+        ->toBe(SchemaIdentity::publishedId(PinnedRequestClass::class));
+});
+
+/** A class that pins nothing, so its identity is its own name. */
+final class IdentityTestUnpinnedClass {}

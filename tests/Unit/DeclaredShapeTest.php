@@ -310,8 +310,8 @@ it('keeps the subschema keyword set in one place, so no reader can carry a stale
         // Which applicators the example rewrite can walk a value in step with — a fact about that
         // walk, not about the position. The complement is DERIVED from the table rather than listed
         // beside it, so a keyword added there is undecidable until somebody teaches the walk to read
-        // it; RenamedFieldExamplesTest holds the derivation against the table in both directions.
-        'core/src/Document/RenamedFieldExamples.php::RESOLVED',
+        // it; ChangedFieldExamplesTest holds the derivation against the table in both directions.
+        'core/src/Document/ChangedFieldExamples.php::RESOLVED',
     ];
 
     $positioned = [

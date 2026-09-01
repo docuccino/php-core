@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-use Docuccino\Core\Document\RenamedFieldExamples;
+use Docuccino\Core\Document\ChangedFieldExamples;
 use Docuccino\Core\Draft\SchemaKeywords;
 
 /*
@@ -44,7 +44,7 @@ function renamedDocument(array $extra = []): array
  */
 function renameFields(array $doc): array
 {
-    return RenamedFieldExamples::inDocument($doc, RENAMED_FIELD_ID, 'name', 'title');
+    return ChangedFieldExamples::inDocument($doc, RENAMED_FIELD_ID, 'name', 'title');
 }
 
 it('rewrites a media type example over the renamed component', function (): void {
@@ -282,7 +282,7 @@ it('treats every subschema keyword it does not read as undecidable', function ()
     ];
 
     expect(count($positioned))->toBeGreaterThan(15)
-        ->and(RenamedFieldExamples::undecidable())->toEqualCanonicalizing(array_values(array_diff($positioned, $read)));
+        ->and(ChangedFieldExamples::undecidable())->toEqualCanonicalizing(array_values(array_diff($positioned, $read)));
 });
 
 it('drops an example where an undecidable keyword stands over the renamed schema', function (string $keyword): void {
@@ -303,4 +303,4 @@ it('drops an example where an undecidable keyword stands over the renamed schema
 
     expect($doc['paths']['/forms']['get']['responses']['200']['content']['application/json'])->not->toHaveKey('example')
         ->and($dropped)->toHaveCount(1);
-})->with(RenamedFieldExamples::undecidable());
+})->with(ChangedFieldExamples::undecidable());

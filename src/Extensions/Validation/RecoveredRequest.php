@@ -256,7 +256,7 @@ final class RecoveredRequest
         // on both sides never dedupes a rules-shape into a property-shape by identity alone —
         // structurally-equal shapes still collapse via the registry's structural dedupe. It honours
         // `#[SchemaId]` like the response side does, so a pinned class stays rename-stable on both.
-        $id = (SchemaIdentity::id($sourceClass) ?? $sourceClass).'#request';
+        $id = SchemaIdentity::publishedId($sourceClass, 'request');
 
         return $context->components->reference($name, $result->schema, $id);
     }

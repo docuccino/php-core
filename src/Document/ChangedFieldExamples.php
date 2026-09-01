@@ -8,8 +8,14 @@ use Docuccino\Core\Contract\Pointer;
 use Docuccino\Core\Draft\SchemaKeywords;
 
 /**
- * Rewrites the examples a document publishes when one schema's property is renamed, so the examples go
- * on saying what the schemas beside them say.
+ * Keeps the examples a document publishes in step with a schema whose MEMBERS a version change moved,
+ * so the examples go on saying what the schemas beside them say.
+ *
+ * Two changes, one walk, because locating the examples an edit reaches is the whole of the work and it
+ * is identical either way. A RENAME rewrites the key it moved. A field put back and DEMANDED — the
+ * shape `#[RemovedResponseField(required: true)]` publishes — rewrites nothing: no example carries a
+ * field that is not in the code, so the only question is whether the example can still be published,
+ * and one lacking a required member cannot.
  *
  * A schema rewritten in place takes its examples with it or the document contradicts itself: the schema
  * declares one field name and the example a consumer copies carries another, which is the one document
@@ -31,8 +37,10 @@ use Docuccino\Core\Draft\SchemaKeywords;
  * pointer itself.
  *
  * Dropping stays narrow two ways: a site is only walked at all where the schema beside it REACHES the
- * renamed schema, and an unsettled walk over a value that never mentions the renamed field is left
- * alone, because no rewrite of it was owed.
+ * changed schema, and an unsettled walk over a value that never mentions the renamed field is left
+ * alone, because no rewrite of it was owed. The second half is a rename's alone — a required member is
+ * missed by its ABSENCE, so there is no name in the value to look for, and an unsettled walk over a
+ * schema that reaches the changed one is exactly the case that cannot be shown to be publishable.
  *
  * The walk descends by POSITION rather than by key name — the OAS structure down to a media type, then
  * {@see SchemaKeywords} inside a schema — so an example is never confused with a property that happens
@@ -47,7 +55,7 @@ use Docuccino\Core\Draft\SchemaKeywords;
  *
  * @internal
  */
-final class RenamedFieldExamples
+final class ChangedFieldExamples
 {
     /**
      * The subschema keywords this walk resolves. Everything else {@see SchemaKeywords} knows is
@@ -89,6 +97,7 @@ final class RenamedFieldExamples
         private readonly string $id,
         private readonly string $from,
         private readonly string $to,
+        private readonly bool $requiring = false,
     ) {
         $this->reaches = DocumentGraph::componentsReaching($doc, $id);
     }
@@ -120,6 +129,37 @@ final class RenamedFieldExamples
     public static function inOperation(array $operation, array $doc, string $id, string $from, string $to, array $keys): array
     {
         $walk = new self($doc, $id, $from, $to);
+
+        return [$walk->operation($operation, $keys), $walk->dropped];
+    }
+
+    /**
+     * Every example the document publishes, held to a schema that has just been given a member it
+     * DEMANDS. Nothing is rewritten: an example carrying the field is already the shape this version
+     * publishes, and one that does not is dropped, because a consumer copying it would send a body the
+     * document itself refuses.
+     *
+     * @param  array<string, mixed>  $doc
+     * @return array{0: array<string, mixed>, 1: list<string>} the document, and the pointers it dropped
+     */
+    public static function requiringInDocument(array $doc, string $id, string $field): array
+    {
+        $walk = new self($doc, $id, '', $field, requiring: true);
+
+        return [$walk->document($doc), $walk->dropped];
+    }
+
+    /**
+     * The same over ONE operation, for a scoped change giving it a private copy of the schema.
+     *
+     * @param  array<array-key, mixed>  $operation
+     * @param  array<string, mixed>  $doc
+     * @param  list<string>  $keys
+     * @return array{0: array<array-key, mixed>, 1: list<string>}
+     */
+    public static function requiringInOperation(array $operation, array $doc, string $id, string $field, array $keys): array
+    {
+        $walk = new self($doc, $id, '', $field, requiring: true);
 
         return [$walk->operation($operation, $keys), $walk->dropped];
     }
@@ -453,9 +493,11 @@ final class RenamedFieldExamples
     }
 
     /**
-     * One example, held to the schema beside it. Dropped where the walk did not settle AND the value
-     * mentions the field that moved — an unsettled walk over a value that never names it owed no
-     * rewrite, and dropping it would cost a reader an example to correct nothing.
+     * One example, held to the schema beside it. A rename drops it where the walk did not settle AND
+     * the value mentions the field that moved — an unsettled walk over a value that never names it owed
+     * no rewrite, and dropping it would cost a reader an example to correct nothing. A newly required
+     * member has no such let-off: it is missed by absence, so an unsettled walk is exactly the case
+     * that cannot be shown to satisfy the schema.
      *
      * @param  list<string>  $keys
      * @return array{0: mixed, 1: bool} the value, and whether it may still be published
@@ -464,7 +506,7 @@ final class RenamedFieldExamples
     {
         [$rewritten, $settled] = $this->value($value, $schema, []);
 
-        if ($settled || ! $this->mentions($value)) {
+        if ($settled || (! $this->requiring && ! $this->mentions($value))) {
             return [$settled ? $rewritten : $value, true];
         }
 
@@ -506,9 +548,9 @@ final class RenamedFieldExamples
             return [$value, false];
         }
 
-        $renameHere = self::carriesId($applying, $this->id);
+        $editHere = self::carriesId($applying, $this->id);
 
-        if ($renameHere && $list) {
+        if ($editHere && $list) {
             return [$value, false];
         }
 
@@ -535,7 +577,17 @@ final class RenamedFieldExamples
             $rewritten[$key] = $child;
         }
 
-        if (! $renameHere || ! array_key_exists($this->to, $rewritten)) {
+        if (! $editHere) {
+            return [$rewritten, true];
+        }
+
+        if ($this->requiring) {
+            // The version puts the field back and demands it, so an object standing where the changed
+            // schema governs is publishable only if it carries one.
+            return [$rewritten, array_key_exists($this->to, $rewritten)];
+        }
+
+        if (! array_key_exists($this->to, $rewritten)) {
             return [$rewritten, true];
         }
 
