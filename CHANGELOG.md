@@ -7,6 +7,13 @@ User-facing changes to `docuccino/core` — features, fixes, performance work an
 taken from the commit messages scoped `core`. Entries begin after v0.1.2; older history is in
 the [repository](https://github.com/docuccino/docuccino) git log.
 
+## v0.13.1
+
+### Bug fixes
+
+- mint a class schema identity in one place, facet and all ([#333](https://github.com/docuccino/docuccino/pull/333))
+- key a cached fragment on the document whose identities it carries ([#326](https://github.com/docuccino/docuccino/pull/326))
+
 ## v0.13.0
 
 ### Breaking changes
