@@ -48,10 +48,9 @@ final readonly class DocumentConfig
         // Laravel's `route:list --except-vendor`.
         public bool $includeVendor = false,
         public ?string $authMiddleware = null,
+        // Whether the document publishes error responses the application did not state itself:
+        // 'default' (the framework's own shapes, plus the implicit ones) or 'none'.
         public string $errorResponses = 'none',
-        // How a 422 problem-details body models `errors`: 'map' (field → messages) or 'pointer-list'
-        // ({detail, pointer} objects, RFC 9457 style).
-        public string $errorsShape = 'map',
         public array $overlays = [],
         public string $onRouteError = 'skeleton',
         public array $security = [],

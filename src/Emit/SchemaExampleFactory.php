@@ -7,6 +7,7 @@ namespace Docuccino\Core\Emit;
 use Docuccino\Core\Canonical\Canonicalizer;
 use Docuccino\Core\Draft\SchemaKeywords;
 use Docuccino\Core\Support\Arr;
+use Docuccino\Core\Support\BoundedNumber;
 use Docuccino\Core\Support\FormatSamples;
 use Docuccino\Core\Support\JsonValue;
 use stdClass;
@@ -19,6 +20,7 @@ use stdClass;
  * is fixed in advance and never taken from encounter order: a map of `examples` picks its lowest key,
  * because JSON object order is not an authored fact, while `enum` and `oneOf` pick their first entry,
  * because a list's order IS authored and every other reader of the document shows the same branch.
+ * Where a schema states a value AND pins one, the pin wins ({@see stated()}).
  *
  * An empty object comes back as a {@see stdClass}, not `[]` ({@see JsonValue} for that convention). The
  * value is serialised into a JSON string for the collection, and an empty PHP array would render as
@@ -59,6 +61,13 @@ final readonly class SchemaExampleFactory
 {
     /** Deep enough for any real payload; past it a self-referential schema is the likelier reading. */
     private const int MAX_DEPTH = 8;
+
+    /**
+     * Where a bounded number starts from. ZERO, because this factory answers for a BARE `type: integer`
+     * too, where the seed is the whole answer and the neutral value is the one claiming least. The
+     * validated field's seed is 1 for the opposite reason — it never answers without a bound.
+     */
+    private const int NUMBER_SEED = 0;
 
     /**
      * @param  array<string, string>  $formatSamples  the document's configured samples, merged over
@@ -208,6 +217,14 @@ final readonly class SchemaExampleFactory
      */
     private function stated(array $schema): ?array
     {
+        // `const` outranks everything, an author's own `example` included: it is the one keyword that
+        // leaves a SINGLE legal value, so any other value stated beside it is one this very schema
+        // rejects. `enum` does not move up with it — it leaves several legal values, and an author's
+        // example is normally one of them and the better illustration for having been chosen.
+        if (array_key_exists('const', $schema)) {
+            return [$schema['const']];
+        }
+
         $illustration = $this->illustration($schema);
         if ($illustration !== null) {
             return $illustration;
@@ -215,10 +232,6 @@ final readonly class SchemaExampleFactory
 
         if (array_key_exists('default', $schema)) {
             return [$schema['default']];
-        }
-
-        if (array_key_exists('const', $schema)) {
-            return [$schema['const']];
         }
 
         if (isset($schema['enum']) && is_array($schema['enum']) && $schema['enum'] !== []) {
@@ -362,11 +375,17 @@ final readonly class SchemaExampleFactory
      */
     private function byType(array $schema, array $components, int $depth, array $stack): ?array
     {
-        return match ($this->type($schema)) {
+        $type = $this->type($schema);
+
+        return match ($type) {
             'object' => $this->object($schema, $components, $depth, $stack),
             'array' => $this->list($schema, $components, $depth, $stack),
             'string' => [$this->string($schema)],
-            'integer', 'number' => [$this->number($schema)],
+            // A bound both constrains a value and NAMES one, so the nearest legal number is what a
+            // consumer gets ({@see BoundedNumber} for the ladder, which every producer of a
+            // representative value reads). Bounds that cross admit nothing, and this factory has
+            // somewhere to put that: no value, so the position leaves the member out.
+            'integer', 'number' => BoundedNumber::nearest($schema, self::NUMBER_SEED, $type === 'integer'),
             'boolean' => [true],
             'null' => [null],
             default => [null],
@@ -674,16 +693,6 @@ final readonly class SchemaExampleFactory
         $format = $schema['format'] ?? null;
 
         return is_string($format) ? (FormatSamples::for($format, $this->formatSamples) ?? 'string') : 'string';
-    }
-
-    /**
-     * @param  array<string, mixed>  $schema
-     */
-    private function number(array $schema): int|float
-    {
-        $minimum = $schema['minimum'] ?? null;
-
-        return is_int($minimum) || is_float($minimum) ? $minimum : 0;
     }
 
     /**

@@ -325,7 +325,7 @@ final class Body
         // machine's filesystem into a committed artifact, and it would be wrong on every other one.
         $field = $binary && $mode === 'formdata'
             ? ['key' => $key, 'type' => 'file', 'src' => null]
-            : ['key' => $key, 'value' => self::scalar($value[0]), 'type' => 'text'];
+            : ['key' => $key, 'value' => Value::text($value[0]), 'type' => 'text'];
 
         if (! $required) {
             $field['disabled'] = true;
@@ -368,22 +368,5 @@ final class Body
             code: 'postman.body-media-type',
             message: sprintf('No example body can be built for `%s`, so requests using it are sent empty.', $base),
         );
-    }
-
-    private static function scalar(mixed $value): string
-    {
-        if (is_bool($value)) {
-            return $value ? 'true' : 'false';
-        }
-
-        if (is_int($value) || is_float($value)) {
-            return (string) $value;
-        }
-
-        if (is_string($value)) {
-            return $value;
-        }
-
-        return is_array($value) ? implode(',', array_map(self::scalar(...), $value)) : '';
     }
 }

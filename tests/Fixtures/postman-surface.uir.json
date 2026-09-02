@@ -110,7 +110,9 @@
               }
             }
           },
-          { "name": "sort", "in": "query", "schema": { "type": "array", "items": { "type": "string", "enum": ["name", "-name"] } } }
+          { "name": "sort", "in": "query", "schema": { "type": "array", "items": { "type": "string", "enum": ["name", "-name"] } } },
+          { "name": "page", "in": "query", "schema": { "type": "integer", "exclusiveMinimum": 0 } },
+          { "name": "sample", "in": "query", "schema": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1 } }
         ],
         "responses": {
           "200": {

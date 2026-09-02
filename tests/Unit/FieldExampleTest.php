@@ -145,6 +145,13 @@ it('derives an example from what the keywords pin, and nothing where they pin on
     'multipleOf' => [[kw('type', '"integer"'), kw('multipleOf', '5')], 5],
     'float minimum keeps its decimal' => [[kw('type', '"number"'), kw('minimum', '2.5')], 2.5],
     'integer type never publishes a float' => [[kw('type', '"integer"'), kw('multipleOf', '2'), kw('minimum', '3')], 4],
+    // A ceiling under the seed sends the STEP downward too, which is what the multiples below zero are
+    // there for: `4` is not a multiple of 10 and `10` is over the cap, and `0` is both a multiple of 10
+    // and at most 4 — so this rule set is satisfiable and used to publish nothing.
+    'a step whose only room is below the ceiling' => [[kw('type', '"integer"'), kw('multipleOf', '10'), kw('maximum', '4')], 0],
+    // An open range narrower than a whole unit, which a `decimal`-style rule pair states: any value
+    // strictly between 0 and 1 satisfies it, and half the room between them is one.
+    'an open range narrower than a unit' => [[kw('type', '"number"'), kw('exclusiveMinimum', '0'), kw('exclusiveMaximum', '1')], 0.5],
 
     // Lengths: a prefix of the filler at a length the bounds allow.
     'maxLength above the preferred length' => [[kw('type', '"string"'), kw('maxLength', '255')], 'example'],
@@ -173,7 +180,6 @@ it('derives an example from what the keywords pin, and nothing where they pin on
     'bounds that cross' => [[kw('type', '"integer"'), kw('minimum', '10'), kw('maximum', '5')], null],
     'lengths that cross' => [[kw('type', '"string"'), kw('minLength', '9'), kw('maxLength', '4')], null],
     'length floor above the cap' => [[kw('type', '"string"'), kw('minLength', '200')], null],
-    'multipleOf with no room under the ceiling' => [[kw('type', '"integer"'), kw('multipleOf', '10'), kw('maximum', '4')], null],
     'enum member the other keywords refuse' => [[kw('type', '"integer"'), kw('enum', '["nine"]')], null],
     'format sample the length bound refuses' => [[kw('type', '"string"'), kw('format', '"email"'), kw('maxLength', '4')], null],
 ]);

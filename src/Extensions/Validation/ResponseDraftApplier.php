@@ -27,9 +27,8 @@ final class ResponseDraftApplier
         $response = $operation->response($draft->status);
         $contribution = Contribution::forProducer($producer, $source);
 
-        // A mapper referencing a shared response component (the Problem Details preset's reusable
-        // `#/components/responses/Problem*`) freezes as a `$ref` — so the status entry becomes that
-        // reference rather than an inline body.
+        // A mapper referencing a shared `#/components/responses/*` component freezes as a `$ref` — so the
+        // status entry becomes that reference rather than an inline body.
         if ($frozen->ref !== null) {
             $response->setRef($frozen->ref, $contribution);
 
@@ -52,6 +51,12 @@ final class ResponseDraftApplier
         }
 
         foreach ($frozen->content ?? [] as $mediaType => $media) {
+            // Registered before its keywords are copied, because a producer that states a media type and
+            // constrains nothing under it — "a body of this type, shape unknown" — states an EMPTY schema,
+            // and a merge driven by the keyword loop alone would read that as nothing to say and drop the
+            // representation the producer had proved.
+            $response->content((string) $mediaType);
+
             $schema = is_array($media) && is_array($media['schema'] ?? null) ? $media['schema'] : [];
             foreach ($schema as $keyword => $value) {
                 if ($keyword === 'x-docuccino') {
@@ -61,8 +66,11 @@ final class ResponseDraftApplier
             }
 
             // Carry the media-type example (a sibling of `schema`) across the merge; first writer wins.
+            // Which of its members the producer FILLED rather than read travels with it: the frozen body
+            // alone cannot say, and a hop that dropped the set would leave a filled example looking like
+            // one every member of which was proven ({@see ResponseDraft::setExample()}).
             if (is_array($media) && array_key_exists('example', $media)) {
-                $response->setExample((string) $mediaType, $media['example']);
+                $response->setExample((string) $mediaType, $media['example'], $draft->examplePlaceholders((string) $mediaType));
             }
         }
     }

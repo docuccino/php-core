@@ -851,6 +851,30 @@ it('leaves every fabricated value alone when no sample is configured', function 
     expect($emitter->emit($document, (new EmitOptions)->withFormatSamples([])))->toBe($emitter->emit($document));
 });
 
+it('sends nothing where a document names a value no number can hold', function (): void {
+    // A collection carries every value as TEXT, so it is the one emitted format that stringifies before
+    // anything checks: `(string) INF` is `"INF"`, which no server parses, and it ships where the OpenAPI
+    // emitters refuse the same document outright. `1e400` is an ordinary number in JSON's grammar and
+    // `json_decode` saturates it, so a supplied document really can carry one.
+    $document = loadFixture('postman-surface.uir.json');
+    $parameters = $document['paths']['/accounts']['get']['parameters'];
+    $parameters[] = ['name' => 'over', 'in' => 'query', 'schema' => ['type' => 'number'], 'example' => INF];
+    $document['paths']['/accounts']['get']['parameters'] = $parameters;
+
+    $query = array_column(postmanLeaves(postman($document)['item'])['/Accounts/List accounts']['request']['url']['query'], 'value', 'key');
+
+    expect($query)->toHaveKey('over')
+        ->and($query['over'])->toBe('');
+
+    // The guard is executed rather than asserted: the same document with a finite example publishes it,
+    // so the empty value above is the non-finite reading and not a parameter nobody illustrated.
+    $parameters[count($parameters) - 1]['example'] = 7;
+    $document['paths']['/accounts']['get']['parameters'] = $parameters;
+
+    expect(array_column(postmanLeaves(postman($document)['item'])['/Accounts/List accounts']['request']['url']['query'], 'value', 'key')['over'])
+        ->toBe('7');
+});
+
 it('carries a deprecation in prose, which is the only place the format has for it', function (): void {
     $leaves = postmanLeaves(postman(loadFixture('kitchen-sink.uir.json'))['item']);
     $description = $leaves['/Widgets/Show a widget']['request']['description'];

@@ -107,6 +107,18 @@ function examplableBody(mixed $example, string $description = 'Forbidden'): arra
 }
 
 /**
+ * The same `{code, hint}` body illustrated by a producer that FILLED some of the example in — the members
+ * it named are the ones nothing but their declared type answered for, recorded the way
+ * `ResponseDraft::setExample()` freezes them.
+ */
+function filledBody(mixed $example, array $filled, string $description = 'Forbidden'): array
+{
+    $body = examplableBody($example, $description);
+
+    return ['x-docuccino' => ['facts' => ['examplePlaceholders' => ['application/problem+json' => $filled]]]] + $body;
+}
+
+/**
  * One status answered with TWO representations: the problem body a renderer already publishes as a
  * component, and an anonymous union of challenge shapes beside it. Neither is "the" body of the
  * response, which is what makes the response's own name no name for either of them.
@@ -547,7 +559,7 @@ it('hoists no shape from what is not worth sharing', function (string $case, arr
     ['a repeated response with no body', ['/a' => ['404' => ['description' => 'Not Found']], '/b' => ['404' => ['description' => 'Not Found']]]],
     // Success bodies are not this transformer's business.
     ['a repeated 200', ['/a' => ['200' => messageBody('OK')], '/b' => ['200' => messageBody('OK')]]],
-    // The Problem Details preset's own hoists are already shared.
+    // A response the producer already published as a component is shared by definition.
     ['responses that are already references', ['/a' => ['404' => ['$ref' => '#/components/responses/ProblemNotFound']], '/b' => ['404' => ['$ref' => '#/components/responses/ProblemNotFound']]]],
     // The component registry already hoisted this shape; pointing a pointer at a pointer buys nothing.
     ['schemas that are already references', [
@@ -2017,4 +2029,230 @@ it('is a no-op the second time it runs over a declared body', function (): void 
     ]);
 
     expect(transformedErrorDoc($once))->toBe($once);
+});
+
+it('publishes one illustration where a second says the same thing with a member filled in', function (): void {
+    // A member filled from its declared type is not a value the server sends — it is what the build shows
+    // where it read nothing. So an arm differing from another only where IT filled in illustrates no body
+    // the other does not already illustrate, and publishing both advertises two shapes for one contract:
+    // an SDK generator reads two examples as two variants, and the reader cannot tell which is real.
+    $doc = errorDoc([
+        '/a' => ['403' => filledBody(['code' => 'forbidden', 'hint' => 'string'], ['hint'])],
+        '/b' => ['403' => examplableBody(['code' => 'forbidden', 'hint' => 'Ask an administrator.'])],
+    ]);
+
+    // One illustration left, so there is no discriminator to mint and the singular member says it.
+    expect(exampleAt($doc, '/a', '403'))->toBe(['code' => 'forbidden', 'hint' => 'Ask an administrator.'])
+        ->and(examplesAt($doc, '/a', '403'))->toBe([])
+        ->and(array_keys($doc['components']['responses']))->toBe(['Error403']);
+});
+
+it('publishes both where two arms read two different values at one member', function (): void {
+    // The rule is subsumption, never a score. `/a` read one member more than `/b`, so "keep the most
+    // complete" would publish `/a` alone — and delete the only statement in the document that a
+    // `denied` code is a body this contract has. Two arms that READ two different values at one member
+    // are two variants, however much else one of them filled in.
+    $doc = errorDoc([
+        '/a' => ['403' => examplableBody(['code' => 'forbidden', 'hint' => 'Ask an administrator.'])],
+        '/b' => ['403' => filledBody(['code' => 'denied', 'hint' => 'string'], ['hint'])],
+    ]);
+
+    expect(exampleValuesAt($doc, '/a', '403'))->toBe([
+        ['code' => 'forbidden', 'hint' => 'Ask an administrator.'],
+        ['code' => 'denied', 'hint' => 'string'],
+    ])->and(exampleAt($doc, '/a', '403'))->toBeNull();
+});
+
+it('publishes both where the member they differ on is one neither of them filled', function (): void {
+    // Nothing was filled at `code`, so both arms read what they state and both statements are true of
+    // the contract. This is the case the existing merge already got right, and the collapse must not
+    // reach it.
+    $doc = errorDoc([
+        '/a' => ['403' => filledBody(['code' => 'forbidden', 'hint' => 'string'], ['hint'])],
+        '/b' => ['403' => filledBody(['code' => 'denied', 'hint' => 'string'], ['hint'])],
+    ]);
+
+    expect(exampleValuesAt($doc, '/a', '403'))->toBe([
+        ['code' => 'forbidden', 'hint' => 'string'],
+        ['code' => 'denied', 'hint' => 'string'],
+    ]);
+});
+
+it('publishes both where both arms filled the member they differ on', function (): void {
+    // Two fills of one member that came out differently mean the two arms were answering against
+    // different schemas for it, which is a difference in the contract rather than in the illustration.
+    $doc = errorDoc([
+        '/a' => ['403' => filledBody(['code' => 'forbidden', 'hint' => 'string'], ['hint'])],
+        '/b' => ['403' => filledBody(['code' => 'forbidden', 'hint' => 0], ['hint'])],
+    ]);
+
+    expect(exampleValuesAt($doc, '/a', '403'))->toHaveCount(2);
+});
+
+it('publishes both where one arm states a member the other does not', function (): void {
+    // Different member sets are different bodies, and no fill makes one of them the other: dropping the
+    // shorter would claim the contract always carries a member only one arm was seen to send.
+    $doc = errorDoc([
+        '/a' => ['403' => filledBody(['code' => 'string'], ['code'])],
+        '/b' => ['403' => examplableBody(['code' => 'forbidden', 'hint' => 'Ask an administrator.'])],
+    ]);
+
+    expect(exampleValuesAt($doc, '/a', '403'))->toHaveCount(2);
+});
+
+it('never drops an illustration whose producer recorded no fills, however placeholder-shaped it reads', function (): void {
+    // The exemption, and why it is a FLAG rather than a reading of the value. `0` is exactly what this
+    // pass fills an integer member with AND an ordinary thing for a server to send, so nothing looking at
+    // the finished document can tell the two apart. An illustration arriving with no record of having
+    // filled anything — an author's own example, a recorded body — is therefore one nothing may drop.
+    $throttled = static fn (mixed $example): array => [
+        'description' => 'Too Many Requests',
+        'content' => ['application/problem+json' => [
+            'schema' => ['type' => 'object', 'properties' => ['code' => ['type' => 'string'], 'retryAfter' => ['type' => 'integer']]],
+            'example' => $example,
+        ]],
+    ];
+
+    $doc = errorDoc([
+        '/a' => ['429' => $throttled(['code' => 'throttled', 'retryAfter' => 0])],
+        '/b' => ['429' => $throttled(['code' => 'throttled', 'retryAfter' => 30])],
+    ]);
+
+    expect(exampleValuesAt($doc, '/a', '429'))->toHaveCount(2)
+        ->and(exampleValuesAt($doc, '/a', '429'))->toContain(['code' => 'throttled', 'retryAfter' => 0])
+        ->and(exampleValuesAt($doc, '/a', '429'))->toContain(['code' => 'throttled', 'retryAfter' => 30]);
+});
+
+it('drops that same illustration once its producer says it filled the member in', function (): void {
+    // The other half of the row above, and the only difference between the two is the record: same bytes,
+    // same schema, same members — one of them stated to be a fill and therefore covered by the value the
+    // other read. Without this row the exemption would be indistinguishable from a collapse that never
+    // fires at all.
+    $throttled = static fn (mixed $example, array $filled = []): array => [
+        'description' => 'Too Many Requests',
+        'content' => ['application/problem+json' => [
+            'schema' => ['type' => 'object', 'properties' => ['code' => ['type' => 'string'], 'retryAfter' => ['type' => 'integer']]],
+            'example' => $example,
+        ]],
+    ] + ($filled === [] ? [] : ['x-docuccino' => ['facts' => ['examplePlaceholders' => ['application/problem+json' => $filled]]]]);
+
+    $doc = errorDoc([
+        '/a' => ['429' => $throttled(['code' => 'throttled', 'retryAfter' => 0], ['retryAfter'])],
+        '/b' => ['429' => $throttled(['code' => 'throttled', 'retryAfter' => 30])],
+    ]);
+
+    expect(exampleAt($doc, '/a', '429'))->toBe(['code' => 'throttled', 'retryAfter' => 30]);
+});
+
+it('reads a fill record as the same illustration however many arms restate it', function (): void {
+    // The record belongs to the BODY, not to the arm: a third arm restating a body already there changes
+    // nothing, and a body one arm filled and another READ is a body that was read. Otherwise the answer
+    // would depend on which arms an application happens to have, which is the locality rule.
+    $collapsed = errorDoc([
+        '/a' => ['403' => filledBody(['code' => 'forbidden', 'hint' => 'string'], ['hint'])],
+        '/b' => ['403' => filledBody(['code' => 'forbidden', 'hint' => 'string'], ['hint'])],
+        '/c' => ['403' => examplableBody(['code' => 'forbidden', 'hint' => 'Ask an administrator.'])],
+    ]);
+
+    // …and the same body reached once by a fill and once by a read is evidence, so it stays.
+    $read = errorDoc([
+        '/a' => ['403' => filledBody(['code' => 'forbidden', 'hint' => 'string'], ['hint'])],
+        '/b' => ['403' => examplableBody(['code' => 'forbidden', 'hint' => 'string'])],
+        '/c' => ['403' => examplableBody(['code' => 'forbidden', 'hint' => 'Ask an administrator.'])],
+    ]);
+
+    expect(exampleAt($collapsed, '/a', '403'))->toBe(['code' => 'forbidden', 'hint' => 'Ask an administrator.'])
+        ->and(exampleValuesAt($read, '/a', '403'))->toHaveCount(2);
+});
+
+it('keeps an illustration no surviving one covers, even where something dropped covered it', function (): void {
+    // Subsumption is not transitive, and this is the shape that shows it: `/c` covers `/b`, `/b` covers
+    // `/a`, and `/c` does NOT cover `/a` — it reads a `code` of its own that `/a` also read. Dropping
+    // `/a` against a `/b` that is itself dropped would delete the only statement in the document that
+    // `forbidden` is a code this contract answers with, so a body is only ever dropped against one that
+    // survives.
+    $doc = errorDoc([
+        '/a' => ['403' => filledBody(['code' => 'forbidden', 'hint' => 'string'], ['hint'])],
+        '/b' => ['403' => filledBody(['code' => 'forbidden', 'hint' => 'Ask an administrator.'], ['code'])],
+        '/c' => ['403' => examplableBody(['code' => 'denied', 'hint' => 'Ask an administrator.'])],
+    ]);
+
+    $values = exampleValuesAt($doc, '/a', '403');
+
+    expect($values)->toHaveCount(2)
+        ->and($values)->toContain(['code' => 'forbidden', 'hint' => 'string'])
+        ->and($values)->toContain(['code' => 'denied', 'hint' => 'Ask an administrator.']);
+});
+
+it('adds and removes only the arriving arm\'s own illustration', function (): void {
+    // Locality on the blast radius the collapse changes. An arriving arm could only ever ADD a key; one
+    // that READ a member another arm filled now removes that arm's key as well. What it must not do is
+    // disturb an illustration neither of them is about, or move the component's name.
+    $filled = filledBody(['code' => 'forbidden', 'hint' => 'string'], ['hint']);
+    $unrelated = examplableBody(['code' => 'denied', 'hint' => 'Ask an administrator.']);
+
+    $before = errorDoc(['/a' => ['403' => $filled], '/b' => ['403' => $unrelated]]);
+    $after = errorDoc([
+        '/a' => ['403' => $filled],
+        '/b' => ['403' => $unrelated],
+        '/c' => ['403' => examplableBody(['code' => 'forbidden', 'hint' => 'Ask an administrator.'])],
+    ]);
+
+    $survivor = array_filter(
+        examplesAt($before, '/a', '403'),
+        static fn (array $example): bool => $example['value'] === ['code' => 'denied', 'hint' => 'Ask an administrator.'],
+    );
+
+    expect($survivor)->toHaveCount(1)
+        ->and(examplesAt($before, '/a', '403'))->toHaveCount(2)
+        ->and(examplesAt($after, '/a', '403'))->toHaveCount(2)
+        // The unrelated arm's key and body are untouched, and the name every operation references is too.
+        ->and(array_intersect_key(examplesAt($after, '/a', '403'), $survivor))->toBe($survivor)
+        ->and(array_keys($after['components']['responses']))->toBe(['Error403'])
+        ->and(responseRefAt($after, '/b', '403'))->toBe(responseRefAt($before, '/b', '403'));
+});
+
+it('collapses the same way whichever order the arms are met in', function (): void {
+    // The choice has to be a function of the accumulated SET, or a warm fragment-cache build that met the
+    // arms in another order would publish a different example from a cold one.
+    $filled = filledBody(['code' => 'forbidden', 'hint' => 'string'], ['hint']);
+    $read = examplableBody(['code' => 'forbidden', 'hint' => 'Ask an administrator.']);
+
+    $forwards = errorDoc(['/a' => ['403' => $filled], '/b' => ['403' => $read]]);
+    $backwards = errorDoc(['/a' => ['403' => $read], '/b' => ['403' => $filled]]);
+
+    expect($forwards['components']['responses'])->toBe($backwards['components']['responses'])
+        ->and(exampleAt($forwards, '/a', '403'))->toBe(['code' => 'forbidden', 'hint' => 'Ask an administrator.']);
+});
+
+it('keeps the arms an author named out of the collapse, and collapses the rest', function (): void {
+    // A name is somebody saying this example is its own thing, so it is published as written whatever a
+    // generated body beside it says. What the collapse settles is only the unnamed illustrations.
+    $named = examplableBody(['code' => 'forbidden', 'hint' => 'Ask an administrator.']);
+    $named['content']['application/problem+json']['examples'] = ['no-hint' => ['value' => ['code' => 'forbidden', 'hint' => 'string']]];
+    unset($named['content']['application/problem+json']['example']);
+
+    $doc = errorDoc([
+        '/a' => ['403' => filledBody(['code' => 'forbidden', 'hint' => 'string'], ['hint'])],
+        '/b' => ['403' => examplableBody(['code' => 'forbidden', 'hint' => 'Ask an administrator.'])],
+        '/c' => ['403' => $named],
+    ]);
+
+    expect(array_keys(examplesAt($doc, '/a', '403')))->toBe(['example', 'no-hint'])
+        ->and(examplesAt($doc, '/a', '403')['example']['value'])->toBe(['code' => 'forbidden', 'hint' => 'Ask an administrator.'])
+        ->and(examplesAt($doc, '/a', '403')['no-hint']['value'])->toBe(['code' => 'forbidden', 'hint' => 'string']);
+});
+
+it('walks past a fill record that is not the shape the fact is written in', function (): void {
+    // An overlay or a hand-written document can put anything anywhere, so a malformed record is read as
+    // no record at all — and an illustration nothing says was filled is one nothing may drop.
+    $body = examplableBody(['code' => 'forbidden', 'hint' => 'string']);
+    $body = ['x-docuccino' => ['facts' => ['examplePlaceholders' => ['application/problem+json' => 'hint']]]] + $body;
+
+    $doc = errorDoc([
+        '/a' => ['403' => $body],
+        '/b' => ['403' => examplableBody(['code' => 'forbidden', 'hint' => 'Ask an administrator.'])],
+    ]);
+
+    expect(exampleValuesAt($doc, '/a', '403'))->toHaveCount(2);
 });

@@ -260,7 +260,7 @@ final readonly class Url
                 $property = Arr::stringKeyed(is_array($properties[$key] ?? null) ? $properties[$key] : []);
                 $out[] = $this->entry(
                     $name.'['.$key.']',
-                    $this->scalar($member[0]),
+                    Value::text($member[0]),
                     false,
                     $this->describe(['schema' => $property] + ['description' => $property['description'] ?? null]),
                 );
@@ -528,31 +528,9 @@ final readonly class Url
         // than inside it, and what the author wrote there beats anything derived from the shape.
         $stated = $this->examples->illustration($parameter);
 
-        return $this->scalar($stated === null
+        return Value::text($stated === null
             ? $this->examples->value(self::schemaOf($parameter), $components)
             : $stated[0]);
-    }
-
-    private function scalar(mixed $value): string
-    {
-        if (is_bool($value)) {
-            return $value ? 'true' : 'false';
-        }
-
-        if (is_int($value) || is_float($value)) {
-            return (string) $value;
-        }
-
-        if (is_string($value)) {
-            return $value;
-        }
-
-        // A list parameter serialises comma-separated, which is what a consumer would type.
-        if (is_array($value)) {
-            return implode(',', array_map($this->scalar(...), $value));
-        }
-
-        return '';
     }
 
     /**

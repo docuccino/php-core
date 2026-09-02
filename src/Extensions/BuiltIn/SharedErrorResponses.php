@@ -33,6 +33,10 @@ use Docuccino\Core\Support\Json;
  * spells out: they are not what a body IS, and keying on them retires the name of a contract they do not
  * change.
  *
+ * The illustrations the arms did not agree on travel into the shared component, minus the ones that say
+ * strictly less than another: an arm differing only where it FILLED a member from its declared type
+ * illustrates no body its sibling does not ({@see collapse()}).
+ *
  * Deliberately narrow: 4xx/5xx only, only bodies that actually repeat, and only responses carrying
  * `content`. Anything already a `$ref` is left alone, which is what makes a second run a no-op.
  *
@@ -41,7 +45,8 @@ use Docuccino\Core\Support\Json;
  * @phpstan-type Claimed array<string, array<string, array<string, mixed>>>
  * @phpstan-type Prose array<string, string>
  * @phpstan-type ProseVotes array<string, array{prose: Prose, count: int}>
- * @phpstan-type Occurrence array{scope: string, group: string, base: string, body: array<array-key, mixed>, illustrations: Illustrations, claimed: Claimed, prose: ProseVotes, count: int, rejected: array<string, array{string, string|null}>}
+ * @phpstan-type Filled array<string, array<string, list<string>>>
+ * @phpstan-type Occurrence array{scope: string, group: string, base: string, body: array<array-key, mixed>, illustrations: Illustrations, filled: Filled, claimed: Claimed, prose: ProseVotes, count: int, rejected: array<string, array{string, string|null}>}
  */
 final class SharedErrorResponses implements DocumentTransformer
 {
@@ -192,6 +197,7 @@ final class SharedErrorResponses implements DocumentTransformer
             static fn (array $occurrence): array => self::illustrate(
                 $occurrence['body'],
                 $occurrence['illustrations'],
+                $occurrence['filled'],
                 $occurrence['claimed'],
             ),
         );
@@ -480,7 +486,8 @@ final class SharedErrorResponses implements DocumentTransformer
 
     /**
      * The shared response as it publishes: the body every arm agreed on, plus the illustrations they did
-     * not — ONE as the media type's `example`, several as an `examples` map whose unnamed keys
+     * not — first with every one that says strictly less than another collapsed away ({@see collapse()}),
+     * then ONE as the media type's `example`, several as an `examples` map whose unnamed keys
      * {@see ComponentNames} mints from each body's own content and whose named ones are the author's own.
      * Design §"Shared error components" has the merge, the name contest ({@see disagreements()}) and why
      * neither kind of key can displace the other.
@@ -492,10 +499,11 @@ final class SharedErrorResponses implements DocumentTransformer
      *
      * @param  array<array-key, mixed>  $body
      * @param  Illustrations  $illustrations
+     * @param  Filled  $filled
      * @param  Claimed  $claimed
      * @return array<array-key, mixed>
      */
-    private static function illustrate(array $body, array $illustrations, array $claimed): array
+    private static function illustrate(array $body, array $illustrations, array $filled, array $claimed): array
     {
         if (($illustrations === [] && $claimed === []) || ! is_array($body['content'] ?? null)) {
             return $body;
@@ -514,7 +522,7 @@ final class SharedErrorResponses implements DocumentTransformer
             }
 
             $media = $content[$mediaType];
-            $values = $illustrations[$mediaType] ?? [];
+            $values = self::collapse($illustrations[$mediaType] ?? [], $filled[$mediaType] ?? []);
             $names = $authored[$mediaType] ?? [];
             $contested = $disputed[$mediaType] ?? [];
             ksort($values);
@@ -538,6 +546,128 @@ final class SharedErrorResponses implements DocumentTransformer
         $body['content'] = $content;
 
         return $body;
+    }
+
+    /**
+     * One contract's unnamed illustrations with every one that says strictly LESS than another dropped —
+     * the arms of a body that differ only where one of them filled a member in. Design
+     * §"Shared error components" has the rule and why it is subsumption rather than a score.
+     *
+     * The two passes are what make the answer a function of the SET: a body is dropped only against one
+     * that SURVIVES, never against something dropped in turn, because subsumption is not transitive and
+     * `A < B < C` with `A` not under `C` is reachable.
+     *
+     * @param  array<string, mixed>  $values  canonical bytes → the example they encode
+     * @param  array<string, list<string>>  $filled  canonical bytes → the members that body filled in
+     * @return array<string, mixed>
+     */
+    private static function collapse(array $values, array $filled): array
+    {
+        // A pure fast path — one illustration has nothing to be covered BY, and the passes below would
+        // answer the same set the long way round.
+        if (count($values) < 2) {
+            return $values;
+        }
+
+        $survivors = [];
+        foreach ($values as $content => $value) {
+            if (! self::coveredBy($content, $value, $values, $filled)) {
+                $survivors[$content] = $value;
+            }
+        }
+
+        $out = $survivors;
+        foreach ($values as $content => $value) {
+            if (! array_key_exists($content, $survivors) && ! self::coveredBy($content, $value, $survivors, $filled)) {
+                $out[$content] = $value;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Whether anything in `$against` subsumes the illustration keyed `$content` — the one question both
+     * passes of {@see collapse()} ask, of two different sets. A body never covers itself.
+     *
+     * @param  array<string, mixed>  $against
+     * @param  array<string, list<string>>  $filled
+     */
+    private static function coveredBy(string $content, mixed $value, array $against, array $filled): bool
+    {
+        foreach ($against as $other => $stronger) {
+            if ($other !== $content && self::subsumes($stronger, $filled[$other] ?? [], $value, $filled[$content] ?? [])) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Whether `$stronger` says everything `$weaker` says and more: the same members, and every member
+     * they disagree on one `$weaker` FILLED and `$stronger` read. Anything else — a different member set,
+     * a disagreement neither side filled, a disagreement both filled — is two illustrations.
+     *
+     * @param  list<string>  $strongerFilled
+     * @param  list<string>  $weakerFilled
+     */
+    private static function subsumes(mixed $stronger, array $strongerFilled, mixed $weaker, array $weakerFilled): bool
+    {
+        if (! is_array($stronger) || ! is_array($weaker)) {
+            return false;
+        }
+
+        $members = array_map(strval(...), array_keys($weaker));
+        $theirs = array_map(strval(...), array_keys($stronger));
+        sort($members, SORT_STRING);
+        sort($theirs, SORT_STRING);
+
+        if ($members !== $theirs) {
+            return false;
+        }
+
+        foreach ($weaker as $member => $value) {
+            if ($stronger[$member] === $value) {
+                continue;
+            }
+
+            if (! in_array((string) $member, $weakerFilled, true) || in_array((string) $member, $strongerFilled, true)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * The members of each media type's example this response's producer filled from a declared type
+     * rather than read ({@see ResponseDraft::EXAMPLE_PLACEHOLDERS}). Anything that isn't the shape the
+     * fact is written in is read as no fact at all, exactly as a declared name is.
+     *
+     * @param  array<array-key, mixed>  $body
+     * @return array<string, list<string>>
+     */
+    private static function filled(array $body): array
+    {
+        $extension = $body[self::PROVENANCE] ?? null;
+        $facts = is_array($extension) ? ($extension['facts'] ?? null) : null;
+        $stated = is_array($facts) ? ($facts[ResponseDraft::EXAMPLE_PLACEHOLDERS] ?? null) : null;
+
+        if (! is_array($stated)) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($stated as $mediaType => $members) {
+            if (! is_array($members)) {
+                continue;
+            }
+
+            $out[(string) $mediaType] = array_values(array_map(strval(...), array_filter($members, is_string(...))));
+        }
+
+        return $out;
     }
 
     /**
@@ -685,6 +815,7 @@ final class SharedErrorResponses implements DocumentTransformer
                     'base' => $name ?? 'Error'.$status,
                     'body' => $stripped,
                     'illustrations' => [],
+                    'filled' => [],
                     'claimed' => [],
                     'prose' => [],
                     'count' => 0,
@@ -699,8 +830,22 @@ final class SharedErrorResponses implements DocumentTransformer
                     $out[$key]['prose'][$vote]['count']++;
                 }
 
+                $filled = self::filled($body);
+
                 foreach ($illustrations as $mediaType => $values) {
                     $out[$key]['illustrations'][$mediaType] = ($out[$key]['illustrations'][$mediaType] ?? []) + $values;
+
+                    // Per BODY, not per arm: two arms publishing identical bytes are one illustration, and
+                    // it is only filled where BOTH filled it — one arm having read the member is what makes
+                    // the value evidence rather than a stand-in. Intersecting is what keeps that a function
+                    // of the set of arms instead of of the first one met.
+                    foreach (array_keys($values) as $content) {
+                        $names = $filled[$mediaType] ?? [];
+                        $standing = $out[$key]['filled'][$mediaType][(string) $content] ?? null;
+                        $out[$key]['filled'][$mediaType][(string) $content] = $standing === null
+                            ? $names
+                            : array_values(array_intersect($standing, $names));
+                    }
                 }
 
                 // Every name an arm gave an example, with the DISTINCT examples the arms put under it —

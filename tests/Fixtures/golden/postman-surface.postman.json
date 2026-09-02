@@ -43,6 +43,16 @@
                   "description": "One of: open, closed."
                 },
                 {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": true
+                },
+                {
+                  "key": "sample",
+                  "value": "0.5",
+                  "disabled": true
+                },
+                {
                   "key": "sort",
                   "value": "name",
                   "disabled": true
@@ -83,6 +93,16 @@
                       "value": "open",
                       "disabled": true,
                       "description": "One of: open, closed."
+                    },
+                    {
+                      "key": "page",
+                      "value": "1",
+                      "disabled": true
+                    },
+                    {
+                      "key": "sample",
+                      "value": "0.5",
+                      "disabled": true
                     },
                     {
                       "key": "sort",

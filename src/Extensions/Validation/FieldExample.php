@@ -7,6 +7,7 @@ namespace Docuccino\Core\Extensions\Validation;
 use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
 use Docuccino\Core\Extensions\Context\RepresentationPolicy;
+use Docuccino\Core\Support\BoundedNumber;
 use Docuccino\Core\Support\FormatSamples;
 use Opis\JsonSchema\Errors\ValidationError;
 use Opis\JsonSchema\Validator as OpisValidator;
@@ -55,7 +56,14 @@ final class FieldExample
     /** Past this a conforming sample is noise rather than an illustration, so none is published. */
     private const int MAX_LENGTH = 64;
 
-    /** The neutral starting point for a bounded number, moved onto the nearest legal value. */
+    /**
+     * Where a bounded number starts from. ONE rather than the neutral zero, because this is the producer
+     * that publishes nothing at all unless a rule pinned a bound — so the seed is only ever seen BESIDE a
+     * constraint, and 1 is the value that demonstrates one. A `multiple_of:5` illustrates 5 where 0
+     * satisfies every step there is, and `max`, `lt` and `lte` illustrate a value a client would send
+     * rather than the one edge of the range that usually means "none". Asserted against the other two
+     * seeds, with this reason, by the adapter's example-agreement rows.
+     */
     private const int NUMBER_SEED = 1;
 
     /**
@@ -173,57 +181,18 @@ final class FieldExample
     }
 
     /**
-     * The lowest legal value at or above the seed, so a `min:18` documents 18 and a `max:5` still
-     * documents something a client can send. Bounds that cross, or a `multipleOf` with no room under
-     * the ceiling, publish nothing.
+     * The value the bounds admit nearest the seed, so a `min:18` documents 18 and a `max:5` still
+     * documents something a client can send — {@see BoundedNumber} for the ladder, which the collection
+     * exporter and the error-example fill read too, each from a seed of its own. A range nothing inhabits
+     * publishes nothing, and so does a rule set that pinned only the type: `type: integer` says that
+     * already.
      *
      * @param  array<string, mixed>  $keywords
      * @return array{mixed}|null
      */
     private static function number(array $keywords, bool $integer): ?array
     {
-        $lower = self::numberKeyword($keywords, 'minimum');
-        $upper = self::numberKeyword($keywords, 'maximum');
-        $step = self::numberKeyword($keywords, 'multipleOf');
-
-        $exclusiveLower = self::numberKeyword($keywords, 'exclusiveMinimum');
-        if ($exclusiveLower !== null) {
-            $lower = max($lower ?? $exclusiveLower + 1, $exclusiveLower + 1);
-        }
-
-        $exclusiveUpper = self::numberKeyword($keywords, 'exclusiveMaximum');
-        if ($exclusiveUpper !== null) {
-            $upper = min($upper ?? $exclusiveUpper - 1, $exclusiveUpper - 1);
-        }
-
-        // Only the type was pinned; `type: integer` says that already.
-        if ($lower === null && $upper === null && $step === null) {
-            return null;
-        }
-
-        $value = self::NUMBER_SEED;
-        if ($lower !== null && $value < $lower) {
-            $value = $lower;
-        }
-        if ($upper !== null && $value > $upper) {
-            $value = $upper;
-        }
-
-        if ($step !== null && $step > 0) {
-            $value = ceil($value / $step) * $step;
-        }
-
-        if (($lower !== null && $value < $lower) || ($upper !== null && $value > $upper)) {
-            return null;
-        }
-
-        // A whole float publishes as an integer literal, which validates against `number` just the same
-        // and keeps the bytes the shortest true form.
-        if (is_float($value) && $value === floor($value) && abs($value) < (float) PHP_INT_MAX) {
-            $value = (int) $value;
-        }
-
-        return [$integer ? (int) $value : $value];
+        return BoundedNumber::stated($keywords) ? BoundedNumber::nearest($keywords, self::NUMBER_SEED, $integer) : null;
     }
 
     /**
@@ -234,16 +203,6 @@ final class FieldExample
         $value = $keywords[$name] ?? null;
 
         return is_int($value) && $value >= 0 ? $value : null;
-    }
-
-    /**
-     * @param  array<string, mixed>  $keywords
-     */
-    private static function numberKeyword(array $keywords, string $name): int|float|null
-    {
-        $value = $keywords[$name] ?? null;
-
-        return is_int($value) || is_float($value) ? $value : null;
     }
 
     /**

@@ -52,8 +52,8 @@ final class ComponentRegistry
     private array $reservedIds = [];
 
     /**
-     * Reusable response components for `components.responses` — e.g. the shared `Problem*` responses
-     * a Problem Details preset references from many operations.
+     * Reusable response components for `components.responses` — a whole response one extension
+     * registers once and many operations reference.
      *
      * @var array<string, array<string, mixed>>
      */

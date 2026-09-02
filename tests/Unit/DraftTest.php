@@ -338,6 +338,24 @@ it('carries a declared name across the merge into the operation it applies to', 
     expect($frozen?->toArray()['x-docuccino']['facts'])->toBe(['component' => 'NotFound']);
 });
 
+it('carries a media type a producer named and constrained in no way', function (): void {
+    // "A body of this media type, shape unknown" is a producer saying something, and JSON Schema spells
+    // it with an EMPTY schema. A merge driven only by the keyword loop finds nothing to copy and would
+    // leave the response with no `content` at all — which says the error returns NOTHING, a different
+    // claim entirely and one the producer never made.
+    $operation = new OperationDraft;
+
+    $mapped = new ResponseDraft('500');
+    $mapped->setDescription('Internal Server Error', Contribution::integration('inferred-handler'));
+    $mapped->content('application/problem+json');
+
+    (new ResponseDraftApplier)->apply($operation, $mapped, 'integration:inferred-handler');
+
+    $frozen = $operation->freeze()->responses['500']->toArray();
+
+    expect($frozen['content'] ?? null)->toBe(['application/problem+json' => ['schema' => []]]);
+});
+
 it('retracts the redirect range a declared concrete status supersedes', function (): void {
     // The range key stands in for the ONE status nobody named. Once something names it, publishing both
     // would tell a consumer that any other member of the class may happen too — which is exactly what

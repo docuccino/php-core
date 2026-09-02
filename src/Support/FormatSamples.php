@@ -6,19 +6,30 @@ namespace Docuccino\Core\Support;
 
 /**
  * One sample value per JSON Schema `format`, shared by everything that has to produce a value the
- * format would accept: the collection exporter's whole-body builder and the synthesized property
- * example a recovered rule set earns. One table, so the two can never disagree about what an email
- * looks like.
+ * format would accept: the collection exporter's whole-body builder, the synthesized property example a
+ * recovered rule set earns, and the fill an error example puts where a member went unread. One table, so
+ * they can never disagree about what an email looks like.
  *
  * Every value is a constant. Nothing here is derived from the clock, the locale or the environment —
  * a sample that moved with the date would move the document with it.
  *
  * A document can replace individual samples (`representation.examples.formats`). The merge happens HERE,
- * at the one lookup, so the table stays the single answer to "what does an email look like" for both
- * callers: the synthesized property example is handed the map by the representation policy that reaches
- * it, and the collection exporter by `EmitOptions::$formatSamples`.
+ * at the one lookup, so the table stays the single answer to "what does an email look like" for every
+ * caller: the synthesized property example and the error-example fill are handed the map by the
+ * representation policy that reaches them, and the collection exporter by `EmitOptions::$formatSamples`.
  *
- * @internal
+ * **Public API, deliberately and permanently.** This class carries no `@internal` marker, so `for()`,
+ * `formats()` and the class name itself are part of the surface that freezes at v1 — a decision, not a
+ * side effect of the adapter needing them. The alternative was a private copy of the table in the
+ * adapter, and a copy is the one thing this class exists to prevent: the whole point is that the error
+ * example an integration fills and the example core synthesizes illustrate an `email` with the SAME
+ * value, and two tables agree only until somebody edits one. Freezing two short static methods is a
+ * cheaper commitment than a divergence no test would notice, and it lets an extension author fill a
+ * member the same way a built-in integration does instead of inventing a second answer.
+ *
+ * What is frozen is the SURFACE, not the values: a document restates any sample it likes through
+ * `representation.examples.formats`, and a change to a constant here moves every document that did not,
+ * so it is an ordinary output change and goes through the goldens like one.
  */
 final class FormatSamples
 {

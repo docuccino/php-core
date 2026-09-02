@@ -42,6 +42,13 @@ final class ResponseDraft
      */
     public const COMPONENT_NAMES_RESPONSE = 'componentNamesResponse';
 
+    /**
+     * Frozen under `x-docuccino.facts` as `media type → the members of that media type's `example` that
+     * came from a declared TYPE and nothing else` ({@see setExample()}). Public for the same reason as
+     * the two above: the shared-error hoist reads it back off the finished document.
+     */
+    public const EXAMPLE_PLACEHOLDERS = 'examplePlaceholders';
+
     private readonly PatchGuard $guard;
 
     /**
@@ -65,6 +72,15 @@ final class ResponseDraft
      * @var array<string, mixed>
      */
     private array $examples = [];
+
+    /**
+     * Which members of each {@see $examples} body its producer filled from a declared type rather than
+     * read ({@see setExample()}), name-sorted. Kept in lockstep with {@see $examples}, so the set always
+     * belongs to the body that won the media type.
+     *
+     * @var array<string, list<string>>
+     */
+    private array $examplePlaceholders = [];
 
     /**
      * The named Example Objects an author declared per media type ({@see declareExamples()}), kept
@@ -227,7 +243,7 @@ final class ResponseDraft
         }
 
         foreach ($other->examples as $mediaType => $example) {
-            $this->setExample((string) $mediaType, $example);
+            $this->setExample((string) $mediaType, $example, $other->examplePlaceholders[$mediaType] ?? []);
         }
     }
 
@@ -288,10 +304,54 @@ final class ResponseDraft
     /**
      * Attach an example body to a media type; only emitted if that media type also carries a schema.
      * First writer wins, so extension evaluation order can't change the result.
+     *
+     * `$placeholders` names the members of that body the producer FILLED from a declared type rather than
+     * read from the code — the one fact about an example nothing downstream can work out again, since a
+     * filled `"string"` and a returned `"string"` are the same bytes. It travels because the shared-error
+     * hoist needs it: two arms of one contract whose bodies differ only where one of them filled in are
+     * one illustration, and telling that from two genuinely different bodies is exactly this set.
+     * Producers that read every member they publish — a recording, an author's own example — pass none,
+     * which is what makes such a body one the hoist may never drop.
+     *
+     * @param  list<string>  $placeholders
      */
-    public function setExample(string $mediaType, mixed $example): void
+    public function setExample(string $mediaType, mixed $example, array $placeholders = []): void
     {
+        // `??=` exactly as it always was, so a first writer of `null` is still no writer at all; the set
+        // is recorded only where the body it describes is the one that landed.
+        $taken = ! isset($this->examples[$mediaType]);
         $this->examples[$mediaType] ??= $example;
+
+        if ($taken) {
+            sort($placeholders, SORT_STRING);
+            $this->examplePlaceholders[$mediaType] = $placeholders;
+        }
+    }
+
+    /**
+     * The filled members of the example this media type actually PUBLISHES, or none where what it
+     * publishes is a declaration or a named illustration instead ({@see illustration()}, which is the one
+     * place that is decided). Read by whoever copies a frozen body into another response, so the set
+     * arrives with the body it belongs to rather than being lost at the hop.
+     *
+     * @return list<string>
+     */
+    public function examplePlaceholders(string $mediaType): array
+    {
+        [, $generated] = $this->illustration($mediaType);
+
+        return $this->filled($mediaType, $generated);
+    }
+
+    /**
+     * The same answer for a caller that has already walked the ladder ({@see freeze()} has), so the two
+     * cannot come to different conclusions about one media type and the walk happens once.
+     *
+     * @return list<string>
+     */
+    private function filled(string $mediaType, bool $generated): array
+    {
+        return $generated ? ($this->examplePlaceholders[$mediaType] ?? []) : [];
     }
 
     /**
@@ -408,7 +468,11 @@ final class ResponseDraft
      * alone: there is no map for an illustration to join, and making one would file the author's own
      * example under a key nobody picked.
      *
-     * @return array<string, mixed>
+     * The second half of the answer is whether what publishes is the {@see setExample()} bag — the one
+     * bag whose members may have been filled rather than read — so {@see examplePlaceholders()} and
+     * {@see freeze()} both ask this rather than re-deciding the ladder for themselves.
+     *
+     * @return array{array<string, mixed>, bool}
      */
     private function illustration(string $mediaType): array
     {
@@ -419,18 +483,20 @@ final class ResponseDraft
             $merged = $declared + $illustrated;
             ksort($merged);
 
-            return ['examples' => $merged];
+            return [['examples' => $merged], false];
         }
 
         if (array_key_exists($mediaType, $this->declaredExample)) {
-            return ['example' => $this->declaredExample[$mediaType]];
+            return [['example' => $this->declaredExample[$mediaType]], false];
         }
 
         if ($illustrated !== []) {
-            return ['examples' => $illustrated];
+            return [['examples' => $illustrated], false];
         }
 
-        return array_key_exists($mediaType, $this->examples) ? ['example' => $this->examples[$mediaType]] : [];
+        return array_key_exists($mediaType, $this->examples)
+            ? [['example' => $this->examples[$mediaType]], true]
+            : [[], false];
     }
 
     /**
@@ -456,18 +522,33 @@ final class ResponseDraft
         unset($resolved['$ref'], $resolved['description'], $resolved['headers'], $resolved[self::COMPONENT]);
 
         $content = null;
+        $placeholders = [];
         if ($this->content !== []) {
             $content = [];
             foreach ($this->content as $mediaType => $schema) {
-                $content[$mediaType] = ['schema' => $schema->freeze()->toArray()] + $this->illustration($mediaType);
+                [$illustration, $generated] = $this->illustration((string) $mediaType);
+                $content[$mediaType] = ['schema' => $schema->freeze()->toArray()] + $illustration;
+
+                $filled = $this->filled((string) $mediaType, $generated);
+                if ($filled !== []) {
+                    $placeholders[(string) $mediaType] = $filled;
+                }
             }
+        }
+
+        ksort($placeholders);
+
+        $facts = $component === null ? [] : [self::COMPONENT => $component]
+            + ($this->componentNamesResponse ? [self::COMPONENT_NAMES_RESPONSE => true] : []);
+
+        if ($placeholders !== []) {
+            $facts += [self::EXAMPLE_PLACEHOLDERS => $placeholders];
         }
 
         $docuccino = new NodeExtension(
             id: $this->id,
             provenance: $this->guard->provenance(),
-            rest: $component === null ? [] : ['facts' => [self::COMPONENT => $component]
-                + ($this->componentNamesResponse ? [self::COMPONENT_NAMES_RESPONSE => true] : [])],
+            rest: $facts === [] ? [] : ['facts' => $facts],
         );
 
         return new ResponseObject(
