@@ -7,6 +7,14 @@ User-facing changes to `docuccino/core` — features, fixes, performance work an
 taken from the commit messages scoped `core`. Entries begin after v0.1.2; older history is in
 the [repository](https://github.com/docuccino/docuccino) git log.
 
+## v0.14.0
+
+### Bug fixes
+
+- read a bound as the values it admits, not as the value one unit past it ([#371](https://github.com/docuccino/docuccino/pull/371))
+- illustrate a schema from every keyword that names a value ([#369](https://github.com/docuccino/docuccino/pull/369))
+- publish one generated illustration where a second only filled a member in ([#359](https://github.com/docuccino/docuccino/pull/359))
+
 ## v0.13.1
 
 ### Bug fixes
