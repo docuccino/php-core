@@ -157,7 +157,11 @@ final class SavedExample
 
         $media = Arr::stringKeyed(is_array($content[$mediaType] ?? null) ? $content[$mediaType] : []);
         $schema = is_array($media['schema'] ?? null) ? Arr::stringKeyed($media['schema']) : [];
-        $json = $mediaType === 'application/json' || str_ends_with($mediaType, '+json');
+        // Lower-cased for the reason {@see Body::of()} does it: a `content` key is written by an author
+        // and `Application/JSON` names JSON exactly as the usual spelling does. Read case-sensitively,
+        // a JSON response came back as an empty text body.
+        $base = strtolower($mediaType);
+        $json = $base === 'application/json' || str_ends_with($base, '+json');
 
         if (! $json) {
             return ['', 'text'];

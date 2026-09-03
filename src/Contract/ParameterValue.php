@@ -54,7 +54,27 @@ final class ParameterValue
     {
         $memo = [];
 
-        return self::read($value, $schema, $document, 0, [], $memo);
+        return self::read($value, $schema, $document, 0, [], $memo, true);
+    }
+
+    /**
+     * The same reader for a form body, which differs in two ways nothing in the value can tell it.
+     *
+     * The top level is a MAP of field names whatever those names look like, so `0=a&1=b` is an object
+     * and not the list PHP holds it as. And a form has no comma-list representation: `tags=a,b` is one
+     * field whose value is `a,b`, not two values — OAS serialises a form array as the repeated key
+     * `tags=a&tags=b`, which the framework hands over as a list already. Splitting on the comma here
+     * would take a body the server would reject and pass it.
+     *
+     * @param  array<array-key, mixed>  $fields
+     * @param  array<string, mixed>|null  $schema
+     * @param  array<string, mixed>  $document
+     */
+    public static function coerceForm(array $fields, ?array $schema, array $document = []): stdClass
+    {
+        $memo = [];
+
+        return self::asObject($fields, self::flatten($schema, $document, 0, [], $memo), $document, 0, [], $memo, false);
     }
 
     /**
@@ -73,17 +93,19 @@ final class ParameterValue
      * @param  list<string>  $seen  the pointers this walk has resolved without the value shrinking, so
      *                              a schema that reaches itself is cut on the second visit
      * @param  array<string, Flattened>  $memo
+     * @param  bool  $commaLists  whether a string here may be a comma list, which is a QUERY
+     *                            representation and not a form one ({@see coerceForm()})
      */
-    private static function read(mixed $value, ?array $schema, array $document, int $depth, array $seen, array &$memo): mixed
+    private static function read(mixed $value, ?array $schema, array $document, int $depth, array $seen, array &$memo, bool $commaLists): mixed
     {
         $flat = self::flatten($schema, $document, $depth, $seen, $memo);
 
         if (is_string($value)) {
-            return self::fromString($value, $flat, $document, $depth, $memo);
+            return self::fromString($value, $flat, $document, $depth, $memo, $commaLists);
         }
 
         if (is_array($value)) {
-            return self::fromArray($value, $flat, $document, $depth, $seen, $memo);
+            return self::fromArray($value, $flat, $document, $depth, $seen, $memo, $commaLists);
         }
 
         return $value;
@@ -94,7 +116,7 @@ final class ParameterValue
      * @param  array<string, mixed>  $document
      * @param  array<string, Flattened>  $memo
      */
-    private static function fromString(string $value, array $flat, array $document, int $depth, array &$memo): mixed
+    private static function fromString(string $value, array $flat, array $document, int $depth, array &$memo, bool $commaLists): mixed
     {
         $types = $flat['types'];
 
@@ -103,9 +125,9 @@ final class ParameterValue
         // comes before the string rule below rather than after it: a list serialised into a query
         // string satisfies `type: string` incidentally, and leaving it as the string it arrived as
         // leaves `items` — the allow-list the document publishes — checking nothing at all.
-        if (in_array('array', $types, true)) {
+        if ($commaLists && in_array('array', $types, true)) {
             return array_map(
-                static fn (string $item): mixed => self::read($item, $flat['items'], $document, $depth + 1, $flat['path'], $memo),
+                static fn (string $item): mixed => self::read($item, $flat['items'], $document, $depth + 1, $flat['path'], $memo, true),
                 explode(',', $value),
             );
         }
@@ -140,16 +162,37 @@ final class ParameterValue
      * @param  list<string>  $seen
      * @param  array<string, Flattened>  $memo
      */
-    private static function fromArray(array $value, array $flat, array $document, int $depth, array $seen, array &$memo): mixed
+    private static function fromArray(array $value, array $flat, array $document, int $depth, array $seen, array &$memo, bool $commaLists): mixed
     {
         if (array_is_list($value)) {
             return array_map(
-                static fn (mixed $item): mixed => self::read($item, $flat['items'], $document, $depth + 1, $seen, $memo),
+                static fn (mixed $item): mixed => self::read($item, $flat['items'], $document, $depth + 1, $seen, $memo, $commaLists),
                 $value,
             );
         }
 
         // A bracketed query parameter (`filter[status]=paid`) arrives as a map: an object to JSON Schema.
+        $object = self::asObject($value, $flat, $document, $depth, $seen, $memo, $commaLists);
+
+        // The brackets have already said which of the two this is, so where the contract permits both
+        // the value decides: a map is an object. Reading it as a list instead throws the keys away, and
+        // `properties`, `required` and the `*Properties` counts then have nothing left to check.
+        $list = in_array('array', $flat['types'], true) && ! in_array('object', $flat['types'], true);
+
+        return $list ? array_values(get_object_vars($object)) : $object;
+    }
+
+    /**
+     * A map read member by member against the `properties` this node names.
+     *
+     * @param  array<array-key, mixed>  $value
+     * @param  Flattened  $flat
+     * @param  array<string, mixed>  $document
+     * @param  list<string>  $seen
+     * @param  array<string, Flattened>  $memo
+     */
+    private static function asObject(array $value, array $flat, array $document, int $depth, array $seen, array &$memo, bool $commaLists): stdClass
+    {
         $object = new stdClass;
 
         foreach ($value as $key => $item) {
@@ -160,15 +203,11 @@ final class ParameterValue
                 $depth + 1,
                 $seen,
                 $memo,
+                $commaLists,
             );
         }
 
-        // The brackets have already said which of the two this is, so where the contract permits both
-        // the value decides: a map is an object. Reading it as a list instead throws the keys away, and
-        // `properties`, `required` and the `*Properties` counts then have nothing left to check.
-        $list = in_array('array', $flat['types'], true) && ! in_array('object', $flat['types'], true);
-
-        return $list ? array_values(get_object_vars($object)) : $object;
+        return $object;
     }
 
     /**

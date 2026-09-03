@@ -720,6 +720,19 @@ it('saves a documented response as a runnable example', function (): void {
         ->and(array_column($response['header'], 'key'))->toContain('X-Total-Count');
 });
 
+it('reads a content key an author spelled in capitals as the media type it names', function (): void {
+    // A `content` key is written by a person, and `Application/JSON` is JSON. Compared case-sensitively
+    // it was neither, and a documented JSON response was saved as an empty text body.
+    $document = loadFixture('postman-surface.uir.json');
+    $content = $document['paths']['/accounts']['get']['responses']['200']['content'];
+    $document['paths']['/accounts']['get']['responses']['200']['content'] = ['Application/JSON' => reset($content)];
+
+    $response = postmanLeaves(postman($document)['item'])['/Accounts/List accounts']['response'][0];
+
+    expect($response['_postman_previewlanguage'])->toBe('json')
+        ->and($response['body'])->toContain('user@example.com');
+});
+
 it('skips a status it cannot put in an integer code', function (): void {
     // `default`/`2XX` cannot fill Postman's `code`; the OpenAPI artifact still carries them, so nothing
     // a consumer can act on is lost and there is nothing to report.

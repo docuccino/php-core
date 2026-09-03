@@ -1,0 +1,165 @@
+{
+  "$schema": "https://spec.docuccino.app/uir/1.0/schema.json",
+  "uir": "1.0.0",
+  "openapi": "3.2.0",
+  "info": { "title": "Uploads API", "version": "1.0.0" },
+  "paths": {
+    "/api/uploads": {
+      "post": {
+        "x-docuccino": { "id": "op:v1:aaaaaauploadsnew" },
+        "summary": "Upload an attachment.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": { "schema": { "$ref": "#/components/schemas/UploadForm" } }
+          }
+        },
+        "responses": {
+          "201": {
+            "x-docuccino": { "id": "res:v1:aaaaaauploadmade" },
+            "description": "Created"
+          }
+        }
+      }
+    },
+    "/api/preferences": {
+      "put": {
+        "x-docuccino": { "id": "op:v1:aaaaprefsreplace" },
+        "summary": "Replace the caller's preferences.",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": { "schema": { "$ref": "#/components/schemas/PreferencesForm" } }
+          }
+        },
+        "responses": {
+          "204": {
+            "x-docuccino": { "id": "res:v1:aaaaaprefsstored" },
+            "description": "No content"
+          }
+        }
+      }
+    },
+    "/api/subscriptions": {
+      "post": {
+        "x-docuccino": { "id": "op:v1:aaaaaaasubsnewly" },
+        "summary": "Subscribe.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": { "schema": { "$ref": "#/components/schemas/PreferencesForm" } }
+          }
+        },
+        "responses": {
+          "201": {
+            "x-docuccino": { "id": "res:v1:aaaaaaaaasubsnew" },
+            "description": "Created"
+          }
+        }
+      }
+    },
+    "/api/avatars": {
+      "put": {
+        "x-docuccino": { "id": "op:v1:aaaaaavatarsswap" },
+        "summary": "Replace the caller's avatar.",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": { "schema": { "$ref": "#/components/schemas/AvatarForm" } }
+          }
+        },
+        "responses": {
+          "204": {
+            "x-docuccino": { "id": "res:v1:aaaaaavatarstore" },
+            "description": "No content"
+          }
+        }
+      }
+    },
+    "/api/imports": {
+      "post": {
+        "x-docuccino": { "id": "op:v1:aaaaaaimportsnew" },
+        "summary": "Import preferences, as a form or as JSON.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/PreferencesForm" } },
+            "multipart/form-data": { "schema": { "$ref": "#/components/schemas/PreferencesForm" } }
+          }
+        },
+        "responses": {
+          "201": {
+            "x-docuccino": { "id": "res:v1:aaaaaaimportmade" },
+            "description": "Created"
+          }
+        }
+      }
+    },
+    "/api/notes": {
+      "post": {
+        "x-docuccino": { "id": "op:v1:aaaaaaaanotesnew" },
+        "summary": "Write a note.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/PreferencesForm" } }
+          }
+        },
+        "responses": {
+          "201": {
+            "x-docuccino": { "id": "res:v1:aaaaaaaanotemade" },
+            "description": "Created"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "UploadForm": {
+        "type": "object",
+        "required": ["title", "quantity", "attachment"],
+        "properties": {
+          "title": {
+            "x-docuccino": {
+              "provenance": [
+                {
+                  "producer": "integration:form-request",
+                  "layer": "integration",
+                  "fields": ["type", "minLength"],
+                  "source": {
+                    "file": "app/Http/Requests/StoreUpload.php",
+                    "line": 21,
+                    "symbol": "App\\Http\\Requests\\StoreUpload::rules"
+                  }
+                }
+              ]
+            },
+            "type": "string",
+            "minLength": 3
+          },
+          "quantity": { "type": "integer", "minimum": 1 },
+          "attachment": { "type": "string", "format": "binary" },
+          "tags": { "type": "array", "items": { "type": "string" } }
+        },
+        "additionalProperties": false
+      },
+      "AvatarForm": {
+        "type": "object",
+        "required": ["portrait"],
+        "properties": {
+          "portrait": { "type": "string", "format": "binary" },
+          "caption": { "type": "string", "maxLength": 40 }
+        },
+        "additionalProperties": false
+      },
+      "PreferencesForm": {
+        "type": "object",
+        "required": ["theme"],
+        "properties": {
+          "theme": { "type": "string", "enum": ["light", "dark"] },
+          "notify": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      }
+    }
+  }
+}

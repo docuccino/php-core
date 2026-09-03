@@ -23,12 +23,30 @@ final class MediaType
         return $base === '' ? null : $base;
     }
 
-    /** Whether a body of this type is JSON — `application/problem+json` and friends included. */
+    /**
+     * Whether a body of this type is JSON — `application/problem+json` and friends included.
+     *
+     * Asked of a key {@see select()} matched case-insensitively and returned in the document's own
+     * case, so it reads the same grammar: a `content` entry spelled `Application/JSON` is the JSON
+     * entry it looks like, and reading it as anything else leaves a body unchecked in silence.
+     */
     public static function isJson(string $mediaType): bool
     {
-        return $mediaType === 'application/json'
-            || $mediaType === 'text/json'
-            || str_ends_with($mediaType, '+json');
+        $base = strtolower($mediaType);
+
+        return $base === 'application/json' || $base === 'text/json' || str_ends_with($base, '+json');
+    }
+
+    /**
+     * Whether a body of this type is a FORM: named fields the framework parses out of the message,
+     * rather than bytes a decoder reads ({@see Exchange} says why that matters). Case-insensitive for
+     * the reason {@see isJson()} gives.
+     */
+    public static function isForm(string $mediaType): bool
+    {
+        $base = strtolower($mediaType);
+
+        return $base === 'application/x-www-form-urlencoded' || $base === 'multipart/form-data';
     }
 
     /**

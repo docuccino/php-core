@@ -10,9 +10,19 @@ namespace Docuccino\Core\Contract;
  * This is the seam that keeps contract checking framework-neutral. An adapter turns whatever its test
  * suite produces — a Laravel `TestResponse` and the `Request` behind it, a PSR-7 pair, a HAR entry —
  * into one of these; everything downstream is the same code for all of them.
+ *
+ * A parsed body is not bytes, and this is where that is stated. A `multipart/form-data` or
+ * `application/x-www-form-urlencoded` request is one the framework decodes on the way in, and the
+ * stream it decoded is drained by the time anything can ask — so `$requestBody` is empty for exactly
+ * those requests and `$requestForm` carries what they sent instead. A streamed response is the mirror:
+ * no body string was ever built, only a callback that would write one. Both are the adapter's to state,
+ * because only it can tell; everything downstream points here rather than saying it again.
  */
 final readonly class Exchange
 {
+    /** @var array<array-key, mixed>|null */
+    public ?array $requestForm;
+
     /**
      * @param  string  $path  the concrete request path, `/api/invoices/42`
      * @param  array<string, mixed>  $query  decoded query parameters, nesting preserved
@@ -24,6 +34,23 @@ final readonly class Exchange
      *                                                that way. Keeping the first alone would let the
      *                                                second violate the documented schema unseen
      * @param  array<string, string>  $cookies
+     * @param  array<array-key, mixed>|null  $requestForm  the fields a form request body carried,
+     *                                                     decoded, nesting preserved, or null where
+     *                                                     the request sent none. A file part reaches
+     *                                                     here as the name it was sent under — a
+     *                                                     string, which is what `format: binary` says
+     *                                                     a part is — so a check reads that a part was
+     *                                                     present and never its bytes. An empty map
+     *                                                     and no map are the same request, and are
+     *                                                     normalised to the latter: a form body with
+     *                                                     no fields is zero bytes on the wire
+     * @param  string|null  $requestBodyUnread  why the adapter could not say what the request body was,
+     *                                          or null where it could. Neither an empty `$requestBody`
+     *                                          nor an absent `$requestForm` is evidence a request sent
+     *                                          nothing while this is set, and neither is
+     *                                          `$requestContentType` evidence of what it was — so the
+     *                                          request-body check reports what it did not do rather
+     *                                          than reading either as a fact
      * @param  array<string, list<string>>  $responseHeaders  the same, for the response
      * @param  bool  $ambiguousEmptyRequestBody  whether whatever serialised `$requestBody` writes an
      *                                           empty list and an empty map as the same bytes, so `[]`
@@ -44,11 +71,15 @@ final readonly class Exchange
         public array $cookies = [],
         public string $requestBody = '',
         public ?string $requestContentType = null,
+        ?array $requestForm = null,
+        public ?string $requestBodyUnread = null,
         public bool $ambiguousEmptyRequestBody = false,
         public string $responseBody = '',
         public ?string $responseContentType = null,
         public array $responseHeaders = [],
-    ) {}
+    ) {
+        $this->requestForm = $requestForm === [] ? null : $requestForm;
+    }
 
     /**
      * Every value the REQUEST sent under this name, empty when it sent none.

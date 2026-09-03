@@ -239,7 +239,7 @@ it('reports the same thing whatever order the filesystem lists the files in', fu
         ->and($codes[1])->toContain('op-v1-zzzzzzzz12345678.json');
 });
 
-it('reports the names an error response cannot carry, once per media type', function (): void {
+it('says nothing about a name recorded on an error status, whatever the document does with errors', function (array $representation): void {
     $base = auditBase();
     (new RecordingStore($base.'/docs/recordings'))->put(ExampleRecording::of('op:v1:abcdefgh12345678', 'GET /api/invoices', [
         RecordedExample::of('403', 'application/json', ['code' => 'a'], 'expired'),
@@ -247,25 +247,12 @@ it('reports the names an error response cannot carry, once per media type', func
         RecordedExample::of('200', 'application/json', ['id' => 1], 'paid'),
     ]));
 
-    $findings = auditFindings($base, auditDocument('op:v1:abcdefgh12345678', ['200', '403']));
-
-    // Info rather than a warning: naming is now how a body is asked for at all, so every recorded
-    // error body reaches this, and the one remaining remedy is a document-wide setting.
-    expect($findings)->toHaveCount(1)
-        ->and($findings[0]->severity)->toBe(Severity::Info)
-        ->and($findings[0]->code)->toBe('examples.recording-name-unpublished')
-        ->and($findings[0]->message)->toContain('expired, missing')
-        ->and($findings[0]->help)->toContain('representation.errors.components');
-});
-
-it('says nothing about a name the document can carry after all', function (array $statuses, array $representation): void {
-    $base = auditBase();
-    (new RecordingStore($base.'/docs/recordings'))->put(ExampleRecording::of('op:v1:abcdefgh12345678', 'GET /api/invoices', [
-        RecordedExample::of('403', 'application/json', ['code' => 'a'], 'expired'),
-    ]));
-
-    expect(auditFindings($base, auditDocument('op:v1:abcdefgh12345678', $statuses), representation: $representation))->toBe([]);
+    // Every one of these names publishes, so there is no news to give. A named example on an error
+    // status is carried into the shared component under the name it was written with
+    // ({@see SharedErrorResponses::illustrated()}), which is why the answer cannot depend on whether
+    // this document shares error components at all — asserted under both settings for that reason.
+    expect(auditFindings($base, auditDocument('op:v1:abcdefgh12345678', ['200', '403']), representation: $representation))->toBe([]);
 })->with([
-    'a document that shares no error components' => [['403'], ['errors' => ['components' => false]]],
-    'a status the document does not document' => [['200'], []],
+    'a document that shares error components' => [[]],
+    'a document that shares none' => [['errors' => ['components' => false]]],
 ]);

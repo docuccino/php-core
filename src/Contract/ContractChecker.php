@@ -364,6 +364,16 @@ final class ContractChecker
         return $value === null ? [] : [$value];
     }
 
+    /**
+     * The documented request body against what the request sent — as bytes, or as the fields a form
+     * body was parsed into ({@see Exchange}).
+     *
+     * A body that is absent and a media type that is undocumented are reported TOGETHER rather than
+     * the first winning. They are two independent mistakes, and a request that made both used to be
+     * sent away to fix one and come straight back on the other — which reads as the check moving the
+     * goalposts. The one pairing left unsaid is an absent body with no declared type: there is no type
+     * there to be undocumented, and naming one would be a second sentence about a single mistake.
+     */
     private function requestBody(ContractOperation $operation, Exchange $exchange): Outcome
     {
         $documented = $operation->requestBody($this->index->document());
@@ -384,16 +394,26 @@ final class ContractChecker
             return Outcome::failed([Violation::unresolvedRef($dangling, 'the request body')]);
         }
 
-        if (trim($exchange->requestBody) === '') {
-            return ($body['required'] ?? false) === true
-                ? Outcome::failed([Violation::ofExchange('sent no request body, which the contract documents as required', 'the request')])
-                : Outcome::passed();
+        // Nobody can say what this request sent, so nothing about it is checked and the whole half says
+        // so: an empty body would not be evidence the request sent none, and the type it declared would
+        // not be evidence of what it was ({@see Exchange::$requestBodyUnread}).
+        if ($exchange->requestBodyUnread !== null) {
+            return Outcome::passed('the request body could not be read: '.$exchange->requestBodyUnread);
+        }
+
+        $form = $exchange->requestForm;
+        $absent = $form === null && trim($exchange->requestBody) === '';
+
+        if ($absent && ($body['required'] ?? false) !== true) {
+            return Outcome::passed();
         }
 
         $content = $body['content'] ?? null;
 
         if (! is_array($content) || $content === []) {
-            return Outcome::passed('the contract documents a request body with no media types');
+            return $absent
+                ? Outcome::failed([self::sentNoBody()])
+                : Outcome::passed('the contract documents a request body with no media types');
         }
 
         /** @var array<string, mixed> $content */
@@ -401,22 +421,108 @@ final class ContractChecker
         $key = MediaType::select($content, $requested);
 
         if ($key === null) {
-            return Outcome::failed([Violation::ofExchange(sprintf(
-                'sent %s, which the contract does not document as a request body (it documents %s)',
-                $requested ?? 'no content type',
-                implode(', ', array_map(strval(...), array_keys($content))),
-            ), 'the request')]);
+            $violations = $absent ? [self::sentNoBody()] : [];
+
+            if (! $absent || $requested !== null) {
+                $violations[] = Violation::ofExchange(sprintf(
+                    'sent %s, which the contract does not document as a request body (it documents %s)',
+                    $requested ?? 'no content type',
+                    implode(', ', array_map(strval(...), array_keys($content))),
+                ), 'the request');
+            }
+
+            return Outcome::failed($violations);
+        }
+
+        if ($absent) {
+            return Outcome::failed([self::sentNoBody()]);
+        }
+
+        $schemaSegments = [...$segments, 'content', $key, 'schema'];
+
+        // On what ARRIVED rather than on what the key is called: a request the framework parsed into
+        // fields has no bytes left to decode, whether the entry describing it is `multipart/form-data`
+        // or the `*/*` that also matched it.
+        if ($form !== null) {
+            return $this->formBody($form, $content[$key], $schemaSegments, $key, 'the request body');
+        }
+
+        // The other way round, and only on this half: a form body IS checkable as its fields, so one
+        // that arrives as bytes arrived as a message nothing decoded. Saying JSON Schema cannot check
+        // it would name the wrong reason — and a form-typed RESPONSE really is bytes, which is why the
+        // sentence lives here rather than in {@see body()}.
+        if (MediaType::isForm($key)) {
+            return Outcome::passed(sprintf(
+                'the request body is %s, and reached the check as bytes rather than as the fields its schema describes',
+                $key,
+            ));
         }
 
         return $this->body(
             $exchange->requestBody,
             $content[$key],
-            [...$segments, 'content', $key, 'schema'],
+            $schemaSegments,
             $key,
             'the request body',
             'the request',
             $exchange->ambiguousEmptyRequestBody,
         );
+    }
+
+    private static function sentNoBody(): Violation
+    {
+        return Violation::ofExchange('sent no request body, which the contract documents as required', 'the request');
+    }
+
+    /**
+     * A form body against the schema the document publishes for it.
+     *
+     * There is nothing special about the schema: an OpenAPI form body is an ordinary object schema, and
+     * a `format: binary` part is an ordinary string. What is special is the VALUES, which were strings
+     * on the wire whatever the document calls them — `quantity=2` is `"2"` for the same reason
+     * `?quantity=2` is — so they are read back through {@see ParameterValue::coerceForm()}, which
+     * converts only where the string cannot stand as itself.
+     *
+     * @param  array<array-key, mixed>  $form
+     * @param  list<string>  $schemaSegments
+     */
+    private function formBody(array $form, mixed $media, array $schemaSegments, string $mediaType, string $location): Outcome
+    {
+        $schema = self::mediaSchema($media);
+
+        if ($schema === null) {
+            return Outcome::passed(self::noSchemaNote($location, $mediaType));
+        }
+
+        return Outcome::failedOrPassed($this->validate(
+            ParameterValue::coerceForm($form, is_array($schema) ? $schema : null, $this->index->document()),
+            $schemaSegments,
+            $location,
+        ));
+    }
+
+    /**
+     * The schema the document publishes for a media type, or null where it publishes none. One reading
+     * for both bodies: a note that fired on one road and not the other would be a body checked in
+     * silence on whichever road forgot it.
+     *
+     * @return array<string, mixed>|bool|null
+     */
+    private static function mediaSchema(mixed $media): array|bool|null
+    {
+        $schema = is_array($media) ? ($media['schema'] ?? null) : null;
+
+        if (is_bool($schema)) {
+            return $schema;
+        }
+
+        /** @var array<string, mixed>|null */
+        return is_array($schema) ? $schema : null;
+    }
+
+    private static function noSchemaNote(string $location, string $mediaType): string
+    {
+        return sprintf('the contract documents no schema for %s (%s)', $location, $mediaType);
     }
 
     /**
@@ -432,10 +538,8 @@ final class ContractChecker
             return Outcome::passed(sprintf('%s is %s, which JSON Schema cannot check', $location, $mediaType));
         }
 
-        $schema = is_array($media) ? ($media['schema'] ?? null) : null;
-
-        if (! is_array($schema) && ! is_bool($schema)) {
-            return Outcome::passed(sprintf('the contract documents no schema for %s (%s)', $location, $mediaType));
+        if (self::mediaSchema($media) === null) {
+            return Outcome::passed(self::noSchemaNote($location, $mediaType));
         }
 
         if (trim($raw) === '') {
