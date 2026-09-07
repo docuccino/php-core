@@ -31,6 +31,8 @@ use Docuccino\Attributes\Versioning\MadeRequestFieldOptional;
 use Docuccino\Attributes\Versioning\MadeResponseFieldOptional;
 use Docuccino\Attributes\Versioning\MadeResponseFieldRequired;
 use Docuccino\Attributes\Versioning\RemovedResponseField;
+use Docuccino\Attributes\Versioning\RenamedParameter;
+use Docuccino\Attributes\Versioning\RenamedRequestField;
 use Docuccino\Attributes\Versioning\RenamedResponseField;
 use Docuccino\Attributes\Webhook;
 
@@ -64,6 +66,8 @@ use Docuccino\Attributes\Webhook;
 #[QueryParameter]
 #[QueryParameter]
 #[RemovedResponseField]
+#[RenamedParameter]
+#[RenamedRequestField]
 #[RenamedResponseField]
 #[Response]
 #[ResponseHeader]

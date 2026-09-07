@@ -13,8 +13,8 @@ use JsonException;
 /**
  * The directory of committed recordings: one file per operation, named after its stable id.
  *
- * Reading one is all the document build ever does with a test suite's traffic — no application code
- * runs, no database is touched. The file is the whole seam, and it is committed precisely so a human
+ * Reading one is all the document build ever does with a test suite's traffic — no route is
+ * dispatched, no database is touched. The file is the whole seam, and it is committed precisely so a human
  * reviews what goes into the document before it does.
  *
  * @internal

@@ -8,6 +8,7 @@ use Docuccino\Attributes\Example;
 use Docuccino\Core\Canonical\CanonicalJsonSerializer;
 use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
+use Docuccino\Core\Document\Parameter;
 use Docuccino\Core\Draft\OperationDraft;
 use Docuccino\Core\Extensions\Context\RouteContext;
 use Docuccino\Core\Extensions\Contracts\OperationExtension;
@@ -28,12 +29,6 @@ use Docuccino\Core\Support\PlainText;
  */
 final class AttributeExamplesExtension implements OperationExtension
 {
-    /**
-     * Where a `parameter:` name is looked for, most-addressable first. A fixed order rather than the
-     * operation's own, so which parameter a name resolves to is a function of the name and nothing else.
-     */
-    private const array PARAMETER_LOCATIONS = ['path', 'query', 'header', 'cookie'];
-
     public function __construct(
         private readonly string $basePath,
     ) {}
@@ -153,7 +148,9 @@ final class AttributeExamplesExtension implements OperationExtension
 
     private function parameterTarget(OperationDraft $operation, RouteContext $context, string $name): ?ExampleTarget
     {
-        foreach (self::PARAMETER_LOCATIONS as $in) {
+        // The order a document publishes its parameters in rather than the operation's own, so which
+        // parameter a name resolves to is a function of the name and nothing else.
+        foreach (Parameter::LOCATIONS as $in) {
             if ($operation->hasParameter($in, $name)) {
                 return new ExampleTarget(ExampleTarget::PARAMETER, $name, in: $in);
             }

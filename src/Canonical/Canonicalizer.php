@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Canonical;
 
+use Docuccino\Core\Document\Parameter;
 use Docuccino\Core\Document\PathItem;
 use Docuccino\Core\Draft\SchemaKeywords;
 use Docuccino\Core\Support\Json;
@@ -24,8 +25,6 @@ use stdClass;
  */
 final class Canonicalizer
 {
-    private const array PARAMETER_IN_RANK = ['path' => 0, 'query' => 1, 'header' => 2, 'cookie' => 3];
-
     /**
      * Every member an object that is NOT a Schema Object reads as one, and the position it reads it at.
      * The handler maps below are BUILT from this ({@see schemaSlots()}), so the table is the set of outer
@@ -298,13 +297,21 @@ final class Canonicalizer
         return array_column($keyed, 1);
     }
 
+    /**
+     * Where one parameter is published, by its location: the order {@see Parameter::LOCATIONS} declares,
+     * a location it does not name after all of those, and a parameter stating no location at all last.
+     */
     private function parameterRank(mixed $parameter): int
     {
+        $unnamed = count(Parameter::LOCATIONS);
+
         if (is_array($parameter) && isset($parameter['in']) && is_string($parameter['in'])) {
-            return self::PARAMETER_IN_RANK[$parameter['in']] ?? 4;
+            $rank = array_search($parameter['in'], Parameter::LOCATIONS, true);
+
+            return $rank === false ? $unnamed : $rank;
         }
 
-        return 5;
+        return $unnamed + 1;
     }
 
     private function parameterName(mixed $parameter): string

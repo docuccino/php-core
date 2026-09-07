@@ -15,6 +15,22 @@ use Docuccino\Core\Support\Hydrate;
 final readonly class Parameter
 {
     /**
+     * The parameter locations that NAME a parameter, in the order a document publishes them. The one
+     * owner — the canonicaliser ranks by this list and the example extension searches it, and neither
+     * keeps its own copy, because one conventional order means a reader meeting two of them never has
+     * to work out which is which.
+     *
+     * OAS 3.2's fifth location is deliberately absent. `querystring` describes the WHOLE query string
+     * as one value and so names no parameter: there is nothing for a rename to move, for an example
+     * declaration to find, or for an attribute to own, and nothing this product mints publishes one. A
+     * location this does not name is ordered after the ones it does, which is a position rather than a
+     * refusal.
+     *
+     * @var list<string>
+     */
+    public const array LOCATIONS = ['path', 'query', 'header', 'cookie'];
+
+    /**
      * @param  array<string, mixed>  $rest
      */
     public function __construct(

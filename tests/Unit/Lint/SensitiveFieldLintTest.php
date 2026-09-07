@@ -225,3 +225,139 @@ it('takes an application\'s own heuristic as a name in its own right', function 
     expect($options->matchExact('sort_code'))->toBe('a bank sort code')
         ->and($options->matchExact('sort_code_prefix'))->toBeNull();
 });
+
+// --- Parameter names --------------------------------------------------------
+
+/**
+ * A document publishing one `query` parameter at the position `$at` names: an operation's own list, the
+ * path item's shared list, or `components.parameters`. The three are the same subject in the emitted
+ * document, so the lint owes the same answer at each.
+ */
+function documentWithParameter(string $at, string $name, string $in = 'query'): array
+{
+    $parameter = ['name' => $name, 'in' => $in, 'schema' => ['type' => 'string']];
+
+    return match ($at) {
+        'operation' => ['paths' => ['/x' => ['get' => ['parameters' => [$parameter]]]]],
+        'path item' => ['paths' => ['/x' => ['parameters' => [$parameter]]]],
+        'component' => ['components' => ['parameters' => ['ApiKey' => $parameter]]],
+    };
+}
+
+/**
+ * Every parameter location the OAS 3.2 meta-schema declares, and the answer the lint owes it: whether a
+ * sensitive name there is the defect. Read by the behaviour dataset AND by the guard that holds this
+ * list against the meta-schema, so a location the spec grows cannot arrive with no answer at all.
+ *
+ * @return array<string, array{0: string, 1: bool}>
+ */
+function parameterLocationExpectations(): array
+{
+    return [
+        // The URL carries the value, and a URL is written down all along the request's path — access
+        // logs, proxy logs, browser history, an outbound `Referer`.
+        'query' => ['query', true],
+        'path' => ['path', true],
+        // A header is where a credential is SUPPOSED to travel, and so, most of the time, is a cookie:
+        // firing here would fire on every correctly-secured API and take the actionable findings with it.
+        'header' => ['header', false],
+        'cookie' => ['cookie', false],
+        // 3.2's whole-query-string parameter. Its `name` names no field, so there is nothing about the
+        // name to read — the values inside it are not members this document spells.
+        'querystring' => ['querystring', false],
+    ];
+}
+
+it('warns on a sensitive parameter name at every position a document publishes one', function (string $at, string $pointer): void {
+    $findings = lintFindings(documentWithParameter($at, 'api_key'));
+
+    expect($findings)->toHaveCount(1);
+    expect($findings[0]->severity)->toBe(Severity::Warning)
+        ->and($findings[0]->code)->toBe('lint.data-leakage')
+        ->and($findings[0]->message)->toBe(sprintf(
+            'The query parameter "api_key" (%s) looks like an API key and may leak sensitive data.',
+            $pointer,
+        ));
+})->with([
+    // The pointer names the `name` member, the way a value finding points at the leaf it read: it is
+    // the member the author has to change.
+    'an operation' => ['operation', '/paths//x/get/parameters/0/name'],
+    'a path item' => ['path item', '/paths//x/parameters/0/name'],
+    'components.parameters' => ['component', '/components/parameters/ApiKey/name'],
+]);
+
+it('reads a parameter name only where the URL carries the value', function (string $in, bool $warns): void {
+    expect(lintFindings(documentWithParameter('operation', 'api_key', $in)))->toHaveCount($warns ? 1 : 0);
+})->with(parameterLocationExpectations());
+
+/**
+ * The union guard. Two answers over five locations means three the behaviour dataset could simply not
+ * mention, and a location with no row is a location the lint decides about in silence — so the list is
+ * held against the spec's own enum rather than against itself.
+ */
+it('answers for every parameter location the OAS meta-schema declares', function (): void {
+    $schema = json_decode((string) file_get_contents(dirname(__DIR__, 2).'/Fixtures/openapi-v3.2.schema.json'), true);
+    $declared = $schema['$defs']['parameter']['properties']['in']['enum'];
+    $answered = array_keys(parameterLocationExpectations());
+
+    sort($declared);
+    sort($answered);
+
+    expect($declared)->not->toBeEmpty()
+        ->and($answered)->toBe($declared);
+});
+
+it('leaves an unreadable parameter alone rather than guessing at its position', function (mixed $parameter): void {
+    expect(lintFindings(['paths' => ['/x' => ['get' => ['parameters' => [$parameter]]]]]))->toBe([]);
+})->with([
+    // Which position exposes the value is the whole reason the rule fires, so nothing about a
+    // parameter missing one can be widened into a finding.
+    'no location' => [['name' => 'api_key']],
+    'a location that is not a string' => [['name' => 'api_key', 'in' => ['query']]],
+    'a name that is not a string' => [['name' => ['api_key'], 'in' => 'query']],
+    'not an object at all' => ['api_key'],
+]);
+
+it('reports a $ref parameter once, at the component it names', function (): void {
+    $document = [
+        'paths' => ['/x' => ['get' => ['parameters' => [['$ref' => '#/components/parameters/ApiKey']]]]],
+        'components' => ['parameters' => ['ApiKey' => ['name' => 'api_key', 'in' => 'query']]],
+    ];
+
+    // The use site carries no name, so nothing is invented there; the declaration it points at is
+    // walked like any other node, which is where the author can act.
+    $findings = lintFindings($document);
+
+    expect($findings)->toHaveCount(1)
+        ->and($findings[0]->message)->toContain('/components/parameters/ApiKey/name');
+});
+
+it('does not warn on ordinary parameter names', function (string $name): void {
+    expect(lintFindings(documentWithParameter('operation', $name)))->toBe([]);
+})->with([
+    // The names the workbench's own thirteen documents publish, which is the population this half of
+    // the lint runs over: none of them may fire.
+    'page', 'per_page', 'page[size]', 'cursor', 'limit', 'offset', 'sort', 'include',
+    'fields[entries]', 'filter[status]', 'dry_run', 'session', 'trace', 'precision', 'form', 'id',
+]);
+
+it('silences a parameter by name and by pointer, the way a property is silenced', function (string $allowEntry): void {
+    $options = new SensitiveFieldLintOptions(allow: [$allowEntry]);
+
+    expect(lintFindings(documentWithParameter('operation', 'api_key'), $options))->toBe([]);
+})->with([
+    'by name' => ['api_key'],
+    'by pointer' => ['/paths//x/get/parameters/0/name'],
+    'by pointer written as a fragment' => ['#/paths//x/get/parameters/0/name'],
+]);
+
+it('names the move that would actually remove a parameter finding', function (): void {
+    // Neither hide reaches a parameter — a parameter is not a property of anything — so the help says
+    // where the value belongs instead, and why the URL is the wrong place for it.
+    $help = (string) lintFindings(documentWithParameter('operation', 'api_key'))[0]->help;
+
+    expect($help)->toContain('header')
+        ->and($help)->toContain('access logs')
+        ->and($help)->toContain('lint.leakage.allow')
+        ->and($help)->not->toContain('#[Hidden]');
+});
