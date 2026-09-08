@@ -25,6 +25,7 @@ final class DiagnosticDocs
      */
     private const SECTIONS = [
         'attribute' => 'attributes',
+        'authorization' => 'authorization',
         'components' => 'routes-operations-and-names',
         'config' => 'configuration',
         'content' => 'narrative-content',
