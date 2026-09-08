@@ -7,6 +7,7 @@ namespace Docuccino\Core\Content;
 use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
 use Docuccino\Core\Extensions\Context\DocumentConfig;
+use Docuccino\Core\Support\ConfiguredFlag;
 use Docuccino\Core\Support\ConfinedPath;
 use Docuccino\Core\Support\Hydrate;
 use Docuccino\Core\Support\PlainText;
@@ -64,14 +65,20 @@ final readonly class ContentCompiler
         $prefix = $this->sourcePrefix($dir);
 
         $pages = [];
+        $diagnostics = [];
         foreach ($this->markdownFiles($dir) as $absolute) {
-            $pages[] = $this->compilePage($absolute, $dir, $prefix);
+            [$page, $pageDiagnostics] = $this->compilePage($absolute, $dir, $prefix);
+            $pages[] = $page;
+            $diagnostics = [...$diagnostics, ...$pageDiagnostics];
         }
 
-        return [new CompiledContent($pages), []];
+        return [new CompiledContent($pages), $diagnostics];
     }
 
-    private function compilePage(string $absolute, string $dir, string $prefix): CompiledPage
+    /**
+     * @return array{0: CompiledPage, 1: list<Diagnostic>}
+     */
+    private function compilePage(string $absolute, string $dir, string $prefix): array
     {
         $raw = @file_get_contents($absolute);
         $raw = $raw === false ? '' : $raw;
@@ -85,7 +92,12 @@ final readonly class ContentCompiler
         $navType = Hydrate::stringOrNull($nav['type'] ?? null);
         $navType = in_array($navType, ['page', 'operation', 'tag'], true) ? $navType : 'page';
 
-        return new CompiledPage(
+        // Frontmatter is YAML, where `hidden: no` and `hidden: yes` are both STRINGS — so the one
+        // reading refuses them rather than coercing, which would hide every page whose author said not to.
+        $hidden = ConfiguredFlag::read($nav, 'hidden', false);
+        $refusal = $hidden->refusal('nav.hidden');
+
+        $page = new CompiledPage(
             slug: $slug,
             body: rtrim($body, "\n"),
             sourceFile: $prefix.$relative,
@@ -95,10 +107,21 @@ final readonly class ContentCompiler
             order: Hydrate::intOrNull($nav['order'] ?? null),
             tags: Hydrate::stringList($frontmatter['tags'] ?? null),
             group: Hydrate::stringOrNull($nav['group'] ?? null) ?? $this->groupFromPath($relative),
-            hidden: ($nav['hidden'] ?? false) === true,
+            hidden: $hidden->on,
             navType: $navType,
             navRef: Hydrate::stringOrNull($nav['ref'] ?? null),
         );
+
+        if ($refusal === null) {
+            return [$page, []];
+        }
+
+        return [$page, [new Diagnostic(
+            severity: Severity::Warning,
+            code: 'content.frontmatter-not-a-switch',
+            message: sprintf('%s: %s', $prefix.$relative, $refusal),
+            help: ConfiguredFlag::HELP,
+        )]];
     }
 
     /**

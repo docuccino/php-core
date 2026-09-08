@@ -6,6 +6,7 @@ namespace Docuccino\Core\Extensions\Context;
 
 use Docuccino\Core\Emit\Formats;
 use Docuccino\Core\Extensions\Contracts\TagMapper;
+use Docuccino\Core\Support\ConfiguredFlag;
 use Docuccino\Core\Support\ConfinedPath;
 use Docuccino\Core\Support\Fqcn;
 use Docuccino\Core\Support\Hydrate;
@@ -112,15 +113,25 @@ final readonly class DocumentConfig
     }
 
     /**
-     * Whether `integrations.<name>.enabled` is on, falling back to (and coercing a non-bool to)
-     * $default. So a default-on integration stays on until a document opts out, and a sensitive one
-     * like permissions stays off until a document opts in.
+     * Whether `integrations.<name>.enabled` is on, read the one way {@see ConfiguredFlag} reads every
+     * switch. So a default-on integration stays on until a document opts out, and a sensitive one like
+     * permissions stays off until a document opts in — and a key holding no switch at all takes
+     * $default and is reported rather than guessed at ({@see integrationRefusal()}).
      */
     public function integrationEnabled(string $name, bool $default): bool
     {
-        $value = $this->integration($name)['enabled'] ?? $default;
+        return ConfiguredFlag::read($this->integration($name), 'enabled', $default)->on;
+    }
 
-        return is_bool($value) ? $value : $default;
+    /**
+     * What to tell the author when `integrations.<name>.enabled` holds no switch, or null when it holds
+     * one (or none at all). The adapter owns the per-integration $default, so it asks; nothing here
+     * knows which integrations are opt-in.
+     */
+    public function integrationRefusal(string $name, bool $default): ?string
+    {
+        return ConfiguredFlag::read($this->integration($name), 'enabled', $default)
+            ->refusal('integrations.'.$name.'.enabled');
     }
 
     /**

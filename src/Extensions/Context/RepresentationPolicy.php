@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Docuccino\Core\Extensions\Context;
 
 use Docuccino\Core\Extensions\Schema\EnumDecoration;
+use Docuccino\Core\Support\ConfiguredFlag;
+use Docuccino\Core\Support\Hydrate;
 
 /**
  * The per-document representation policy: separates *what was inferred* from *how it's expressed in
@@ -71,15 +73,8 @@ final readonly class RepresentationPolicy
      */
     public static function fromConfig(array $representation, mixed $resourceWrap = null): self
     {
-        $enums = $representation['enums'] ?? null;
-        $enumNaming = is_array($enums) ? ($enums['naming'] ?? null) : null;
-        $enumComponents = is_array($enums) ? ($enums['components'] ?? null) : null;
-
-        $errors = $representation['errors'] ?? null;
-        $errorComponents = is_array($errors) ? ($errors['components'] ?? null) : null;
-
-        $pagination = $representation['pagination'] ?? null;
-        $paginationComponents = is_array($pagination) ? ($pagination['components'] ?? null) : null;
+        $enums = Hydrate::map($representation['enums'] ?? null);
+        $enumNaming = $enums['naming'] ?? null;
 
         $examples = $representation['examples'] ?? null;
 
@@ -90,9 +85,9 @@ final readonly class RepresentationPolicy
             filterStyle: self::keyword($representation['filters'] ?? null, 'bracketed'),
             listStyle: self::keyword($representation['lists'] ?? null, 'comma'),
             resourceWrap: self::normalizeWrap($resourceWrap),
-            enumComponents: ! ($enumComponents === false),
-            errorComponents: ! ($errorComponents === false),
-            paginationComponents: ! ($paginationComponents === false),
+            enumComponents: ConfiguredFlag::read($enums, 'components', true)->on,
+            errorComponents: ConfiguredFlag::read(Hydrate::map($representation['errors'] ?? null), 'components', true)->on,
+            paginationComponents: ConfiguredFlag::read(Hydrate::map($representation['pagination'] ?? null), 'components', true)->on,
             formatSamples: self::formatSamples(is_array($examples) ? ($examples['formats'] ?? null) : null),
         );
     }

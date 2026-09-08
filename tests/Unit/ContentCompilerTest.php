@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Docuccino\Core\Content\ContentCompiler;
 use Docuccino\Core\Content\Frontmatter;
+use Docuccino\Core\Diagnostics\Severity;
 use Docuccino\Core\Extensions\Context\DocumentConfig;
 
 /**
@@ -195,4 +196,43 @@ it('warns and reads nothing when a relative content.dir escapes the base path', 
 
     expect($content->isEmpty())->toBeTrue()
         ->and($diagnostics[0]->code)->toBe('content.dir-escapes-base');
+});
+
+/**
+ * Frontmatter is YAML, and YAML hands back `no`, `off`, `yes` and `on` as STRINGS. So `nav.hidden`
+ * goes through the one reading of a configured switch: it takes the default and the compiler says so,
+ * rather than coercing — a coerced `no` would hide the page whose author said not to.
+ */
+it('refuses a nav.hidden that is no switch, keeps the page visible and says so', function (string $written): void {
+    $dir = compilerDir();
+    file_put_contents($dir.'/getting-started/page.md', "---\nnav:\n  hidden: ".$written."\n---\nBody.\n");
+
+    [$content, $diagnostics] = (new ContentCompiler(sys_get_temp_dir()))->compile(configForDir($dir));
+
+    expect($content->pages[0]->hidden)->toBeFalse()
+        ->and($diagnostics)->toHaveCount(1)
+        ->and($diagnostics[0]->code)->toBe('content.frontmatter-not-a-switch')
+        ->and($diagnostics[0]->severity)->toBe(Severity::Warning)
+        ->and($diagnostics[0]->message)->toContain('nav.hidden is string rather than true or false')
+        ->and($diagnostics[0]->message)->toContain('page.md')
+        ->and($diagnostics[0]->help)->toContain('Write true or false');
+})->with([
+    // The one that would coerce to "hidden" and is the likeliest thing an author writes.
+    'no' => ['no'],
+    'off' => ['off'],
+    // And the one whose author meant to hide the page: refused, so the page stays visible and says why.
+    'yes' => ['yes'],
+    'on' => ['on'],
+]);
+
+it('says nothing about a nav.hidden written as a switch, or left out', function (): void {
+    $dir = compilerDir();
+    file_put_contents($dir.'/getting-started/a.md', "---\nnav:\n  hidden: true\n---\n");
+    file_put_contents($dir.'/getting-started/b.md', "---\nnav:\n  hidden: false\n---\n");
+    file_put_contents($dir.'/getting-started/c.md', "---\ntitle: C\n---\n");
+
+    [$content, $diagnostics] = (new ContentCompiler(sys_get_temp_dir()))->compile(configForDir($dir));
+
+    expect($diagnostics)->toBe([])
+        ->and(array_map(static fn ($page): bool => $page->hidden, $content->pages))->toBe([true, false, false]);
 });
