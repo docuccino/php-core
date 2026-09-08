@@ -138,15 +138,19 @@ final readonly class DocumentConfig
      * {@see Json::stable()} so key order can't perturb it; falls back to the document key if the bag
      * won't encode.
      *
-     * `export` is excluded on purpose: it says where artifacts are written, never what they contain.
-     * Folding it in would make adding a second export target rewrite the document's `configHash` —
-     * changing emitted bytes, and cold-busting every cached fragment — over a filename. Nothing a
-     * fragment holds can read an export destination, so this is not under-keying.
+     * `export` and `viewer` are excluded on purpose, on the same grounds: neither shapes an emitted
+     * byte. `export` says where artifacts are written, never what they contain; `viewer` is boot-time
+     * wiring — a route, its middleware and gate, which driver renders the page and where its script
+     * comes from — read only by the runtime endpoints and the console, never by document assembly.
+     * Folding either in would make moving a route or naming a second export target rewrite the
+     * document's `configHash` — changing emitted bytes, and cold-busting every cached fragment — over
+     * something no consumer of the document can see. Nothing a fragment holds can read an export
+     * destination or a viewer route, so this is not under-keying.
      */
     public function hash(): string
     {
         $shaping = $this->raw;
-        unset($shaping['export']);
+        unset($shaping['export'], $shaping['viewer']);
 
         $stable = Json::stable($shaping);
 
