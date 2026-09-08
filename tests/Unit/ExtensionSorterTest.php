@@ -51,6 +51,34 @@ it('breaks priority ties by FQCN ascending, independent of input order', functio
         ->and($reverse)->toBe([SorterDefaultA::class, SorterDefaultZ::class]);
 });
 
+/*
+ * The tie-break the docblock's third key is, stated from the contract rather than from the code:
+ * `ExtensionOrder` is `TARGET_CLASS`, so two instances of one class carry ONE priority and neither
+ * `before` nor `after` can name the other — the FQCN comparison is a class against itself. Nothing
+ * intrinsic is left, so the order they were registered in is the answer, and the chains reading it are
+ * first-match-wins or sequential. It is a real, published, author-controlled order, which is why
+ * ResolvedExtensions::cacheSignature() has to carry it (ExtensionSignatureTest holds that half). Make
+ * this sort arrival-free and this test is what says the key has become redundant.
+ */
+it('leaves two instances of one class in the order they were registered', function (): void {
+    $first = new SorterDefaultA;
+    $second = new SorterDefaultA;
+
+    expect((new ExtensionSorter)->sort([$first, $second]))->toBe([$first, $second])
+        ->and((new ExtensionSorter)->sort([$second, $first]))->toBe([$second, $first]);
+});
+
+it('declares its ordering per class, so two instances of one class can never differ in priority', function (): void {
+    // The premise of the test above, and the reason "one class at two priorities" is not a case anything
+    // can register: the ordering is declared on the CLASS, so both instances read one priority. An
+    // instance-level priority would separate such a pair intrinsically and the position keyed by
+    // ResolvedExtensions::cacheSignature() would be describing the wrong set.
+    $declaration = (new ReflectionClass(ExtensionOrder::class))->getAttributes(Attribute::class);
+    $targets = $declaration === [] ? Attribute::TARGET_ALL : ($declaration[0]->getArguments()[0] ?? Attribute::TARGET_ALL);
+
+    expect($targets)->toBe(Attribute::TARGET_CLASS);
+});
+
 it('honours before edges over priority', function (): void {
     // SorterBeforeHigh is default priority but must precede the high-priority node.
     $sorted = sortedClasses([new SorterHighPriority, new SorterBeforeHigh]);

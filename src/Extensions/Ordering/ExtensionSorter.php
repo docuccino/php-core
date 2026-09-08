@@ -4,13 +4,21 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Extensions\Ordering;
 
+use Docuccino\Core\Extensions\ResolvedExtensions;
 use ReflectionClass;
 
 /**
  * Deterministic topological sort of extensions by their {@see ExtensionOrder}. `before`/`after` become
  * hard edges; among nodes with no remaining prerequisite it picks by priority descending, then FQCN
- * ascending, then original index — so output bytes never depend on registration order. A cycle raises
- * {@see CyclicExtensionOrderException}.
+ * ascending, then original index. A cycle raises {@see CyclicExtensionOrderException}.
+ *
+ * Priority and FQCN are intrinsic, so reordering the registrations of two DIFFERENT classes moves
+ * nothing here. The index is not intrinsic, and it is reached more often than it looks: `priority` is a
+ * class-level attribute and `before`/`after` name classes, so two instances of ONE class tie on both
+ * earlier keys and the order they were registered in is what decides between them. That order is real
+ * and published — the chains reading the result are first-match-wins or sequential — and it is the
+ * author's only control over two instances of one class, which no attribute can separate. It is keyed by
+ * {@see ResolvedExtensions::cacheSignature()} and nowhere else.
  */
 final class ExtensionSorter
 {

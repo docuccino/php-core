@@ -18,6 +18,12 @@ use Throwable;
  *
  * Recording a file too many costs a rebuild; recording one too few serves a stale answer, so this errs
  * upward — while staying proportional, since a parent invalidates its subclasses and nothing else.
+ *
+ * The order is hierarchy order and it is load-bearing rather than incidental: the first entry is the file
+ * of the class asked about, and a caller reads it as where that class is written. So this list is
+ * deliberately NOT canonicalised — sorting it for tidiness answers with whichever ancestor's path sorts
+ * first, silently, since a dependency set compares the same either way. `DeclarationFilesTest`'s
+ * leading-entry row is what refuses it.
  */
 final class DeclarationFiles
 {

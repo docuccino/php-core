@@ -5,7 +5,10 @@ declare(strict_types=1);
 use Docuccino\Core\Extensions\Context\DocumentContext;
 use Docuccino\Core\Extensions\Contracts\DocumentTransformer;
 use Docuccino\Core\Extensions\Document\UirDocumentDraft;
+use Docuccino\Core\Extensions\Ordering\ExtensionOrder;
+use Docuccino\Core\Extensions\Ordering\ExtensionSorter;
 use Docuccino\Core\Extensions\ResolvedExtensions;
+use Docuccino\Core\Pipeline\FragmentCache;
 
 enum SignatureMode: string
 {
@@ -46,6 +49,15 @@ final class ClosureConfiguredTransformer implements DocumentTransformer
 
 /** A subclass, so the digest has to reach a PRIVATE property declared on the parent. */
 final class InheritingTransformer extends ConfiguredTransformer {}
+
+/** A second class at a priority of its own, so a pair of them ties on nothing. */
+#[ExtensionOrder(priority: 100)]
+final class PrioritisedTransformer implements DocumentTransformer
+{
+    public function __construct(private readonly string $mode = 'a') {}
+
+    public function transform(UirDocumentDraft $document, DocumentContext $context): void {}
+}
 
 /*
  * The fragment-cache key's view of the extension set. Extensions are registrable as instances on every
@@ -168,4 +180,84 @@ it('reads what a closure captured, when two of them were written in one place', 
 
     expect($signature('a'))->not->toBe($signature('b'))
         ->and($signature('a'))->toBe($signature('a'));
+});
+
+/*
+ * The ORDER half. A chain of extensions is first-match-wins — `RouteContext`'s six resolvers,
+ * `SchemaConverter`'s mappers — or sequential mutation, in `OperationPipeline`. So the sequence the
+ * instances arrive in is published, and a key that cannot tell two sequences apart hands a warm build
+ * the other sequence's fragment.
+ *
+ * `ExtensionSorter` decides a sequence from priority, then FQCN, then the registration index. Only the
+ * last of those is arrival, and it is reached exactly when two instances are of ONE class: the ordering
+ * attribute is declared per class, so such a pair shares a priority, and `before`/`after` name classes,
+ * so neither can name the other (ExtensionSorterTest holds that half). That is the run this signature
+ * has to carry — and only that run, because a fix that keys every order costs every application a cold
+ * rebuild for reorders that change nothing.
+ */
+
+it('separates the two registration orders of two instances of one class', function (): void {
+    // Registration through to signature, the way a build reaches it: same set both times, and the sorter
+    // has nothing but arrival to separate them by.
+    $sorter = new ExtensionSorter;
+    $a = new ConfiguredTransformer('a');
+    $b = new ConfiguredTransformer('b');
+
+    $aFirst = new ResolvedExtensions(documentTransformers: $sorter->sort([$a, $b]));
+    $bFirst = new ResolvedExtensions(documentTransformers: $sorter->sort([$b, $a]));
+
+    expect($sorter->sort([$a, $b]))->toBe([$a, $b])
+        ->and($sorter->sort([$b, $a]))->toBe([$b, $a])
+        ->and($aFirst->cacheSignature())->not->toBe($bFirst->cacheSignature());
+});
+
+it('gives the two orders two fragment keys, so a warm build cannot answer across them', function (): void {
+    // What the entries are for. Everything else about the two builds is identical, so the signature is
+    // the only field of the key that can carry the difference.
+    $sorter = new ExtensionSorter;
+    $a = new ConfiguredTransformer('a');
+    $b = new ConfiguredTransformer('b');
+    $cache = FragmentCache::disabled();
+
+    $key = static fn (ResolvedExtensions $resolved): string => $cache->key('GET /a', 'doc:default', 'config', $resolved->cacheSignature());
+
+    expect($key(new ResolvedExtensions(documentTransformers: $sorter->sort([$a, $b]))))
+        ->not->toBe($key(new ResolvedExtensions(documentTransformers: $sorter->sort([$b, $a]))));
+});
+
+it('keys two instances of different classes alike whichever order it was handed them', function (DocumentTransformer $one, DocumentTransformer $other): void {
+    // The sibling that must not regress, asserted on the signature DIRECTLY rather than through the
+    // sorter: the sorter canonicalises these pairs by FQCN or by priority, so putting them through it
+    // would pass whether the signature read order or not.
+    expect((new ResolvedExtensions(documentTransformers: [$one, $other]))->cacheSignature())
+        ->toBe((new ResolvedExtensions(documentTransformers: [$other, $one]))->cacheSignature());
+})->with([
+    'two classes at one priority' => [new ConfiguredTransformer('a'), new InheritingTransformer('b')],
+    'two classes at two priorities' => [new ConfiguredTransformer('a'), new PrioritisedTransformer('b')],
+    // There is no "one class at two priorities" row to write: the ordering attribute is TARGET_CLASS, so
+    // two instances of one class read one priority however they were registered.
+]);
+
+it('keys two indistinguishable instances of one class alike whichever order it was handed them', function (): void {
+    // Nothing separates these two, so nothing about them is observable and a reorder of them is not a
+    // rebuild. It is also what refuses a position paired with the OBJECT — keying `spl_object_id`
+    // alongside it looks safer and makes two runs of one configuration two cache entries.
+    $one = new ConfiguredTransformer('a');
+    $other = new ConfiguredTransformer('a');
+
+    expect((new ResolvedExtensions(documentTransformers: [$one, $other]))->cacheSignature())
+        ->toBe((new ResolvedExtensions(documentTransformers: [$other, $one]))->cacheSignature());
+});
+
+it('leaves an entry no other instance of its class contests exactly as it was', function (): void {
+    // The cost half, pinned as bytes: an application registering one instance per class — every
+    // application there has been — keys as it did before order was carried, so nobody pays a cold
+    // rebuild for this. A position appended unconditionally would fail here.
+    $signature = (new ResolvedExtensions(
+        documentTransformers: [new ConfiguredTransformer('a')],
+        typeToSchema: [],
+    ))->cacheSignature();
+
+    expect($signature)->toHaveCount(1)
+        ->and($signature[0])->toMatch('/^ConfiguredTransformer@[^#*]*#[0-9a-f]{16}$/');
 });

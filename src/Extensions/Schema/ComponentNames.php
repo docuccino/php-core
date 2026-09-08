@@ -202,8 +202,12 @@ final class ComponentNames
     /**
      * The name each claim is published under. Two claims can only still share a proposal by sharing a
      * ladder's last rung, which takes two identities that hash alike — so the numeric tail here is a
-     * guarantee that the map stays one-to-one rather than a naming strategy. Claims are awarded in
-     * identity order, so even that tail is a function of the contesting set.
+     * guarantee that the map stays one-to-one rather than a naming strategy. Which of them wears it has
+     * to be a function of the contesting set like every other name, so claims are awarded by
+     * discriminant, then by content, then by the registration name they arrived under. All three are
+     * data the claims map holds — the last of them is its keys — and a `usort` comparing fewer of them
+     * ties, at which point PHP's stable sort hands the decision to arrival and the tail becomes the
+     * first-come counter this class exists to refuse.
      *
      * @param  array<string, list<string>>  $ladders
      * @param  array<string, int>  $rungs
@@ -214,7 +218,9 @@ final class ComponentNames
     private static function award(array $ladders, array $rungs, array $claims, array $taken = []): array
     {
         $order = array_map(strval(...), array_keys($ladders));
-        usort($order, static fn (string $a, string $b): int => self::discriminant($claims[$a]) <=> self::discriminant($claims[$b]));
+        usort($order, static fn (string $a, string $b): int => self::discriminant($claims[$a]) <=> self::discriminant($claims[$b])
+            ?: strcmp($claims[$a]['content'], $claims[$b]['content'])
+            ?: strcmp($a, $b));
 
         $used = array_fill_keys($taken, true);
         $names = [];

@@ -91,6 +91,34 @@ it('depends on the claims alone, not on which of them registered first', functio
         ->and($backwards)->toEqual(['SSOConnectionData' => 'SSOSSOConnectionData', 'SSOConnectionData_2' => 'AuthSSOConnectionData']);
 });
 
+it('awards two claims nothing else separates by the set, not by which arrived first', function (array $claims): void {
+    // The test above proves the property over claims with DIFFERENT identities, which never reach the
+    // award's tie-break at all. These do: a pair agreeing on the discriminant runs off the same last
+    // rung, one of them wears the `_2`, and a comparison that ties lets PHP's stable sort decide which —
+    // so the plain name means one shape in a build that met it first and the other shape in a build that
+    // did not. Whichever name each claim gets, it has to get the same one both ways round.
+    [$one, $other] = array_keys($claims);
+
+    [$forwards] = ComponentNames::mint($claims);
+    [$backwards] = ComponentNames::mint([$other => $claims[$other], $one => $claims[$one]]);
+
+    expect($forwards[$one])->toBe($backwards[$one])
+        ->and($forwards[$other])->toBe($backwards[$other])
+        // Still one-to-one, or the pair agreeing is being answered by one component.
+        ->and(array_unique(array_values($forwards)))->toHaveCount(2);
+})->with([
+    // Two unidentified claims of one body: the discriminant IS the content, so both tie.
+    'nothing but a body, and the same body' => [[
+        'alpha' => claim('Thing', null, '{"type":"object"}'),
+        'beta' => claim('Thing', null, '{"type":"object"}'),
+    ]],
+    // Two claims of one identity: the discriminant is the identity, so the content never gets read.
+    'one identity claimed twice' => [[
+        'alpha' => claim('Thing', 'App\\Data\\Thing', '{"type":"object"}'),
+        'beta' => claim('Thing', 'App\\Data\\Thing', '{"type":"string"}'),
+    ]],
+]);
+
 it('retires a name two claims asked for rather than awarding it to one of them', function (): void {
     // If one claimant kept `Node`, a build that met the other first would publish a `Node` of the other
     // shape — same name, different meaning, and a green build either way.

@@ -48,6 +48,12 @@ final readonly class ResolvedExtensions
     private const TRUNCATED = '@docuccino:depth';
 
     /**
+     * What separates a {@see cacheSignature()} entry from its position in its run. Neither a class name
+     * nor a hex digest can hold it, so an entry carrying one is unambiguous.
+     */
+    private const POSITION = '*';
+
+    /**
      * Grouped by phase once, up front, so a build iterating phases per route doesn't re-filter the
      * whole list every time.
      *
@@ -114,17 +120,48 @@ final readonly class ResolvedExtensions
      * configured differently are two different builds. Keyed by the class alone they are one entry, and
      * a warm cache answers the second configuration with the first one's output.
      *
+     * Identity and multiplicity are not the whole set: ORDER is published too, because every chain
+     * reading these instances is first-match-wins (`RouteContext`'s six resolvers, `SchemaConverter`) or
+     * sequential (`OperationPipeline`). {@see ExtensionSorter} settles order from the registration index
+     * exactly where nothing intrinsic separates two instances, which is when they are of ONE class —
+     * `priority` is a class-level attribute and `before`/`after` name classes. So each member of a
+     * same-class run carries its position in that run, and every other entry stays order-free: two
+     * DIFFERENT classes cannot trade places in the sorted output at all, and keying that would buy every
+     * application a cold rebuild for a change nothing can observe.
+     *
+     * The position sees no more than the digest does — two instances differing only inside a collaborator
+     * object key alike, and so key alike in either order.
+     *
      * @return list<string>
      */
     public function cacheSignature(): array
     {
-        $signature = [];
-        foreach ($this->instances() as $extension) {
-            $signature[] = $extension::class.'@'.self::packageVersion($extension::class).'#'.self::configurationDigest($extension);
+        $instances = $this->instances();
+
+        /** @var array<class-string, int> $occurrences */
+        $occurrences = [];
+        foreach ($instances as $extension) {
+            $occurrences[$extension::class] = ($occurrences[$extension::class] ?? 0) + 1;
         }
 
-        // Two instances configured alike contribute the same entry twice, which is what running an
-        // extension twice is — the count is part of the set.
+        /** @var array<class-string, int> $reached */
+        $reached = [];
+        $signature = [];
+        foreach ($instances as $extension) {
+            $class = $extension::class;
+            $entry = $class.'@'.self::packageVersion($class).'#'.self::configurationDigest($extension);
+
+            if ($occurrences[$class] > 1) {
+                $reached[$class] = ($reached[$class] ?? -1) + 1;
+                $entry .= self::POSITION.$reached[$class];
+            }
+
+            $signature[] = $entry;
+        }
+
+        // Sorting is safe now every entry says where in its run it ran: two instances configured alike
+        // contribute the same entry twice, which is what running an extension twice is — the count is
+        // part of the set — and two configured differently no longer trade places silently.
         sort($signature);
 
         return $signature;
