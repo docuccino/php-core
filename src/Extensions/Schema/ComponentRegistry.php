@@ -12,8 +12,8 @@ use Docuccino\Core\Support\Json;
 /**
  * Accumulates the reusable schema/response/security-scheme components hoisted during a build:
  * structurally-equal registrations of ONE identity dedupe and a genuine name collision gets a suffix.
- * The `schemaId` hint (an FQCN) is remembered per component so the assembler can pin its diff identity
- * via {@see IdentityGenerator::namedSchemaId()}.
+ * The `schemaId` hint (an FQCN) is remembered per component, so {@see schemaNodeIds()} can pin the diff
+ * identity of a class-backed component via {@see IdentityGenerator::namedSchemaId()}.
  *
  * The name a registration lands on is a PROVISIONAL slot; what it ASKED to be called is kept beside it,
  * because that plus the identity is what the rename accessors publish from ({@see ComponentNames}).
@@ -181,12 +181,70 @@ final class ComponentRegistry
      * A schema that names no identity has none to lose, so two of those with equal bytes are one claim
      * and still merge — that is the same-class case, which is what dedupe is for.
      *
+     * The comparison is the slot's CLAIM ({@see claim()}) — everything that makes one registration a
+     * different component from another. Its base is not compared because the slot already fixes it: a
+     * registration only ever meets slots on its own base's suffix chain.
+     *
      * @param  array<string, mixed>  $schema
      */
     private function mergesInto(string $slot, array $schema, ?string $schemaId): bool
     {
-        return ($this->schemaIds[$slot] ?? null) === $schemaId
-            && self::structurallyEqual($this->schemas[$slot], $schema);
+        $occupant = $this->claimOf($slot);
+
+        return self::claim($occupant['base'], $schema, $schemaId) === $occupant;
+    }
+
+    /**
+     * What one registration claims, which is the whole of what makes two of them different: the name it
+     * asked for, the identity behind it, and the bytes it publishes — the last standing in for the
+     * identity a schema that names none doesn't have.
+     *
+     * Stated ONCE because three readers owe each other agreement. {@see mergesInto()} decides whether
+     * two registrations are one component, {@see ComponentNames} decides what each is called, and
+     * {@see schemaNodeIds()} mints the id each publishes: two slots the first refuses to merge must end
+     * up with neither the same name nor the same id, and they do because all three read this.
+     *
+     * @param  array<string, mixed>  $schema
+     * @return Claim
+     */
+    private static function claim(string $base, array $schema, ?string $schemaId): array
+    {
+        return ['base' => $base, 'identity' => $schemaId, 'content' => Json::stable($schema)];
+    }
+
+    /**
+     * The claim the schema in a slot makes, for a slot that holds one.
+     *
+     * @return Claim
+     */
+    private function claimOf(string $slot): array
+    {
+        return self::claim($this->schemaBases[$slot] ?? $slot, $this->schemas[$slot], $this->schemaIds[$slot] ?? null);
+    }
+
+    /**
+     * The node id each registered schema publishes under: slot => id. An FQCN answers for itself
+     * ({@see IdentityGenerator::namedSchemaId()}); everything else answers with the rest of its claim
+     * ({@see IdentityGenerator::componentSchemaId()}).
+     *
+     * Minted off the same {@see claim()} {@see mergesInto()} decides on, which is the whole of why the
+     * two agree: two slots the registry refused to merge differ in that claim, so they cannot come to
+     * share an id.
+     *
+     * @internal
+     *
+     * @return array<string, string>
+     */
+    public function schemaNodeIds(IdentityGenerator $identity): array
+    {
+        $ids = [];
+        foreach ($this->schemaClaims() as $slot => $claim) {
+            $ids[$slot] = $claim['identity'] !== null
+                ? $identity->namedSchemaId($claim['identity'])
+                : $identity->componentSchemaId($claim['base'], $this->schemas[$slot]);
+        }
+
+        return $ids;
     }
 
     /**
@@ -291,20 +349,15 @@ final class ComponentRegistry
     }
 
     /**
-     * What every registered schema claims: the name it asked for, the identity behind it, and the
-     * bytes it publishes — the last standing in for the identity a schema that names none doesn't have.
+     * What every registered schema claims ({@see claim()}), by slot.
      *
      * @return array<string, Claim>
      */
     private function schemaClaims(): array
     {
         $claims = [];
-        foreach ($this->schemas as $name => $schema) {
-            $claims[(string) $name] = [
-                'base' => $this->schemaBases[$name] ?? (string) $name,
-                'identity' => $this->schemaIds[$name] ?? null,
-                'content' => Json::stable($schema),
-            ];
+        foreach (array_keys($this->schemas) as $name) {
+            $claims[(string) $name] = $this->claimOf((string) $name);
         }
 
         return $claims;

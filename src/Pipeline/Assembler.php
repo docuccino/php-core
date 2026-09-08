@@ -596,6 +596,11 @@ final class Assembler
     }
 
     /**
+     * `components.schemas`, each entry stamped with the node id the registry mints for it
+     * ({@see ComponentRegistry::schemaNodeIds()}) — which is the registry's job because the rule that
+     * decides whether two registrations are ONE component is the rule that decides whether they may
+     * share an id.
+     *
      * @return array<string, array<string, mixed>>
      */
     private function buildComponents(ComponentRegistry $components): array
@@ -605,15 +610,11 @@ final class Assembler
             return [];
         }
 
-        $schemaIds = $components->schemaIds();
+        $ids = $components->schemaNodeIds($this->identity);
 
         $out = [];
         foreach ($schemas as $name => $schema) {
-            $id = isset($schemaIds[$name])
-                ? $this->identity->namedSchemaId($schemaIds[$name])
-                : $this->identity->inlineSchemaId($schema);
-
-            $out[$name] = ['x-docuccino' => ['id' => $id]] + $schema;
+            $out[$name] = ['x-docuccino' => ['id' => $ids[$name]]] + $schema;
         }
 
         return $out;

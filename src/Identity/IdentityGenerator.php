@@ -106,7 +106,10 @@ final readonly class IdentityGenerator
     /**
      * The identity of a schema published verbatim under a component name of its own, where the exact
      * bytes are the thing being published: `$scope` is whatever else distinguishes this publication from
-     * another carrying the same bytes.
+     * another carrying the same bytes. The shared-error hoist's mint, whose scope is the STATUS a body
+     * answers for plus the name its producer declared; a registration hoisted by the component registry
+     * is {@see componentSchemaId()}, which carries a discriminator of its own so the two producers
+     * cannot spell one scope between them.
      *
      * {@see inlineSchemaId()} cannot serve here. It normalises annotations and `required` order away so
      * an inline schema keeps its identity across a cosmetic edit — which is right for an inline schema
@@ -118,6 +121,24 @@ final readonly class IdentityGenerator
     public function publishedSchemaId(string $scope, array $schema): string
     {
         return $this->id('sch', [$scope, Json::stable($schema)]);
+    }
+
+    /**
+     * The identity of a component the schema registry hoisted that names no class of its own —
+     * {@see namedSchemaId()} answers for the ones that do. `$ask` is the name the registration asked to
+     * be called, and the bytes are what it publishes: together, the whole of what makes two such
+     * registrations two components rather than one — the registry's own statement of that difference,
+     * which is why the registry is what asks for these.
+     *
+     * Never {@see inlineSchemaId()}, whose normalisation would hand one id to two components the
+     * registry deliberately kept apart; and never the PUBLISHED name, which a sibling arriving can
+     * move — that is a rename, and the differ pairs a renamed component by the id it keeps.
+     *
+     * @param  array<string, mixed>  $schema
+     */
+    public function componentSchemaId(string $ask, array $schema): string
+    {
+        return $this->id('sch', ['component', $ask, Json::stable($schema)]);
     }
 
     /**
