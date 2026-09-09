@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Docuccino\Core\Extensions\Context;
 
 use Docuccino\Core\Emit\Formats;
+use Docuccino\Core\Extensions\Contracts\RouteFilter;
 use Docuccino\Core\Extensions\Contracts\TagMapper;
 use Docuccino\Core\Support\ConfiguredFlag;
 use Docuccino\Core\Support\ConfinedPath;
@@ -27,7 +28,7 @@ final readonly class DocumentConfig
      * @param  list<array<string, mixed>>  $servers
      * @param  list<string>  $routeInclude  wildcard patterns of URIs to include
      * @param  list<string>  $routeExclude  wildcard patterns of URIs to exclude
-     * @param  callable(RouteDescriptor): bool|null  $routeFilter  optional closure filter
+     * @param  RouteFilter|null  $routeFilter  the configured route filter, asked after the wildcards
      * @param  string|null  $authMiddleware  wildcard matched against middleware to require auth
      * @param  list<string>  $overlays  glob patterns of Overlay 1.0 documents
      * @param  array<string, mixed>  $security  the `security` config (schemes + document requirement)
@@ -44,7 +45,7 @@ final readonly class DocumentConfig
         public array $servers = [],
         public array $routeInclude = [],
         public array $routeExclude = [],
-        public mixed $routeFilter = null,
+        public ?RouteFilter $routeFilter = null,
         // Opt back into routes whose controller lives under vendor/ — excluded by default, mirroring
         // Laravel's `route:list --except-vendor`.
         public bool $includeVendor = false,
