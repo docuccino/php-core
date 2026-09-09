@@ -44,6 +44,39 @@ final class DeclarationFiles
     }
 
     /**
+     * The same list for a collaborator the build was handed at RUNTIME, or null when its declaration is
+     * nothing a fragment can be keyed on.
+     *
+     * A dependency manifest records a file that is not there as absent, and absent compares FRESH for as
+     * long as it stays absent — so a path that names no file keys nothing while looking like it does.
+     * `eval()`'d code is exactly that: it reports a file like `/app/Tags.php(12) : eval()'d code`, which
+     * no `is_file()` matches. A class with no file at all (an internal one) is the same answer arrived at
+     * sooner. Either way the caller has been handed something it cannot key, and refusing to cache is the
+     * only reading that cannot serve a stale fragment.
+     *
+     * An anonymous class and a class inside a phar both key fine, and are deliberately not special-cased:
+     * `new class {…}` reports the file it was written in, and `phar://app.phar/src/Tags.php` both
+     * `is_file()`s and hashes — to the entry's own bytes, so rebuilding the phar retires the fragment.
+     *
+     * One unhashable file anywhere in the hierarchy answers null for the whole class: a parent declared in
+     * `eval()`'d code writes as much of the answer as the leaf does.
+     *
+     * @return list<string>|null
+     */
+    public static function keyableFor(object $subject): ?array
+    {
+        $files = self::forClass(new ReflectionClass($subject));
+
+        foreach ($files as $file) {
+            if (! @is_file($file)) {
+                return null;
+            }
+        }
+
+        return $files === [] ? null : $files;
+    }
+
+    /**
      * @param  ReflectionClass<object>  $class
      * @return list<string>
      */

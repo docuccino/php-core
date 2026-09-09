@@ -6,6 +6,7 @@ namespace Docuccino\Core\Extensions\Context;
 
 use Docuccino\Core\Extensions\Schema\EnumDecoration;
 use Docuccino\Core\Support\ConfiguredFlag;
+use Docuccino\Core\Support\ConfiguredKeyword;
 use Docuccino\Core\Support\Hydrate;
 
 /**
@@ -48,13 +49,41 @@ final readonly class RepresentationPolicy
     public const WRAP_DISABLED = 'disabled';
 
     /**
+     * The closed sets the four keyword members take, and the default each answers — declared here
+     * because this is what reads them, so the reading, the constructor's default and the diagnostic
+     * that names the set are one statement rather than three literals that can drift.
+     *
+     * Ordered as the shipped configuration lists them, which is the order a refusal reads them back in.
+     *
+     * @var non-empty-list<string>
+     */
+    public const array OPERATION_IDS = ['route-name', 'controller-method'];
+
+    /** @var non-empty-list<string> */
+    public const array ENUM_NAMINGS = ['names', 'none', 'x-enumNames', 'x-enum-varnames'];
+
+    /** @var non-empty-list<string> */
+    public const array NULLABLE_STYLES = ['type-array', 'anyof'];
+
+    /** @var non-empty-list<string> */
+    public const array FILTER_STYLES = ['bracketed', 'deepObject'];
+
+    public const string DEFAULT_OPERATION_ID = 'route-name';
+
+    public const string DEFAULT_ENUM_NAMING = 'names';
+
+    public const string DEFAULT_NULLABLE = 'type-array';
+
+    public const string DEFAULT_FILTER_STYLE = 'bracketed';
+
+    /**
      * @param  array<string, string>  $formatSamples  JSON Schema `format` => the configured sample
      */
     public function __construct(
-        public string $operationId = 'route-name',
-        public string $enumNaming = 'names',
-        public string $nullable = 'type-array',
-        public string $filterStyle = 'bracketed',
+        public string $operationId = self::DEFAULT_OPERATION_ID,
+        public string $enumNaming = self::DEFAULT_ENUM_NAMING,
+        public string $nullable = self::DEFAULT_NULLABLE,
+        public string $filterStyle = self::DEFAULT_FILTER_STYLE,
         public string $resourceWrap = '',
         public bool $enumComponents = true,
         public bool $errorComponents = true,
@@ -70,15 +99,14 @@ final readonly class RepresentationPolicy
     public static function fromConfig(array $representation, mixed $resourceWrap = null): self
     {
         $enums = Hydrate::map($representation['enums'] ?? null);
-        $enumNaming = $enums['naming'] ?? null;
 
         $examples = $representation['examples'] ?? null;
 
         return new self(
-            operationId: self::keyword($representation['operation_id'] ?? null, 'route-name'),
-            enumNaming: self::keyword($enumNaming, 'names'),
-            nullable: self::keyword($representation['nullable'] ?? null, 'type-array'),
-            filterStyle: self::keyword($representation['filters'] ?? null, 'bracketed'),
+            operationId: self::keyword($representation, 'operation_id', self::DEFAULT_OPERATION_ID, self::OPERATION_IDS),
+            enumNaming: self::keyword($enums, 'naming', self::DEFAULT_ENUM_NAMING, self::ENUM_NAMINGS),
+            nullable: self::keyword($representation, 'nullable', self::DEFAULT_NULLABLE, self::NULLABLE_STYLES),
+            filterStyle: self::keyword($representation, 'filters', self::DEFAULT_FILTER_STYLE, self::FILTER_STYLES),
             resourceWrap: self::normalizeWrap($resourceWrap),
             enumComponents: ConfiguredFlag::read($enums, 'components', true)->on,
             errorComponents: ConfiguredFlag::read(Hydrate::map($representation['errors'] ?? null), 'components', true)->on,
@@ -126,8 +154,17 @@ final readonly class RepresentationPolicy
         return $this->filterStyle === 'deepObject';
     }
 
-    private static function keyword(mixed $value, string $default): string
+    /**
+     * One keyword member, refused rather than coerced — a value outside the set answers the default,
+     * which is what a `match` over an unrecognised keyword was already going to publish. The adapter's
+     * keyword catalogue reads the same paths again to REPORT the refusal, because nothing here has
+     * anywhere to put a diagnostic.
+     *
+     * @param  array<string, mixed>  $bag
+     * @param  non-empty-list<string>  $accepted
+     */
+    private static function keyword(array $bag, string $key, string $default, array $accepted): string
     {
-        return is_string($value) && $value !== '' ? $value : $default;
+        return ConfiguredKeyword::read($bag, $key, $default, $accepted)->keyword;
     }
 }

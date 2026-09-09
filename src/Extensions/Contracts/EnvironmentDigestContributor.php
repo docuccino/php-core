@@ -18,6 +18,12 @@ namespace Docuccino\Core\Extensions\Contracts;
  *
  * Reads must be defensive — an unresolvable fact contributes the empty string rather than failing the
  * build, which keeps the aggregate total and deterministic.
+ *
+ * A segment joins its values on `"\0"` and on nothing else, labels included. Joining on a character a
+ * value could hold digests `['a,b']` and `['a', 'b']` alike, so two applications the document reads
+ * differently share one warm fragment — and the values read here are config keys, prose and a
+ * delimiter whose own default is a comma. No config key, class name or YAML scalar can carry a NUL,
+ * which is the whole reason it is the separator.
  */
 interface EnvironmentDigestContributor
 {

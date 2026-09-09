@@ -12,8 +12,8 @@ use Docuccino\Core\Support\ConfiguredFlag;
  * holding ANYTHING ELSE answers the caller's default and is reported — never coerced, because
  * `(bool) 'no'` is `true` and coercion therefore reads a switch its author turned off as turned on.
  *
- * `null` counts as written: it is what an unset `env()` leaves under a key someone typed, so it is a
- * refusal and not an absence.
+ * `null` counts as written: it is what a key with nothing after the colon holds, so it is a refusal
+ * and not an absence.
  */
 it('reads only true and false as switches, and refuses everything else', function (mixed $value, ?bool $answer): void {
     // Both defaults, because a refusal's answer IS the default and a single default would hide that.
@@ -59,9 +59,9 @@ it('reads an absent key as the default, silently', function (): void {
 });
 
 /**
- * A key holding `null` must stay distinguishable from one nobody wrote: an unset `env()` under a key
- * an author typed is a mistake worth naming, and the same config surface already tells the two apart
- * for `error_responses`. Same answer, different report — which is the whole distinction.
+ * A key holding `null` must stay distinguishable from one nobody wrote: a key an author typed and left
+ * empty is a mistake worth naming, and the same config surface already tells the two apart for
+ * `error_responses`. Same answer, different report — which is the whole distinction.
  */
 it('tells a key holding null from a key nobody wrote', function (): void {
     $written = ConfiguredFlag::read(['s' => null], 's', true);

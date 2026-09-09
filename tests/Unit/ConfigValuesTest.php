@@ -20,9 +20,7 @@ it('refuses a wrong type and answers the default it names', function (string $ya
 
     $answer = match ($type) {
         'string' => $values->string('setting', $default),
-        'bool' => $values->bool('setting', $default),
-        'int' => $values->int('setting', $default),
-        default => $values->strings('setting', $default),
+        default => $values->entries('setting'),
     };
 
     $diagnostic = $values->diagnostics()[0] ?? null;
@@ -52,31 +50,12 @@ it('refuses a wrong type and answers the default it names', function (string $ya
     'a map as text' => ["setting:\n  a: 1\n", 'string', 'API', 'API', 'a map', 'text'],
     'a list as text' => ["setting: [a]\n", 'string', 'API', 'API', 'a list', 'text'],
 
-    // The Norway problem as it actually lands: these arrive as TEXT, so anything willing to convert
-    // reads the author's "off" as ON.
-    'no' => ["setting: no\n", 'bool', true, true, 'the text "no"', 'true or false'],
-    'off' => ["setting: off\n", 'bool', true, true, 'the text "off"', 'true or false'],
-    'yes against a false default' => ["setting: yes\n", 'bool', false, false, 'the text "yes"', 'true or false'],
-    'on against a false default' => ["setting: on\n", 'bool', false, false, 'the text "on"', 'true or false'],
-    'n' => ["setting: n\n", 'bool', true, true, 'the text "n"', 'true or false'],
-    'a number as a boolean' => ["setting: 1\n", 'bool', false, false, 'the whole number 1', 'true or false'],
-    'the text "false"' => ["setting: 'false'\n", 'bool', true, true, 'the text "false"', 'true or false'],
-
-    // `0777` and `08` are text, not numbers, because neither is a notation YAML has.
-    'a file mode' => ["setting: 0777\n", 'int', 8, 8, 'the text "0777"', 'a whole number'],
-    'a padded number' => ["setting: 08\n", 'int', 8, 8, 'the text "08"', 'a whole number'],
-    // A float that is not some integer stays a float, and is still refused.
-    'a fractional number' => ["setting: 1.5\n", 'int', 8, 8, 'the decimal number 1.5', 'a whole number'],
-    'a version that became a float' => ["setting: 1.10\n", 'int', 8, 8, 'the decimal number 1.1', 'a whole number'],
-    'past PHP_INT_MAX' => ["setting: 9223372036854775808\n", 'int', 8, 8, 'the text "9223372036854775808"', 'a whole number'],
-
-    // A list is refused WHOLE. A list of paths short by one silently changes what the build looks at.
-    'a list with a number in it' => ["setting:\n  - app\n  - 5\n", 'strings', ['src'], ['src'], 'a list whose entry 2 is the whole number 5', 'a list of text'],
-    'a list with a null in it' => ["setting:\n  - app\n  -\n", 'strings', ['src'], ['src'], 'a list whose entry 2 is empty', 'a list of text'],
-    'a list with a map in it' => ["setting:\n  - a: 1\n", 'strings', ['src'], ['src'], 'a list whose entry 1 is a map', 'a list of text'],
-    'a map where a list belongs' => ["setting:\n  a: 1\n", 'strings', ['src'], ['src'], 'a map', 'a list of text'],
-    'text where a list belongs' => ["setting: app\n", 'strings', ['src'], ['src'], 'the text "app"', 'a list of text'],
-    'a list with no default' => ["setting: app\n", 'strings', null, null, 'the text "app"', 'a list of text'],
+    // Listness is all a list read judges, so the whole value is refused and the caller answers its own
+    // built-in default — which is why the fallback this names is never a list of ours.
+    'a map where a list belongs' => ["setting:\n  a: 1\n", 'entries', null, null, 'a map', 'a list'],
+    'text where a list belongs' => ["setting: app\n", 'entries', null, null, 'the text "app"', 'a list'],
+    'a number where a list belongs' => ["setting: 5\n", 'entries', null, null, 'the whole number 5', 'a list'],
+    'a boolean where a list belongs' => ["setting: true\n", 'entries', null, null, 'the boolean true', 'a list'],
 ]);
 
 it('takes a value of the right type without a word', function (string $yaml, string $type, mixed $expected): void {
@@ -84,9 +63,7 @@ it('takes a value of the right type without a word', function (string $yaml, str
 
     $answer = match ($type) {
         'string' => $values->string('setting', 'fallback'),
-        'bool' => $values->bool('setting', true),
-        'int' => $values->int('setting', 99),
-        default => $values->strings('setting', ['fallback']),
+        default => $values->entries('setting'),
     };
 
     expect($answer)->toBe($expected)
@@ -97,47 +74,32 @@ it('takes a value of the right type without a word', function (string $yaml, str
     'quoted date' => ["setting: '2024-01-15'\n", 'string', '2024-01-15'],
     'three-segment version' => ["setting: 0.14.0\n", 'string', '0.14.0'],
     'plain text' => ["setting: strict\n", 'string', 'strict'],
-    'false' => ["setting: false\n", 'bool', false],
-    'true' => ["setting: true\n", 'bool', true],
-    'a number' => ["setting: 2048\n", 'int', 2048],
-    // Taken, not refused — and this row reverses what it used to assert, so here is why the new
-    // answer is right. The parser is free to hand back either the int 2 or the float 2.0 for a
-    // spelling like `+2`, so the reader settles an integral float to its integer before any typed
-    // read happens. Refusing it, as this used to, made the same file behave differently on two
-    // machines whose lockfiles differed by one patch release of the YAML parser.
-    'a whole float' => ["setting: 2.0\n", 'int', 2],
-    'a signed whole number' => ["setting: +2\n", 'int', 2],
-    'a signed zero' => ["setting: -0.0\n", 'int', 0],
-    'a hex number' => ["setting: 0x1A\n", 'int', 26],
-    'an underscored number' => ["setting: 1_000\n", 'int', 1000],
-    'a list of text' => ["setting:\n  - app\n  - modules\n", 'strings', ['app', 'modules']],
-    'an empty list' => ["setting: []\n", 'strings', []],
+    'a list of text' => ["setting:\n  - app\n  - modules\n", 'entries', ['app', 'modules']],
+    'a list of mixed entries' => ["setting:\n  - app\n  - 5\n", 'entries', ['app', 5]],
+    // An empty map arrives from YAML as an empty list, so there is nothing left to refuse it by.
+    'an empty list' => ["setting: []\n", 'entries', []],
 ]);
 
 it('answers the default for a setting nobody wrote, saying nothing', function (): void {
     $values = ConfigFile::parse("other: 1\n")->values();
 
     expect($values->string('setting', 'API'))->toBe('API')
-        ->and($values->bool('setting', true))->toBeTrue()
-        ->and($values->int('setting', 8))->toBe(8)
-        ->and($values->strings('setting', ['src']))->toBe(['src'])
+        ->and($values->entries('setting'))->toBeNull()
         ->and($values->diagnostics())->toBe([]);
 });
 
-it('answers the default for a setting written empty, and still says it was written', function (): void {
-    // The distinction some settings read as opposites, kept all the way to the reader: a typed read
-    // has no value either way, and only has() can tell the two apart.
+it('answers the default for a setting written empty, and keeps the key it was written under', function (): void {
+    // A typed read has no value either way, so it answers the default for both. The distinction stays
+    // readable off all(): the key an author wrote empty is still a key in the parsed map, which is
+    // what the passes that walk it go on.
     $values = ConfigFile::parse("setting:\nother: 1\n")->values();
 
-    expect($values->has('setting'))->toBeTrue()
-        ->and($values->has('missing'))->toBeFalse()
-        ->and($values->raw('setting'))->toBeNull()
+    expect($values->raw('setting'))->toBeNull()
         ->and($values->string('setting', 'API'))->toBe('API')
-        ->and($values->bool('setting', true))->toBeTrue()
-        ->and($values->int('setting', 8))->toBe(8)
-        ->and($values->strings('setting', ['src']))->toBe(['src'])
-        // Present and empty is not a defect, so nothing is reported. What the two readings MEAN is
-        // the caller's to decide, which is what has() is for.
+        ->and($values->entries('setting'))->toBeNull()
+        ->and(array_key_exists('setting', $values->all()))->toBeTrue()
+        ->and(array_key_exists('missing', $values->all()))->toBeFalse()
+        // Present and empty is not a defect, so nothing is reported.
         ->and($values->diagnostics())->toBe([]);
 });
 
@@ -156,32 +118,71 @@ it('addresses a nested setting by its path, and reports a refusal under its full
     $values = ConfigFile::parse("documents:\n  default:\n    title: 1.10\n")->values();
 
     expect($values->string('documents.default.title', 'API'))->toBe('API')
-        ->and($values->has('documents.default.title'))->toBeTrue()
-        ->and($values->has('documents.default.version'))->toBeFalse()
+        ->and($values->raw('documents.default.title'))->toBe(1.1)
+        ->and($values->raw('documents.default.version'))->toBeNull()
         ->and($values->diagnostics()[0]->message)->toStartWith('documents.default.title is ');
 });
 
-it('stops walking a path at the first thing that is not a map', function (): void {
+it('refuses the section a path stops walking at, rather than reading it as an absent key', function (): void {
+    // The answers are the same as for a key nobody wrote — there is no value under text either way —
+    // and the REPORT cannot be. A section is refused when it is asked for directly, on the stated
+    // ground that a build would otherwise run on every default and produce a plausible document, so
+    // the author's file looks applied and is not; a path walking through the same section reaches the
+    // same defaults by the same route, so the same refusal is owed. Silence here is the worse half of
+    // the two, because nobody asked about `documents` and so nobody could report it either.
     $values = ConfigFile::parse("documents: strict\n")->values();
 
-    expect($values->has('documents.default.title'))->toBeFalse()
-        ->and($values->raw('documents.default.title'))->toBeNull()
+    expect($values->raw('documents.default.title'))->toBeNull()
         ->and($values->string('documents.default.title', 'API'))->toBe('API')
-        ->and($values->diagnostics())->toBe([]);
+        // Named `documents` and not `documents.default.title`: the section is what the author has to
+        // go and rewrite, and the key under it does not exist to be wrong.
+        ->and(array_map(static fn (object $d): string => $d->message, $values->diagnostics()))->toBe([
+            'documents is the text "strict", where the setting takes a map of settings — an empty section is used instead.',
+        ]);
+});
+
+it('refuses a section written as a list on the way through it, like one asked for directly', function (): void {
+    // The list reading is the one a walk used to pass over in silence: a list IS an array, so it
+    // answered array_key_exists() for every key it does not have.
+    $values = ConfigFile::parse("documents:\n  default:\n    - info\n    - routes\n")->values();
+
+    expect($values->string('documents.default.info.title', 'API'))->toBe('API')
+        ->and(array_map(static fn (object $d): string => $d->message, $values->diagnostics()))->toBe([
+            'documents.default is a list, where the setting takes a map of settings — an empty section is used instead.',
+        ]);
+});
+
+it('reports one refusal for a section however many keys were read under it', function (): void {
+    // One defect is one line to go and fix. Two readers asking two keys under the same unreadable
+    // section is still that one line, and reporting it twice would make the count depend on how many
+    // readers there happened to be.
+    $values = ConfigFile::parse("lint: 'yes'\n")->values();
+
+    $values->string('lint.leakage.mode', 'strict');
+    $values->entries('lint.leakage.allow');
+
+    expect($values->diagnostics())->toHaveCount(1)
+        ->and($values->diagnostics()[0]->message)->toStartWith('lint is the text "yes", ');
+
+    // And the section asked for by name is that same one fact rather than a second line, which is
+    // what keeps map() and the walk from reporting a section twice between them.
+    $values->map('lint');
+
+    expect($values->diagnostics())->toHaveCount(1);
 });
 
 it('reads a section as a reader of its own, and its refusals come back up', function (): void {
     // A section reader records into the reader the build made, so a refusal deep in the file reaches
     // the build's diagnostics rather than being reported by whoever happened to hold the child.
-    $values = ConfigFile::parse("cache:\n  enabled: no\n  ttl: 0777\n")->values();
+    $values = ConfigFile::parse("cache:\n  path: 1.10\n  stores: fast\n")->values();
     $cache = $values->map('cache');
 
-    expect($cache->bool('enabled', true))->toBeTrue()
-        ->and($cache->int('ttl', 60))->toBe(60)
+    expect($cache->string('path', 'fragments'))->toBe('fragments')
+        ->and($cache->entries('stores'))->toBeNull()
         ->and($values->diagnostics())->toHaveCount(2)
         ->and(array_map(static fn (object $d): string => $d->message, $values->diagnostics()))->toBe([
-            'cache.enabled is the text "no", where the setting takes true or false — true is used instead.',
-            'cache.ttl is the text "0777", where the setting takes a whole number — 60 is used instead.',
+            'cache.path is the decimal number 1.1, where the setting takes text — "fragments" is used instead.',
+            'cache.stores is the text "fast", where the setting takes a list — the built-in default is used instead.',
         ])
         // Asked of the section, the answer is still the build's.
         ->and($cache->diagnostics())->toBe($values->diagnostics());
@@ -192,8 +193,8 @@ it('reads an absent or empty section as a section with nothing in it', function 
     // empty map from an empty list. Refusing it would name a defect in a file that says what it means.
     $values = ConfigFile::parse($yaml)->values();
 
-    expect($values->map('cache')->bool('enabled', true))->toBeTrue()
-        ->and($values->map('cache')->has('enabled'))->toBeFalse()
+    expect($values->map('cache')->string('path', 'fragments'))->toBe('fragments')
+        ->and($values->map('cache')->all())->toBe([])
         ->and($values->diagnostics())->toBe([]);
 })->with([
     'absent' => ["other: 1\n"],
@@ -205,7 +206,7 @@ it('reads an absent or empty section as a section with nothing in it', function 
 it('refuses a section written as something other than a map', function (string $yaml, string $found): void {
     $values = ConfigFile::parse($yaml)->values();
 
-    expect($values->map('cache')->bool('enabled', true))->toBeTrue()
+    expect($values->map('cache')->string('path', 'fragments'))->toBe('fragments')
         ->and($values->diagnostics())->toHaveCount(1)
         ->and($values->diagnostics()[0]->message)->toBe(sprintf(
             'cache is %s, where the setting takes a map of settings — an empty section is used instead.',
@@ -224,30 +225,30 @@ it('refuses a section written as something other than a map', function (string $
 it('reports one setting once, however many readers ask', function (): void {
     // Two extensions reading the same bad setting is one defect with one line to fix — and a count
     // that grew with the number of askers would also make the answer depend on who asked.
-    $values = ConfigFile::parse("setting: no\n")->values();
+    $values = ConfigFile::parse("setting: 1.10\n")->values();
 
-    $values->bool('setting', true);
-    $values->bool('setting', false);
-    $values->int('setting', 1);
+    $values->string('setting', 'first');
+    $values->string('setting', 'second');
+    $values->entries('setting');
 
     expect($values->diagnostics())->toHaveCount(1)
-        ->and($values->diagnostics()[0]->message)->toContain('true is used instead');
+        ->and($values->diagnostics()[0]->message)->toContain('"first" is used instead');
 });
 
 it('reports refusals in setting order, whatever order they were asked in', function (): void {
     // Insertion order is read order, and read order is whichever extension ran first. Sorted by the
     // setting's own name, the build reports the same bytes every run.
-    $yaml = "zeta: no\nalpha: no\nmiddle:\n  beta: no\n";
+    $yaml = "zeta: 1.10\nalpha: 1.10\nmiddle:\n  beta: 1.10\n";
 
     $first = ConfigFile::parse($yaml)->values();
-    $first->bool('zeta', true);
-    $first->map('middle')->bool('beta', true);
-    $first->bool('alpha', true);
+    $first->string('zeta', 'API');
+    $first->map('middle')->string('beta', 'API');
+    $first->string('alpha', 'API');
 
     $second = ConfigFile::parse($yaml)->values();
-    $second->bool('alpha', true);
-    $second->bool('zeta', true);
-    $second->map('middle')->bool('beta', true);
+    $second->string('alpha', 'API');
+    $second->string('zeta', 'API');
+    $second->map('middle')->string('beta', 'API');
 
     $names = static fn (ConfigValues $v): array => array_map(
         static fn (object $d): string => explode(' ', $d->message)[0],
@@ -269,8 +270,9 @@ it('escapes a value it reads back to its author', function (): void {
     $escape = ConfigFile::parse("setting: \"\x1b[31mred\"\n")->values();
     $override = ConfigFile::parse("setting: \"a\u{202E}b\"\n")->values();
 
-    $escape->bool('setting', true);
-    $override->bool('setting', true);
+    // Asked as a list, so the refusal reads the text back rather than naming its type.
+    $escape->entries('setting');
+    $override->entries('setting');
 
     expect($escape->diagnostics()[0]->message)->toContain('\\u001b')
         ->and($escape->diagnostics()[0]->message)->not->toContain("\x1b")
@@ -284,9 +286,9 @@ it('files a refusal under a setting name and not under a key that has a dot in i
     $values = ConfigFile::parse("lint:\n  leakage:\n    patterns:\n      host.internal: 5\n")->values();
     $patterns = $values->map('lint')->map('leakage')->map('patterns');
 
-    expect($patterns->has('host.internal'))->toBeFalse()
+    expect($patterns->raw('host.internal'))->toBeNull()
         ->and($patterns->string('host.internal', 'x'))->toBe('x')
         ->and($values->diagnostics())->toBe([])
         // Reached the way a map's own keys are reached, it is there.
-        ->and($patterns->map('host')->has('internal'))->toBeFalse();
+        ->and($patterns->all())->toBe(['host.internal' => 5]);
 });

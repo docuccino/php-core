@@ -7,7 +7,7 @@ namespace Docuccino\Core\Config;
 use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
 use Docuccino\Core\Support\Arr;
-use Docuccino\Core\Support\PlainText;
+use Docuccino\Core\Support\ConfiguredValue;
 
 /**
  * The parsed configuration, read one setting at a time by a reader that REFUSES a value of the wrong
@@ -16,14 +16,15 @@ use Docuccino\Core\Support\PlainText;
  *
  * Casting is what this class exists to not do, and YAML is why. `version: 1.10` parses to the float
  * 1.1, so `(string)` publishes "1.1" — a different version number in a document somebody's client is
- * generated from. `enabled: no` parses to the STRING "no", so a forgiving boolean read makes it TRUE,
- * which is the opposite of what the author wrote. Neither is a value to salvage; both are a line to go
- * and fix, and a diagnostic is the only thing that gets the author there.
+ * generated from. That is not a value to salvage; it is a line to go and fix, and a diagnostic is the
+ * only thing that gets the author there. A switch and a closed-set keyword are the same trap one layer
+ * over, and each has a reader of its own — `ConfiguredFlag` and `ConfiguredKeyword`. `enabled: no` is
+ * the string "no", which anything willing to coerce reads as ON.
  *
- * Absent and present-null are different questions with different answers. {@see has()} answers the
- * first and nothing else does — a reader that needs to tell "the author never mentioned this" from
- * "the author mentioned it and the value did not survive" asks it, and a typed read answers the
- * default for both because there is no value either way.
+ * A typed read answers the setting's default for absent and for present-null alike, because there is
+ * no value either way. The two stay distinguishable all the same, off {@see all()}: a key written with
+ * an empty value is still a key the author wrote, so whatever walks the parsed map sees it and holds it
+ * to the same reporting as any other key.
  *
  * Diagnostics are keyed by setting and handed back in the setting's alphabetical order, so a build
  * reports the same lines however many readers asked and in whatever order they asked.
@@ -64,33 +65,35 @@ final class ConfigValues
         return new self($values);
     }
 
-    /**
-     * Whether the setting is written in the file AT ALL — true for a key present and null.
-     *
-     * The distinction is load-bearing rather than pedantic. A key nobody wrote has expressed no
-     * intent, and its documented fallback is the right answer; a key written with an unreadable value
-     * has an author behind it, and the two readings of some settings are opposites.
-     */
-    public function has(string $path): bool
-    {
-        return $this->find($path)[0];
-    }
-
     /** The value exactly as parsed, with nothing rejected and nothing converted. Null when absent. */
     public function raw(string $path): mixed
     {
-        return $this->find($path)[1];
+        return $this->find($path);
+    }
+
+    /**
+     * This reader's whole map, exactly as parsed — for a caller that type-checks a section itself and
+     * would report the same defect twice if it also read that section a key at a time.
+     *
+     * A section reader made by {@see map()} answers its own keys and nothing else, and a section that
+     * was REFUSED answers none, so the refusal and the empty answer stay one fact rather than two.
+     *
+     * @return array<string, mixed>
+     */
+    public function all(): array
+    {
+        return $this->values;
     }
 
     public function string(string $path, ?string $default = null): ?string
     {
-        $value = $this->find($path)[1];
+        $value = $this->find($path);
 
         if ($value === null || is_string($value)) {
             return $value ?? $default;
         }
 
-        $this->refuse($path, self::described($value), 'text', self::fallback($default), match (true) {
+        $this->refuse($path, ConfiguredValue::described($value), 'text', self::fallback($default), match (true) {
             is_float($value) => 'Quote it. An unquoted number is read as a number, and a trailing zero does not survive that — `1.10` becomes 1.1.',
             is_bool($value) => 'Quote it. Unquoted `true` and `false` are the only two words YAML reads as booleans.',
             default => 'Quote it, so it is read as text rather than as a number.',
@@ -99,89 +102,35 @@ final class ConfigValues
         return $default;
     }
 
-    public function bool(string $path, ?bool $default = null): ?bool
-    {
-        $value = $this->find($path)[1];
-
-        if ($value === null || is_bool($value)) {
-            return $value ?? $default;
-        }
-
-        $this->refuse($path, self::described($value), 'true or false', self::fallback($default), match (true) {
-            // The one that catches people. YAML reads `no`, `off`, `yes` and `on` as TEXT, so the
-            // author who wrote the shortest possible "off" wrote a non-empty string — which anything
-            // willing to convert would read as ON.
-            is_string($value) && in_array(strtolower($value), ['no', 'off', 'n', 'yes', 'on', 'y'], true) => 'Write `false` or `true`. Those are the only two words read as booleans — `no`, `off`, `yes` and `on` are read as text.',
-            default => 'Write `false` or `true`, unquoted.',
-        });
-
-        return $default;
-    }
-
-    public function int(string $path, ?int $default = null): ?int
-    {
-        $value = $this->find($path)[1];
-
-        if ($value === null || is_int($value)) {
-            return $value ?? $default;
-        }
-
-        $this->refuse($path, self::described($value), 'a whole number', self::fallback($default), match (true) {
-            is_float($value) => 'Write it without a decimal point.',
-            // `0777` and `08` are text, not numbers, because neither is valid in any of YAML's integer
-            // notations — which is exactly the spelling somebody reaches for first.
-            is_string($value) => 'Write it unquoted, without a leading zero and without thousands separators.',
-            default => 'Write a whole number.',
-        });
-
-        return $default;
-    }
-
     /**
-     * A list of text, refused WHOLE when any member is not text.
+     * A list, refused when the value is not one. The ENTRIES are the caller's to read: a `servers` entry
+     * is an OAS Server Object and an `exclude` entry is a glob, and there is no one reading of both.
      *
-     * Dropping the offending member instead would be the quiet kind of wrong: a list of paths or
-     * patterns short by one silently changes what the build looks at, and the document that comes out
-     * is missing things rather than visibly broken.
+     * Listness alone, and deliberately not the entries too, because the fallback has to be one the
+     * caller actually takes. Every reader of a configured list answers its own built-in default for a
+     * value that is no list, which is what this refusal claims — while a reader that keeps the members
+     * it could read does NOT discard the list over one bad entry, so refusing the whole of it here
+     * would name a fallback nobody returns.
      *
-     * @param  list<string>|null  $default
-     * @return list<string>|null
+     * @return list<mixed>|null
      */
-    public function strings(string $path, ?array $default = null): ?array
+    public function entries(string $path): ?array
     {
-        $value = $this->find($path)[1];
+        $value = $this->find($path);
 
         if ($value === null) {
-            return $default;
+            return null;
         }
 
-        if (! is_array($value) || ! array_is_list($value)) {
-            $this->refuse($path, self::described($value), 'a list of text', self::fallback($default), 'Write it as a YAML list, one `- entry` per line.');
-
-            return $default;
+        // An empty map arrives as an empty LIST, so it comes through as one rather than as a refusal —
+        // see section() for why that ambiguity is never resolved by guessing.
+        if (is_array($value) && array_is_list($value)) {
+            return $value;
         }
 
-        $strings = [];
+        $this->refuse($path, ConfiguredValue::described($value), 'a list', self::fallback(null), 'Write it as a YAML list, one `- entry` per line.');
 
-        foreach ($value as $index => $member) {
-            if (is_string($member)) {
-                $strings[] = $member;
-
-                continue;
-            }
-
-            $this->refuse(
-                $path,
-                sprintf('a list whose entry %d is %s', $index + 1, self::described($member)),
-                'a list of text',
-                self::fallback($default),
-                'Quote that entry, or remove it. One entry the build cannot read makes the whole list untrustworthy, so none of it is used.',
-            );
-
-            return $default;
-        }
-
-        return $strings;
+        return null;
     }
 
     /**
@@ -189,28 +138,15 @@ final class ConfigValues
      * full names.
      *
      * An absent section and an empty one answer the same reader over no values, because a section is
-     * addressed by its keys and there are none either way. A section written as a LIST is refused:
-     * `documents:` followed by `- name` is a different document from `documents:` followed by
-     * `name:`, and reading the first as the second would invent structure the author did not write.
+     * addressed by its keys and there are none either way.
      */
     public function map(string $path): self
     {
-        $value = $this->find($path)[1];
-        $root = $this->root ?? $this;
-
-        if (is_array($value) && ! array_is_list($value)) {
-            return new self(Arr::stringKeyed($value), $this->prefix.$path.'.', $root);
-        }
-
-        // An empty map arrives from YAML as an empty LIST — `{}` and `[]` parse to the same PHP array,
-        // and there is nothing left in the parsed value to tell one from the other. So an empty
-        // anything reads as an empty section rather than a refusal, because refusing it would name a
-        // defect in a file that says exactly what it means.
-        if ($value !== null && $value !== []) {
-            $this->refuse($path, self::described($value), 'a map of settings', 'an empty section', 'Write the section as `key: value` pairs, indented under the section name.');
-        }
-
-        return new self([], $this->prefix.$path.'.', $root);
+        return new self(
+            $this->section($path, $this->find($path)) ?? [],
+            $this->prefix.$path.'.',
+            $this->root ?? $this,
+        );
     }
 
     /**
@@ -229,24 +165,66 @@ final class ConfigValues
     }
 
     /**
-     * @return array{0: bool, 1: mixed} [written in the file, the value]
+     * The section at `$path` as a map, or null when there is none there — refusing a value that is no
+     * section on the way.
+     *
+     * The one place that decides what a section IS, because two answers to that question is a hole:
+     * {@see map()} hands a section back as a reader, and {@see find()} walks THROUGH a section to
+     * reach a key under it. A walk that quietly accepted what map() refuses left a whole subtree
+     * unread with nothing said — `routes: 'api/*'` emptied a document's route filter, and every route
+     * in the application was published.
+     *
+     * A section written as a LIST is refused with the rest: `documents:` followed by `- name` is a
+     * different document from `documents:` followed by `name:`, and reading the first as the second
+     * would invent structure the author did not write.
+     *
+     * @return array<string, mixed>|null
      */
-    private function find(string $path): array
+    private function section(string $path, mixed $value): ?array
     {
+        if (is_array($value) && ! array_is_list($value)) {
+            return Arr::stringKeyed($value);
+        }
+
+        // An empty map arrives from YAML as an empty LIST — `{}` and `[]` parse to the same PHP array,
+        // and there is nothing left in the parsed value to tell one from the other. So an empty
+        // anything reads as an empty section rather than a refusal, because refusing it would name a
+        // defect in a file that says exactly what it means.
+        if ($value !== null && $value !== []) {
+            $this->refuse($path, ConfiguredValue::described($value), 'a map of settings', 'an empty section', 'Write the section as `key: value` pairs, indented under the section name.');
+        }
+
+        return null;
+    }
+
+    /** The value at a dotted path, or null when nothing is written there. */
+    private function find(string $path): mixed
+    {
+        $segments = explode('.', $path);
+        $last = count($segments) - 1;
         $node = $this->values;
+        $walked = '';
 
         // A dot addresses STRUCTURE — `documents.title` is the `title` key of the `documents` section.
         // A key whose own name holds a dot is reached by taking its section with map() and reading the
         // key there, which is how the settings whose keys are author-supplied patterns are read.
-        foreach (explode('.', $path) as $segment) {
+        foreach ($segments as $index => $segment) {
             if (! is_array($node) || ! array_key_exists($segment, $node)) {
-                return [false, null];
+                return null;
             }
 
             $node = $node[$segment];
+            $walked = $walked === '' ? $segment : $walked.'.'.$segment;
+
+            // Every segment but the last addresses a section, so one holding something else is refused
+            // under its own name — see section(). The walk stops there either way: there is no key to
+            // reach under a value that has none.
+            if ($index !== $last && $this->section($walked, $node) === null) {
+                return null;
+            }
         }
 
-        return [true, $node];
+        return $node;
     }
 
     /**
@@ -277,39 +255,12 @@ final class ConfigValues
     }
 
     /**
-     * The answer a refused setting is about to give, named for its author. One place, because four
-     * typed readers say it and a fifth answer that disagreed with the other four is exactly the drift
-     * this phrasing exists to prevent.
+     * The answer a refused setting is about to give, named for its author. One place, because both
+     * typed reads say it and a second phrasing that disagreed with the first is exactly the drift this
+     * wording exists to prevent.
      */
-    private static function fallback(mixed $default): string
+    private static function fallback(?string $default): string
     {
-        return $default === null || $default === [] ? 'the built-in default' : self::rendered($default);
-    }
-
-    /** What was written, as a phrase naming both the type and — for a scalar — the value itself. */
-    private static function described(mixed $value): string
-    {
-        return match (true) {
-            $value === null => 'empty',
-            is_bool($value) => sprintf('the boolean %s', $value ? 'true' : 'false'),
-            is_int($value) => sprintf('the whole number %s', self::rendered($value)),
-            is_float($value) => sprintf('the decimal number %s', self::rendered($value)),
-            is_string($value) => sprintf('the text %s', self::rendered($value)),
-            is_array($value) => array_is_list($value) ? 'a list' : 'a map',
-            default => 'a value of a kind YAML has no notation for',
-        };
-    }
-
-    /**
-     * A value as it should be read back to its author.
-     *
-     * Through {@see PlainText} because every byte here came out of a file: a setting can hold anything
-     * somebody typed, and a diagnostic goes to a terminal and to CI logs.
-     */
-    private static function rendered(mixed $value): string
-    {
-        $json = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION);
-
-        return PlainText::of($json === false ? '(unprintable)' : $json);
+        return $default === null ? 'the built-in default' : ConfiguredValue::rendered($default);
     }
 }

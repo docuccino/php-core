@@ -8,6 +8,7 @@ use Docuccino\Core\Emit\Formats;
 use Docuccino\Core\Extensions\Contracts\RouteFilter;
 use Docuccino\Core\Extensions\Contracts\TagMapper;
 use Docuccino\Core\Support\ConfiguredFlag;
+use Docuccino\Core\Support\ConfiguredKeyword;
 use Docuccino\Core\Support\ConfinedPath;
 use Docuccino\Core\Support\Fqcn;
 use Docuccino\Core\Support\Hydrate;
@@ -15,13 +16,60 @@ use Docuccino\Core\Support\Json;
 
 /**
  * One document's resolved configuration (design §9). Framework-agnostic — the adapter builds it
- * from `config/docuccino.php`. Typed accessors cover what the pipeline and built-in extensions
- * read; the untouched `raw` bag carries everything else, so not every key needs modelling here.
+ * from one entry of the configuration file's `documents` map. Typed accessors cover what the
+ * pipeline and built-in extensions read; the untouched `raw` bag carries everything else, so not
+ * every key needs modelling here.
  */
 final readonly class DocumentConfig
 {
     /** The `info.version` a document that names none falls back to — a placeholder, never a real one. */
     public const string DEFAULT_VERSION = '1.0.0';
+
+    /**
+     * The `info.title` a document that names none falls back to. Here rather than at the reader
+     * because two of them answer it now — the one that BUILDS the info object and the one that
+     * reports a title it had to refuse — and a fallback named in a diagnostic that the document does
+     * not actually use is worse than no diagnostic, because it is checkable and wrong.
+     */
+    public const string DEFAULT_TITLE = 'API Documentation';
+
+    /**
+     * The closed sets the document's keyword settings take, and the default each answers, ordered as
+     * the shipped configuration lists them. Declared here because a keyword setting is READ in one
+     * place and ACTED ON in several: `versioning` reaches two policy resolvers, `on_route_error` a
+     * generator, `error_responses` the whole error tier — and a set restated at each of those is a set
+     * that grows in one of them. {@see ConfiguredKeyword} is the reading; the adapter's keyword
+     * catalogue reads the same paths again to REPORT what was refused, because nothing here has
+     * anywhere to put a diagnostic.
+     *
+     * @var non-empty-list<string>
+     */
+    public const array ERROR_RESPONSES = ['default', 'none'];
+
+    /**
+     * What a WRITTEN `error_responses` naming no strategy answers. Not the same as the absent answer
+     * below, and deliberately so: a key nobody wrote has expressed nothing, and a key written with an
+     * unreadable value has an author behind it. The adapter's config factory is where that is argued.
+     */
+    public const string ERROR_RESPONSES_DEFAULT = 'default';
+
+    /** What a document that never mentions `error_responses` answers. */
+    public const string ERROR_RESPONSES_ABSENT = 'none';
+
+    /** @var non-empty-list<string> */
+    public const array TAG_STRATEGIES = ['controller', 'none'];
+
+    public const string TAG_STRATEGY_DEFAULT = 'controller';
+
+    /** @var non-empty-list<string> */
+    public const array VERSIONING_POLICIES = ['none', 'semver', 'date'];
+
+    public const string VERSIONING_DEFAULT = 'none';
+
+    /** @var non-empty-list<string> */
+    public const array ON_ROUTE_ERRORS = ['skeleton', 'omit'];
+
+    public const string ON_ROUTE_ERROR_DEFAULT = 'skeleton';
 
     /**
      * @param  array<string, mixed>  $info  OAS info object (title, version, description …)
@@ -52,14 +100,14 @@ final readonly class DocumentConfig
         public ?string $authMiddleware = null,
         // Whether the document publishes error responses the application did not state itself:
         // 'default' (the framework's own shapes, plus the implicit ones) or 'none'.
-        public string $errorResponses = 'none',
+        public string $errorResponses = self::ERROR_RESPONSES_ABSENT,
         public array $overlays = [],
-        public string $onRouteError = 'skeleton',
+        public string $onRouteError = self::ON_ROUTE_ERROR_DEFAULT,
         public array $security = [],
         public array $tags = [],
         public array $representation = [],
         public array $viewer = [],
-        public string $versioning = 'none',
+        public string $versioning = self::VERSIONING_DEFAULT,
         public ?TagMapper $tagMapper = null,
         public array $raw = [],
     ) {}
@@ -73,14 +121,13 @@ final readonly class DocumentConfig
     /**
      * How an operation with no `#[Group]` gets its default tag: `controller` (short controller name,
      * `Controller` stripped, then through `tags.map`) or `none`. Defaults to `controller` so an
-     * untagged API still groups sensibly. An unknown value coerces to `controller` and the adapter
-     * reports that as a `config.unknown-tag-strategy` diagnostic rather than swallowing it.
+     * untagged API still groups sensibly. A value outside the set answers `controller` and the adapter
+     * reports it rather than swallowing it.
      */
     public function tagDefaultStrategy(): string
     {
-        $strategy = $this->tags['default_strategy'] ?? 'controller';
-
-        return $strategy === 'none' ? 'none' : 'controller';
+        return ConfiguredKeyword::read($this->tags, 'default_strategy', self::TAG_STRATEGY_DEFAULT, self::TAG_STRATEGIES)
+            ->keyword;
     }
 
     /**

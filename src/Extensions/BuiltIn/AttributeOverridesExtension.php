@@ -16,6 +16,7 @@ use Docuccino\Core\Draft\DeprecationNote;
 use Docuccino\Core\Draft\DescriptionAppender;
 use Docuccino\Core\Draft\OperationDraft;
 use Docuccino\Core\Extensions\Context\RouteContext;
+use Docuccino\Core\Extensions\Context\TagMapperKeying;
 use Docuccino\Core\Extensions\Contracts\OperationExtension;
 use Docuccino\Core\Extensions\Contracts\OperationPhase;
 use Docuccino\Core\Patch\Contribution;
@@ -297,12 +298,20 @@ final class AttributeOverridesExtension implements OperationExtension
         }
 
         if ($tags !== []) {
+            // A configured mapper answered, so its files key this fragment ({@see TagMapperKeying}).
+            TagMapperKeying::record($context->dependencies(), $context->document);
+
             return $tags;
         }
 
         // No #[Group]: the document's default strategy decides, and the assembler re-derives the same
         // answer to spot two controllers landing on one tag — so the rule lives there, once.
         $default = $context->document->defaultTag($context->actionRef->class);
+
+        if ($default !== null) {
+            // A derived tag went through the mapper too — a null default is the one answer that did not.
+            TagMapperKeying::record($context->dependencies(), $context->document);
+        }
 
         return $default === null ? [] : [$default];
     }

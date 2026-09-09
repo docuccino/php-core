@@ -83,6 +83,9 @@ it('parses the representative configuration to the bytes committed beside it', f
         JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION | JSON_THROW_ON_ERROR,
     )."\n";
 
+    // Written here rather than through assertGolden(), which addresses the ADAPTER's golden directory
+    // and looks past a generator version. Neither applies: this is a core golden, and a parsed config
+    // bag carries no generator member for a comparison to normalise.
     $golden = dirname(__DIR__).'/Fixtures/golden/config-parse.json';
     if (getenv('DOCUCCINO_UPDATE_GOLDEN') === '1') {
         file_put_contents($golden, $json);

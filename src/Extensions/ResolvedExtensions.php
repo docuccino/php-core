@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Extensions;
 
-use BackedEnum;
-use Closure;
 use Composer\InstalledVersions;
 use Docuccino\Core\Extensions\Contracts\DocumentTransformer;
 use Docuccino\Core\Extensions\Contracts\EnvironmentDigestContributor;
@@ -22,11 +20,10 @@ use Docuccino\Core\Extensions\Contracts\RouteResolver;
 use Docuccino\Core\Extensions\Contracts\RuleTransformer;
 use Docuccino\Core\Extensions\Contracts\TypeToSchema;
 use Docuccino\Core\Extensions\Ordering\ExtensionSorter;
-use Docuccino\Core\Support\Json;
+use Docuccino\Core\Extensions\Schema\ConfigurationDigest;
+use Docuccino\Core\Extensions\Schema\DeclarationFiles;
 use ReflectionClass;
-use ReflectionFunction;
 use Throwable;
-use UnitEnum;
 
 /**
  * The extension set for one build, partitioned by contract and pre-sorted within each partition by
@@ -41,17 +38,14 @@ use UnitEnum;
  */
 final readonly class ResolvedExtensions
 {
-    /** How deep {@see readable()} descends into a property before it stops. */
-    private const MAX_DEPTH = 64;
-
-    /** What stands in for a value below {@see MAX_DEPTH}. */
-    private const TRUNCATED = '@docuccino:depth';
-
     /**
      * What separates a {@see cacheSignature()} entry from its position in its run. Neither a class name
      * nor a hex digest can hold it, so an entry carrying one is unambiguous.
      */
     private const POSITION = '*';
+
+    /** What separates a {@see cacheSignature()} entry from its source digest, on the same reasoning. */
+    private const SOURCE = '~';
 
     /**
      * Grouped by phase once, up front, so a build iterating phases per route doesn't re-filter the
@@ -110,10 +104,21 @@ final readonly class ResolvedExtensions
 
     /**
      * The fragment-cache's view of the extension set: one entry per resolved INSTANCE, each naming its
-     * class, its composer package's installed version and a digest of its own configuration. The
-     * version pairing means upgrading a package that changes an extension's behaviour invalidates every
-     * fragment even though the class list didn't move; the lookup is tolerant, and an unresolvable
-     * package contributes an empty version rather than failing the build.
+     * class, its composer package's installed version, a digest of its own configuration and a digest of
+     * the bytes it is WRITTEN in. The version pairing means upgrading a package that changes an
+     * extension's behaviour invalidates every fragment even though the class list didn't move; the
+     * lookup is tolerant, and an unresolvable package contributes an empty version rather than failing
+     * the build.
+     *
+     * The version cannot stand in for the body, which is why {@see sourceDigest()} is paired with it: a
+     * package's version moves when its author releases, and an extension in the APPLICATION's own tree
+     * has no such author — its "package" is the root, whose version does not move when a file is saved.
+     * So an author edited their own extension, rebuilt, and was served the output the old body produced.
+     * The two components are complementary rather than redundant, and neither is a heuristic about where
+     * a class lives: the source digest is inert exactly where the version is informative, since a release
+     * nobody edited reinstalls byte-identically, and informative exactly where the version is inert. A
+     * `composer update` that leaves an extension's own bytes alone therefore moves no digest, and one
+     * that changes another file of its package is what the version is still there for.
      *
      * Per INSTANCE rather than per class because an extension is registered as an object as often as a
      * class-string (`Docuccino::extend(new MyExtension(mode: 'a'))`), and two instances of one class
@@ -132,6 +137,10 @@ final readonly class ResolvedExtensions
      * The position sees no more than the digest does — two instances differing only inside a collaborator
      * object key alike, and so key alike in either order.
      *
+     * Every entry is document-wide, this one included: an extension shapes whatever operations it is run
+     * over, and nothing here can say which of them its answer reached. So an edited extension retires
+     * every fragment — the same blast radius the package version has always had, rather than a new one.
+     *
      * @return list<string>
      */
     public function cacheSignature(): array
@@ -149,7 +158,8 @@ final readonly class ResolvedExtensions
         $signature = [];
         foreach ($instances as $extension) {
             $class = $extension::class;
-            $entry = $class.'@'.self::packageVersion($class).'#'.self::configurationDigest($extension);
+            $entry = $class.'@'.self::packageVersion($class).'#'.ConfigurationDigest::of($extension)
+                .self::SOURCE.(self::sourceDigest($extension) ?? '');
 
             if ($occurrences[$class] > 1) {
                 $reached[$class] = ($reached[$class] ?? -1) + 1;
@@ -165,6 +175,66 @@ final readonly class ResolvedExtensions
         sort($signature);
 
         return $signature;
+    }
+
+    /**
+     * The classes of the resolved extensions whose declaration no file can be hashed back from, sorted.
+     * A caller holding the fragment cache owes them a refusal: an entry keyed on an empty source digest
+     * is keyed on nothing, and there is nothing else in the signature that moves when such a class's
+     * body does.
+     *
+     * The whole resolved set is read, which is the set {@see cacheSignature()} publishes — the refusal
+     * and the key have to answer over the same instances, or a fragment keyed on an entry the refusal
+     * did not look at is keyed on nothing again.
+     *
+     * @return list<class-string>
+     */
+    public function unhashableExtensions(): array
+    {
+        $classes = [];
+        foreach ($this->instances() as $extension) {
+            if (self::sourceDigest($extension) === null) {
+                $classes[$extension::class] = true;
+            }
+        }
+
+        $classes = array_keys($classes);
+        sort($classes);
+
+        return $classes;
+    }
+
+    /**
+     * A digest of the bytes one extension instance is written in — its own file, its parents' and its
+     * traits' ({@see DeclarationFiles}) — or null when its declaration is nothing that can be hashed.
+     *
+     * The hierarchy is read whole because a parent or a trait writes as much of an extension's answer as
+     * the leaf does, and in hierarchy order because two classes swapping which of them declares a method
+     * is a different extension. Only CONTENT goes in, never the paths: what the extension answers is a
+     * function of its bytes, and a file moved with its bytes intact answers the same.
+     *
+     * Null is the eval()'d case and the internal-class case. A file that is there and cannot be read is
+     * null too: it is a body this build cannot see, which is the same position as one it cannot find.
+     */
+    private static function sourceDigest(object $extension): ?string
+    {
+        $files = DeclarationFiles::keyableFor($extension);
+
+        if ($files === null) {
+            return null;
+        }
+
+        $digests = [];
+        foreach ($files as $file) {
+            $digest = @hash_file('sha256', $file);
+            if ($digest === false) {
+                return null;
+            }
+
+            $digests[] = $digest;
+        }
+
+        return substr(hash('sha256', implode("\0", $digests)), 0, 16);
     }
 
     /**
@@ -190,90 +260,6 @@ final readonly class ResolvedExtensions
     private function partitions(): array
     {
         return [$this->routeResolvers, $this->operationExtensions, $this->typeToSchema, $this->exceptionToResponse, $this->documentTransformers, $this->ruleTransformers, $this->responseAnalysisTargets, $this->responseStatusResolvers, $this->payloadMediaTypeResolvers, $this->routeBindingSchemaResolvers, $this->routeBindingFieldSchemaResolvers, $this->environmentDigestContributors, $this->routeNoteCollectors];
-    }
-
-    /**
-     * A digest of one extension instance's own configuration: its properties, private and inherited
-     * ones included, keyed by where they were declared.
-     *
-     * What it sees is what configuration is made of: scalars, arrays of them, enum cases, and a closure
-     * by where it was written plus what it captured. What it does NOT see is a collaborator object's own
-     * fields — this deliberately does not descend into one, since an injected container would be an
-     * unbounded walk and a collaborator is a dependency rather than a setting. Two instances differing
-     * only inside such an object therefore still key alike; holding the setting itself is the fix.
-     *
-     * The digest leans on {@see Json::stable()} being TOTAL over what a property can hold: a value
-     * `json_encode` refuses — a binary blob, a resource, an INF — fingerprints as itself, because one
-     * shared digest for all of them would reopen the very cache collision this method closes.
-     */
-    private static function configurationDigest(object $extension): string
-    {
-        $state = [];
-        foreach (self::properties($extension) as $key => $value) {
-            $state[$key] = self::readable($value);
-        }
-
-        return $state === [] ? '' : substr(hash('sha256', Json::stable($state)), 0, 16);
-    }
-
-    /**
-     * An instance's readable property values, keyed `Declaring\Class::name`. Uninitialised typed
-     * properties have no value to read and static ones belong to the class, not the configuration.
-     *
-     * @return array<string, mixed>
-     */
-    private static function properties(object $extension): array
-    {
-        $values = [];
-        for ($class = new ReflectionClass($extension); $class !== false; $class = $class->getParentClass()) {
-            foreach ($class->getProperties() as $property) {
-                if ($property->isStatic() || ! $property->isInitialized($extension)) {
-                    continue;
-                }
-
-                $values[$property->getDeclaringClass()->getName().'::'.$property->getName()] = $property->getValue($extension);
-            }
-        }
-
-        return $values;
-    }
-
-    /**
-     * The two configuration values {@see Json::stable()} would flatten to a bare class name — an enum
-     * case, so `Mode::Strict` and `Mode::Loose` are not the same setting, and a closure, read as where
-     * it was written plus what it captured. Everything else is left to `Json::stable()`, which is why a
-     * collaborator object still collapses to its class.
-     *
-     * A closure's source position is an absolute path, which never leaves this method: the signature is
-     * a fragment-cache key and nothing else, so it is local to the machine that built the cache.
-     *
-     * The descent is bounded because a property may hold anything at all, `$a['self'] = &$a` included —
-     * and that is a stack overflow, which is SIGSEGV with no message. `Json::stable()` bounds its own
-     * walk for the same reason, but this one reaches the value first.
-     */
-    private static function readable(mixed $value, int $depth = 0): mixed
-    {
-        if (is_array($value)) {
-            return $depth >= self::MAX_DEPTH
-                ? self::TRUNCATED
-                : array_map(static fn (mixed $item): mixed => self::readable($item, $depth + 1), $value);
-        }
-
-        if ($value instanceof Closure) {
-            $function = new ReflectionFunction($value);
-
-            return [
-                'closure' => $function->getFileName().':'.$function->getStartLine().'-'.$function->getEndLine(),
-                'bound' => $function->getClosureScopeClass()?->getName(),
-                'captured' => self::readable($function->getStaticVariables(), $depth + 1),
-            ];
-        }
-
-        if ($value instanceof BackedEnum) {
-            return $value::class.'::'.$value->value;
-        }
-
-        return $value instanceof UnitEnum ? $value::class.'::'.$value->name : $value;
     }
 
     /**

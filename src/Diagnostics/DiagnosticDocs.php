@@ -36,6 +36,9 @@ final class DiagnosticDocs
         'eloquent' => 'package-integrations',
         'engine' => 'the-engine-and-inference',
         'example-file' => 'attributes',
+        // A registered extension is named either in the `extensions` config key or through
+        // `Docuccino::extend()`, and Configuration is where both are written up.
+        'extension' => 'configuration',
         'examples' => 'recorded-examples',
         'inference' => 'the-engine-and-inference',
         'inferred-handler' => 'responses-recovered-from-your-code',

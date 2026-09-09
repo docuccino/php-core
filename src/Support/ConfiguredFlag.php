@@ -39,9 +39,9 @@ final readonly class ConfiguredFlag
      * `$bag[$key]` as a switch, falling back to `$default`.
      *
      * Presence is asked with `array_key_exists()` rather than `??`, so a key holding `null` is a
-     * refusal and not an absence: it is a key someone wrote — what an unset `env()` leaves behind —
-     * and only a key nobody wrote is silent. The callers that separately need "did the author write
-     * this at all" ask the bag, which is a different question from what the switch reads as.
+     * refusal and not an absence: it is a key somebody wrote — what a key with nothing after the colon
+     * holds — and only a key nobody wrote is silent. The callers that separately need "did the author
+     * write this at all" ask the bag, which is a different question from what the switch reads as.
      *
      * @param  array<string, mixed>  $bag
      */

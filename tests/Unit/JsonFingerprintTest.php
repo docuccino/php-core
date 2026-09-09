@@ -93,3 +93,45 @@ it('stops at the depth bound rather than encoding for ever', function (): void {
     expect(Json::stable($deep(20, 'a')))->not->toBe(Json::stable($deep(20, 'b')))
         ->and(Json::stable($deep(400, 'a')))->toBe(Json::stable($deep(400, 'b')));
 });
+
+it('fingerprints a float identically whatever serialize_precision the host is set to', function (): void {
+    // The other half of the determinism hole the configuration reader's numeric settling closes. That
+    // reader settles an integral float to an int; a NON-integral one stays a float, and `1.10` in a
+    // configuration file is exactly that. `json_encode` then formats it with the ambient ini, so
+    // `document.configHash` — a fragment-cache key input AND a value the document publishes — differed
+    // between two machines building the same commit.
+    $value = ['info' => ['version' => 1.10], 'a' => 0.1, 'b' => 1e-7, 'c' => 1.0 / 3.0];
+
+    $original = ini_get('serialize_precision');
+
+    try {
+        ini_set('serialize_precision', '17');
+        $at17 = Json::stable($value);
+
+        ini_set('serialize_precision', '6');
+        $at6 = Json::stable($value);
+
+        ini_set('serialize_precision', '-1');
+        $atMinus1 = Json::stable($value);
+    } finally {
+        ini_set('serialize_precision', $original === false ? '-1' : $original);
+    }
+
+    expect($at17)->toBe($atMinus1)
+        ->and($at6)->toBe($atMinus1)
+        // Shortest round-trip, which is what the host's default already gives — so nothing a document
+        // already publishes moves.
+        ->and($atMinus1)->toContain('"version":1.1');
+});
+
+it('leaves serialize_precision as it found it', function (): void {
+    ini_set('serialize_precision', '9');
+
+    try {
+        Json::stable(['x' => 0.1]);
+
+        expect(ini_get('serialize_precision'))->toBe('9');
+    } finally {
+        ini_set('serialize_precision', '-1');
+    }
+});

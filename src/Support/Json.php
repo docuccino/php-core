@@ -38,10 +38,29 @@ final class Json
     /** What stands in for a value below {@see MAX_DEPTH}. */
     private const TRUNCATED = '@docuccino:depth';
 
-    /** A stable string fingerprint of an arbitrary JSON-ish value; `''` when it cannot be encoded. */
+    /**
+     * A stable string fingerprint of an arbitrary JSON-ish value; `''` when it cannot be encoded.
+     *
+     * `serialize_precision` is pinned for the encode for the reason
+     * {@see CanonicalJsonSerializer::encodeFloat()} gives, and it matters here for the same reason it
+     * matters there: `json_encode` formats a float with whatever the host is configured with, so
+     * `1.10` in a configuration file — the float 1.1 — encodes as `1.1` at the default `-1` and as
+     * `1.1000000000000001` at `17`. That is a `configHash` that differs between two machines building
+     * the same commit: a fragment-cache key input, and a value the document publishes. Pinned once for
+     * the whole encode rather than per float, since every float in a fingerprint wants the same
+     * shortest round-trip form.
+     */
     public static function stable(mixed $value): string
     {
-        $encoded = json_encode(self::normalize($value));
+        $previous = ini_set('serialize_precision', '-1');
+
+        try {
+            $encoded = json_encode(self::normalize($value));
+        } finally {
+            if (is_string($previous)) {
+                ini_set('serialize_precision', $previous);
+            }
+        }
 
         return $encoded === false ? '' : $encoded;
     }

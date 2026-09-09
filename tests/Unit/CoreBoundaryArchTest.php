@@ -209,16 +209,16 @@ it('freezes the rule-transformer field façade at the methods it means to promis
 });
 
 /**
- * The configuration reader is build machinery, not something an extension author is promised. It sits
- * outside every directory the surface above is globbed from, so nothing there would notice it losing
- * its marker — and the surface freezes at v1, which makes a marker dropped by accident a promise made
- * by accident.
+ * The configuration reader and writer are build machinery, not something an extension author is
+ * promised. They sit outside every directory the surface above is globbed from, so nothing there would
+ * notice one losing its marker — and the surface freezes at v1, which makes a marker dropped by
+ * accident a promise made by accident.
  */
 it('keeps the configuration reader off the frozen public surface', function (): void {
     $files = (array) glob(__DIR__.'/../../src/Config/*.php');
 
     // A glob that stopped matching would make this a scan of nothing.
-    expect($files)->toHaveCount(2);
+    expect($files)->toHaveCount(3);
 
     foreach ($files as $file) {
         $class = 'Docuccino\Core\Config\\'.basename((string) $file, '.php');

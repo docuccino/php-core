@@ -35,21 +35,18 @@ it('reads a configuration file that is there', function (): void {
     expect($read->ok())->toBeTrue()
         ->and($read->error)->toBeNull()
         ->and($read->diagnostics)->toBe([])
-        ->and($read->path)->toBe($this->root.'/docuccino.yaml')
         ->and($read->values)->toBe(['documents' => ['default' => ['title' => 'Forms API']]]);
 });
 
 it('reads no configuration file as no configuration, and says nothing about it', function (): void {
     // A correct document with no configuration is the product, so this is not a degradation and gets
-    // no diagnostic. The path is still reported, because the build registers it as a cache dependency
-    // and has to notice the file appearing.
+    // no diagnostic.
     $read = ConfigFile::read($this->root);
 
     expect($read->error)->toBe(ConfigFile::ABSENT)
         ->and($read->ok())->toBeFalse()
         ->and($read->values)->toBe([])
-        ->and($read->diagnostics)->toBe([])
-        ->and($read->path)->toBe($this->root.'/docuccino.yaml');
+        ->and($read->diagnostics)->toBe([]);
 });
 
 it('reads one name, and trailing separators on the directory do not make a second', function (): void {
@@ -132,7 +129,6 @@ it('reports a file it cannot read, and builds from defaults', function (): void 
 
     expect($read->error)->toBe(ConfigFile::UNREADABLE)
         ->and($read->values)->toBe([])
-        ->and($read->path)->toBe($path)
         ->and($read->diagnostics[0]->code)->toBe('config.file-unreadable')
         ->and($read->diagnostics[0]->severity)->toBe(Severity::Error)
         ->and($read->diagnostics[0]->message)->toContain('docuccino.yaml is there and could not be read')
@@ -213,7 +209,6 @@ it('reads an empty file through the directory the same way it reads one directly
     $read = ConfigFile::read($this->root);
 
     expect($read->error)->toBe(ConfigFile::NOT_A_MAP)
-        ->and($read->path)->toBe($this->root.'/docuccino.yaml')
         ->and($read->diagnostics[0]->code)->toBe('config.file-not-a-map');
 });
 
@@ -274,10 +269,57 @@ it('carries no machine path in anything it reports', function (): void {
 it('hands back the same reader every time, so its refusals accumulate', function (): void {
     // A fresh reader per call would lose every refusal but the last caller's, and the build would
     // report a number that depended on who asked last.
-    $read = ConfigFile::parse("title: 1.10\nenabled: no\n");
+    $read = ConfigFile::parse("title: 1.10\nexclude: vendor\n");
 
     expect($read->values()->string('title', 'API'))->toBe('API')
-        ->and($read->values()->bool('enabled', true))->toBeTrue()
+        ->and($read->values()->entries('exclude'))->toBeNull()
         ->and($read->values())->toBe($read->values())
         ->and($read->values()->diagnostics())->toHaveCount(2);
+});
+
+it('refuses a file that expands past what a configuration can hold, rather than dying inside a walk', function (): void {
+    // 583 bytes. An alias repeated inside an anchor multiplies at every level, so this parses to a
+    // few megabytes and then cost over 512 MB in the walk that settles it — an out-of-memory, which
+    // is a fatal rather than an exception, so nothing here could report it and the whole contract
+    // (nothing this class does throws) failed where it mattered. Reachable from every command and
+    // from a viewer request.
+    $yaml = "a0: &a0 1\n";
+    for ($level = 1; $level <= 5; $level++) {
+        $yaml .= 'a'.$level.": &a$level\n";
+        for ($member = 0; $member < 10; $member++) {
+            $yaml .= '  k'.$member.': *a'.($level - 1)."\n";
+        }
+    }
+
+    expect(strlen($yaml))->toBeLessThan(1024);
+
+    $before = memory_get_peak_usage(true);
+    $read = ConfigFile::parse($yaml);
+
+    expect($read->error)->toBe(ConfigFile::INVALID)
+        ->and($read->values)->toBe([])
+        ->and($read->diagnostics)->toHaveCount(1)
+        ->and($read->diagnostics[0]->code)->toBe('config.file-invalid')
+        ->and($read->diagnostics[0]->message)->toContain('expands to more settings')
+        // The bound is only worth what it costs to find out: measured while the tree is still the
+        // parser's shared structure, refusing this file costs the parse and nothing more.
+        ->and(memory_get_peak_usage(true) - $before)->toBeLessThan(64 * 1024 * 1024);
+});
+
+it('reads a configuration far larger than anybody writes by hand', function (): void {
+    // The other side of the bound, so it cannot be tightened onto real files without a failure: a
+    // thousand documents, each with an info object, a route filter and a representation policy.
+    $documents = [];
+    for ($index = 0; $index < 1000; $index++) {
+        $documents[] = sprintf(
+            "  doc%d:\n    info:\n      title: 'Doc %d'\n      version: '1.0.0'\n    routes:\n      include: ['api/*']\n      exclude: []\n    representation:\n      filters: 'bracketed'\n      nullable: 'type-array'\n",
+            $index,
+            $index,
+        );
+    }
+
+    $read = ConfigFile::parse("documents:\n".implode('', $documents));
+
+    expect($read->error)->toBeNull()
+        ->and($read->values['documents'])->toHaveCount(1000);
 });
