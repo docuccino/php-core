@@ -1,0 +1,63 @@
+# A representative configuration, shaped like one a project would really write, and chosen so that
+# every axis along which a value could be re-typed appears somewhere in it: a quoted version beside an
+# unquoted number, a date, a boolean beside the words that only look like booleans, a key present and
+# null beside a key written as an empty collection, a list of maps, and a block scalar.
+#
+# The golden beside it holds the parse. Anything that re-types a leaf at any depth moves those bytes.
+
+documents:
+  default:
+    title: Forms API
+    # Quoted, because unquoted it would be the float 1.1 and publish a different version number.
+    version: '1.10'
+    description: |
+      Two lines of prose,
+      kept as written.
+    servers:
+      - url: https://api.example.com
+        description: Production
+      - url: https://staging.example.com
+        description: Staging
+    # Written out, because a blank collection parses to null and hashes differently.
+    tags: []
+    # Present and empty on purpose: absent and present-null are different answers downstream.
+    error_responses:
+  v2:
+    title: Forms API (v2)
+    # Deliberately NOT quoted, so this is a number and not the version "1.0". The parser is free to
+    # hand back the int 1 or the float 1.0 for a spelling like this, so the reader settles it to the
+    # int — the golden records that, and it is what stops a dependency's patch level reaching a hash.
+    version: 1.0
+  v3:
+    title: Forms API (v3)
+    # The same mistake with a different outcome: 1.10 is not an integer, so it stays the float 1.1 and
+    # the trailing zero is simply gone. Neither of these is the version anybody typed.
+    version: 1.10
+
+engine:
+  mode: strict
+  memory_limit: 2048
+  paths:
+    - app
+    - modules
+
+cache:
+  enabled: true
+  # Not a boolean: `off` is text, so a reader willing to convert would read it as on.
+  warm: off
+
+lint:
+  fail_on: warning
+  rules:
+    operation-summary: true
+    operation-tags: false
+  leakage:
+    patterns:
+      internal-host: '\.internal\.'
+      absolute-path: '^/(Users|home)/'
+
+diagnostics:
+  embed: false
+  since: 2024-01-15
+
+extensions: []

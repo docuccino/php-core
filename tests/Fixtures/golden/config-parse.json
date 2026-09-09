@@ -1,0 +1,59 @@
+{
+    "documents": {
+        "default": {
+            "title": "Forms API",
+            "version": "1.10",
+            "description": "Two lines of prose,\nkept as written.\n",
+            "servers": [
+                {
+                    "url": "https://api.example.com",
+                    "description": "Production"
+                },
+                {
+                    "url": "https://staging.example.com",
+                    "description": "Staging"
+                }
+            ],
+            "tags": [],
+            "error_responses": null
+        },
+        "v2": {
+            "title": "Forms API (v2)",
+            "version": 1
+        },
+        "v3": {
+            "title": "Forms API (v3)",
+            "version": 1.1
+        }
+    },
+    "engine": {
+        "mode": "strict",
+        "memory_limit": 2048,
+        "paths": [
+            "app",
+            "modules"
+        ]
+    },
+    "cache": {
+        "enabled": true,
+        "warm": "off"
+    },
+    "lint": {
+        "fail_on": "warning",
+        "rules": {
+            "operation-summary": true,
+            "operation-tags": false
+        },
+        "leakage": {
+            "patterns": {
+                "internal-host": "\\.internal\\.",
+                "absolute-path": "^/(Users|home)/"
+            }
+        }
+    },
+    "diagnostics": {
+        "embed": false,
+        "since": 1705276800
+    },
+    "extensions": []
+}
