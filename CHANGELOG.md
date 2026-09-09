@@ -7,6 +7,27 @@ User-facing changes to `docuccino/core` — features, fixes, performance work an
 taken from the commit messages scoped `core`. Entries begin after v0.1.2; older history is in
 the [repository](https://github.com/docuccino/docuccino) git log.
 
+## v0.15.0
+
+### Breaking changes
+
+- drop the representation keyword no reader has ever read ([#413](https://github.com/docuccino/docuccino/pull/413))
+  - `documents.*.representation.lists` is no longer read. It never affected the emitted document — both of its values produced the identical parameter — so removing it changes no consumer-visible byte, but it does change `x-docuccino.document.configHash` for any document that set it, and an application that leaves the key in its own config file will simply have it ignored.
+- leave the viewer wiring out of the hash that keys a document ([#410](https://github.com/docuccino/docuccino/pull/410))
+  - `x-docuccino.document.configHash` no longer folds in a document's `viewer` wiring, so it stops changing when only the viewer's route, middleware, gate, source, driver, CDN flag or driver configuration changes — and its value changes once, for every document that configures a viewer. Anything comparing the hash across this version boundary will see one difference; anything keying on it continues to work, and now shares a fragment cache entry across viewer-only edits.
+
+### Features
+
+- read a project's YAML configuration as a shape that refuses rather than casts ([#411](https://github.com/docuccino/docuccino/pull/411))
+- read a parameter name as the leakage lint already reads a property name ([#388](https://github.com/docuccino/docuccino/pull/388))
+
+### Bug fixes
+
+- fingerprint a float the same on every host ([#427](https://github.com/docuccino/docuccino/pull/427))
+- refuse a configuration file that expands past what a configuration can hold ([#428](https://github.com/docuccino/docuccino/pull/428))
+- mint a component id by the rule that decides whether two components are one ([#409](https://github.com/docuccino/docuccino/pull/409))
+- key a signature and a minted name on the order their readers actually resolve in ([#407](https://github.com/docuccino/docuccino/pull/407))
+
 ## v0.14.0
 
 ### Bug fixes
