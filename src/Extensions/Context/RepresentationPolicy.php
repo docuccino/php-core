@@ -32,9 +32,6 @@ use Docuccino\Core\Support\Hydrate;
  *   `anyof` (a `{type: null}` branch).
  * - `filterStyle` (Query Builder): `bracketed` (flat `filter[status]` params, `fields[articles]` for
  *   sparse fieldsets) | `deepObject` (one `filter`/`fields` object parameter, `explode: true`).
- * - `listStyle` (Query Builder): accepted for compatibility — both keywords now express `sort`/
- *   `include` the same way, a comma-serialised (`form`, `explode: false`) array whose items enum
- *   the allow-list.
  * - `formatSamples` (`examples.formats`): JSON Schema `format` → the value a synthesized example uses
  *   for it, MERGED over {@see FormatSamples} per format. A configured sample is still validated against
  *   the field's finished keywords before publication, exactly as a derived one is; one that fails falls
@@ -58,7 +55,6 @@ final readonly class RepresentationPolicy
         public string $enumNaming = 'names',
         public string $nullable = 'type-array',
         public string $filterStyle = 'bracketed',
-        public string $listStyle = 'comma',
         public string $resourceWrap = '',
         public bool $enumComponents = true,
         public bool $errorComponents = true,
@@ -83,7 +79,6 @@ final readonly class RepresentationPolicy
             enumNaming: self::keyword($enumNaming, 'names'),
             nullable: self::keyword($representation['nullable'] ?? null, 'type-array'),
             filterStyle: self::keyword($representation['filters'] ?? null, 'bracketed'),
-            listStyle: self::keyword($representation['lists'] ?? null, 'comma'),
             resourceWrap: self::normalizeWrap($resourceWrap),
             enumComponents: ConfiguredFlag::read($enums, 'components', true)->on,
             errorComponents: ConfiguredFlag::read(Hydrate::map($representation['errors'] ?? null), 'components', true)->on,
