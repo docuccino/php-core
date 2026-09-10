@@ -66,7 +66,10 @@ final class RouteContext
      *                                extension keyed on IDENTITY — a recorded example, filed under the
      *                                id so it survives a route rename — needs it while the draft is
      *                                still open, and deriving it a second time is how two answers to
-     *                                "which operation is this" start disagreeing
+     *                                "which operation is this" start disagreeing. It is scoped to the
+     *                                DOCUMENT, so anything an extension shapes from it belongs to that
+     *                                document alone and its fragment may not be shared with another —
+     *                                the pipeline settles that per document before the first route
      *
      * @internal an extension is HANDED a context and never builds one, so the constructor is not part
      * of the author surface — which is what lets it take the whole internal {@see ResolvedExtensions}

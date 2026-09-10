@@ -58,6 +58,12 @@ final readonly class NodeExtension
         );
     }
 
+    /** The same extension carrying `$id` — everything else, `rest` included, survives. */
+    public function withId(?string $id): self
+    {
+        return new self($id, $this->provenance, $this->mock, $this->rest);
+    }
+
     /**
      * @return array<string, mixed>
      */

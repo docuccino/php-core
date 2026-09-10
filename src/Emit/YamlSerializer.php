@@ -36,4 +36,18 @@ final class YamlSerializer
 
         return Yaml::dump($value, self::BLOCK_DEPTH, self::INDENT, $flags);
     }
+
+    /**
+     * The inverse, with the carrier kept: a mapping comes back a `stdClass` and a sequence an `array`.
+     *
+     * A plain `Yaml::parse()` answers a PHP array for both, so `paths: {}` and `paths: []` read back
+     * identically — the one distinction a YAML writer can get wrong, and the one this class exists to
+     * keep. Anything reading emitted YAML back to check it has to come through here.
+     *
+     * Throws `ParseException` on bytes that are not YAML; the caller decides what that means.
+     */
+    public function parse(string $yaml): mixed
+    {
+        return Yaml::parse($yaml, Yaml::PARSE_OBJECT_FOR_MAP);
+    }
 }

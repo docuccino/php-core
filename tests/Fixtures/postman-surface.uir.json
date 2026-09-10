@@ -25,6 +25,9 @@
         "operationId": "accounts.store",
         "summary": "Open an account",
         "tags": ["Accounts"],
+        "parameters": [
+          { "name": "Content-Type", "in": "header", "required": true, "description": "The media type of the form body.", "schema": { "type": "string" } }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -117,7 +120,10 @@
         "responses": {
           "200": {
             "description": "A page",
-            "headers": { "X-Total-Count": { "description": "Total rows.", "schema": { "type": "integer", "minimum": 42 } } },
+            "headers": {
+              "Content-Type": { "description": "Always JSON.", "schema": { "type": "string" } },
+              "X-Total-Count": { "description": "Total rows.", "schema": { "type": "integer", "minimum": 42 } }
+            },
             "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Account" } } } }
           }
         }
@@ -181,6 +187,14 @@
         "operationId": "tree.show",
         "summary": "Show the category tree",
         "security": [{ "oidc": [] }],
+        "parameters": [
+          { "name": "Accept", "in": "header", "description": "Negotiated by the client.", "schema": { "type": "string" } },
+          { "name": "Authorization", "in": "header", "required": true, "description": "Bearer token.", "schema": { "type": "string" } },
+          { "name": "Cookie", "in": "header", "description": "The raw cookie header.", "schema": { "type": "string" } },
+          { "name": "X-Tenant", "in": "header", "required": true, "description": "Which tenant the tree belongs to.", "schema": { "type": "string" } },
+          { "name": "session", "in": "cookie", "schema": { "type": "string" } },
+          { "name": "theme", "in": "cookie", "schema": { "type": "string", "enum": ["dark", "light"] } }
+        ],
         "responses": { "200": { "description": "The tree", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Node" } } } } }
       }
     },

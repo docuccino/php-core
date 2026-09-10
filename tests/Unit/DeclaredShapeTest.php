@@ -312,6 +312,12 @@ it('keeps the subschema keyword set in one place, so no reader can carry a stale
         // beside it, so a keyword added there is undecidable until somebody teaches the walk to read
         // it; ChangedFieldExamplesTest holds the derivation against the table in both directions.
         'core/src/Document/ChangedFieldExamples.php::RESOLVED',
+        // Which members hold a map of NAMES rather than keywords — a fact about JSON structure, not
+        // about which positions carry subschemas. The two overlap because most name maps hold schemas,
+        // and they disagree where it counts: `dependentSchemas` carries subschemas and is absent here,
+        // `definitions` is present. It is what tells a walk over a schema that `properties.$ref` is a
+        // property; the OpenAPI half of the same fact composes onto it rather than restating it.
+        'core/src/SpecValidation/OpenApiMetaSchema.php::SCHEMA_NAME_MAPS',
     ];
 
     $positioned = [

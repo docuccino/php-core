@@ -7,6 +7,7 @@ namespace Docuccino\Core\Canonical;
 use Docuccino\Core\Document\Parameter;
 use Docuccino\Core\Document\PathItem;
 use Docuccino\Core\Draft\SchemaKeywords;
+use Docuccino\Core\Support\Arr;
 use Docuccino\Core\Support\Json;
 use Docuccino\Core\Support\JsonValue;
 use stdClass;
@@ -14,7 +15,14 @@ use stdClass;
 /**
  * Normative canonicalisation: fixed member order per object type, map keys sorted by Unicode
  * code point, fixed HTTP method order, parameters sorted by (in-rank, name), declaration-order
- * dedup for tags/security/enum. Spec: docs/design/uir-and-extensions.md §3.
+ * dedup for the VALUE lists — an operation's tags, security requirements, enum, required. Spec:
+ * docs/design/uir-and-extensions.md §3.
+ *
+ * Object lists are ordered, never deduped, and the difference is deliberate: two identical strings
+ * are one string, but two objects contesting a name differ somewhere, so the producer that knows
+ * what they mean is the only one that can merge them without guessing. The top-level `tags` array
+ * must not name a tag twice — the config reader that builds it is what guarantees that, and
+ * deduping by content here would publish both the moment their descriptions differed.
  *
  * Handlers take `mixed` and pass malformed values through untouched, so canonicalisation is
  * total. Empty object-typed members become {@see stdClass} so the serializer writes `{}` not
@@ -284,8 +292,12 @@ final class Canonicalizer
 
         // Decorated with a TOTAL key. `in` and `name` settle every parameter stated inline, but a
         // `{"$ref": …}` parameter states neither, so a list of them would all tie and keep the order
-        // they arrived in — which is whatever built the list. The bytes break the remaining ties, and
-        // two parameters with the same bytes are the same parameter.
+        // they arrived in — which is whatever built the list. The bytes break the remaining ties.
+        //
+        // Ordering only: nothing here drops a parameter. OAS wants (name, in) unique in the list and
+        // OperationDraft keys its drafts by exactly that pair, so the build cannot produce two; one
+        // an overlay or a transformer writes is published as written, rather than having half the
+        // edit silently disappear.
         $keyed = [];
         foreach ($node as $parameter) {
             $canonical = $this->canonicalizeParameter($parameter);
@@ -781,22 +793,9 @@ final class Canonicalizer
             return [];
         }
 
-        $out = [];
-        $seen = [];
-
-        foreach ($node as $item) {
-            $key = json_encode($item);
-            $key = is_string($key) ? $key : '';
-
-            if (isset($seen[$key])) {
-                continue;
-            }
-
-            $seen[$key] = true;
-            $out[] = $this->canonicalizeGeneric($item);
-        }
-
-        return $out;
+        // The one reading of what makes two enum values the same value, shared with
+        // {@see EnumDecoration}, which has to hold the arrays parallel to `enum` in step with it.
+        return array_map($this->canonicalizeGeneric(...), Arr::distinctValues(array_values($node))['values']);
     }
 
     /**

@@ -120,23 +120,25 @@ describe('a name spelled like a fixed field', function (): void {
             'info' => ['title' => 'API', 'version' => '1.0.0'],
             'paths' => ['/a' => ['get' => ['responses' => ['200' => [
                 'description' => 'OK',
-                'content' => ['application/json' => [
-                    'schema' => ['type' => 'object'],
-                    'example' => $value,
-                    'examples' => ['one' => ['value' => $value]],
-                ]],
+                'content' => [
+                    // The two spellings sit on different media types because OpenAPI 3.0 forbids one
+                    // Media Type Object from carrying both, and nothing in the product mints that.
+                    'application/json' => ['schema' => ['type' => 'object'], 'examples' => ['one' => ['value' => $value]]],
+                    'text/plain' => ['schema' => ['type' => 'string'], 'example' => $value],
+                ],
             ]]]]],
             'components' => ['examples' => ['two' => ['value' => $value]]],
         ]));
 
         /** @var array<string, mixed> $decoded */
         $decoded = json_decode($result->output, true, flags: JSON_THROW_ON_ERROR);
-        $media = $decoded['paths']['/a']['get']['responses']['200']['content']['application/json'];
+        $content = $decoded['paths']['/a']['get']['responses']['200']['content'];
+        $media = $content['application/json'];
 
         // Untouched at all three positions: a 2020-12 type array inside an example is what the API returns,
         // not a schema this emitter has any business rewriting. Member for member rather than byte for
         // byte, because the canonicalizer sorts an example's members after this emitter has had its say.
-        expect($media['example'])->toEqual($value)
+        expect($content['text/plain']['example'])->toEqual($value)
             ->and($media['examples']['one']['value'])->toEqual($value)
             ->and($decoded['components']['examples']['two']['value'])->toEqual($value)
             ->and(array_map(static fn ($d): string => $d->code, $result->report->diagnostics))->toBe([]);

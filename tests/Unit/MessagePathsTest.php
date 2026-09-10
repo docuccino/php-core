@@ -621,15 +621,24 @@ it('reduces a run a root accounts for where the backslash is in the sentence, no
 ]);
 
 it('still refuses a backslash run no root accounts for', function (string $case, string $message): void {
-    // The exclusion is not weakened, only anchored: with no root in front of it a backslash still says
-    // regex or JSON string, and those rows are the ones that must never be rewritten. The third is the
-    // leak that buys it — the same trade the braced run makes, in the same direction.
+    // The objection is not weakened, only answerable: with no root in front of it a backslash still
+    // says regex or JSON string, and those rows are the ones that must never be rewritten. The third
+    // is the leak that buys it — the same trade the braced run makes, in the same direction.
+    //
+    // Reading the objection over the whole run rather than over the text a rewrite would touch is
+    // what leaks it, and narrowing it is refused rather than unexamined: the third row and
+    // `Unknown route /api/users.json for App\Foo` are the same shape — a path or a route, then an
+    // FQCN — so no scope rule separates them, and narrowing trades this leak for over-scrubbing that
+    // signature. A leak is the direction that may be traded and an over-scrub is not.
     expect((new MessagePaths(new RootRelativeSourcePathResolver('/Users/ca rol/checkout')))->relative($message))
         ->toBe($message);
 })->with([
     ['a rule whose regex holds a separator', 'Rule "regex:/^\\d+\\/\\d+$/" could not be read'],
     ['a pattern rooted nowhere', 'Refused /some/where/\\d+/x.php as a pattern'],
     ['a path outside every root, followed by a class', 'Failed in /Users/ca rol/secret/X.php for App\\Foo'],
+    // The over-scrub the row above is bought with, pinned beside it rather than argued about: the two
+    // are one shape, so whatever answers the leak answers this too, and this one may not move.
+    ['a route with a format suffix, followed by a class', 'Unknown route /api/users.json for App\\Foo'],
 ]);
 
 it('redacts a machine root out of a braced run without needing the anchor at all', function (string $case, string $configured, string $expected): void {
@@ -809,6 +818,26 @@ it('keeps a backslash the application wrote, and rewrites only the one Windows s
     // The root itself keeps nothing, so there is no tail to spell either way.
     ['nothing left under the root', 'mkdir(/app/root): Permission denied', 'mkdir(): Permission denied'],
 ]);
+
+it('publishes what a ladder that invented text answered, and nothing taken from the original', function (): void {
+    // The third way the row above can be reached, and the one no shipped resolver produces: the
+    // ladder is a seam any adapter may implement, and one that answers a tail the run does not end
+    // with has invented text. There is then nothing to take the author's spelling FROM, so the
+    // answer is published as it came — restating it in the run's own characters would be a strip of
+    // text nobody matched, which is the over-scrub direction wearing a different hat.
+    $rewriting = new class implements SourcePathResolver
+    {
+        public function relative(string $file): string
+        {
+            return str_starts_with($file, '/app/root/')
+                ? strtolower(substr($file, strlen('/app/root/')))
+                : basename($file);
+        }
+    };
+
+    expect((new MessagePaths($rewriting))->relative('Could not open /app/root/App/X.php'))
+        ->toBe('Could not open app/x.php');
+});
 
 it('emits the same bytes for a Windows checkout and a POSIX one, with a backslash inside the path', function (): void {
     // The pair the row above cannot state on its own: the separator rewrite is what makes these two

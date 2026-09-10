@@ -292,7 +292,8 @@ final readonly class Url
 
     /**
      * Header parameters, plus the two a consumer always forgets: the body's `Content-Type` and an
-     * `Accept` naming what the operation returns.
+     * `Accept` naming what the operation returns. One entry per header name — {@see Headers} owns that
+     * invariant and the rule for a name two contributors reach.
      *
      * @param  list<array<string, mixed>>  $parameters
      * @param  array<string, mixed>  $operation
@@ -301,23 +302,26 @@ final readonly class Url
      */
     public function headers(array $parameters, array $operation, ?string $contentType, array $components): array
     {
-        $headers = [];
+        $headers = new Headers;
 
         if ($contentType !== null) {
-            $headers[] = ['key' => 'Content-Type', 'value' => $contentType];
+            $headers->derived('Content-Type', $contentType);
         }
 
         $accept = $this->accept($operation, $components);
         if ($accept !== null) {
-            $headers[] = ['key' => 'Accept', 'value' => $accept];
+            $headers->derived('Accept', $accept);
         }
 
-        $declared = array_values(array_filter($parameters, static fn (array $p): bool => ($p['in'] ?? null) === 'header'));
-        usort($declared, static fn (array $a, array $b): int => strcmp(self::nameOf($a), self::nameOf($b)));
+        foreach (self::in($parameters, 'header') as $parameter) {
+            $name = self::nameOf($parameter);
 
-        foreach ($declared as $parameter) {
-            $headers[] = $this->entry(
-                self::nameOf($parameter),
+            if (Headers::ignoredParameter($name)) {
+                continue;
+            }
+
+            $headers->declared(
+                $name,
                 $this->sample($parameter, $components),
                 ($parameter['required'] ?? false) === true,
                 $this->describe($parameter),
@@ -326,8 +330,7 @@ final readonly class Url
 
         // Postman has no cookie-jar member on a request, so declared cookies travel as one header —
         // which is exactly what the wire carries anyway, so nothing is lost.
-        $cookies = array_values(array_filter($parameters, static fn (array $p): bool => ($p['in'] ?? null) === 'cookie'));
-        usort($cookies, static fn (array $a, array $b): int => strcmp(self::nameOf($a), self::nameOf($b)));
+        $cookies = self::in($parameters, 'cookie');
 
         if ($cookies !== []) {
             $pairs = array_map(
@@ -335,15 +338,32 @@ final readonly class Url
                 $cookies,
             );
 
-            $headers[] = $this->entry(
+            $headers->derived(
                 'Cookie',
                 implode('; ', $pairs),
                 array_any($cookies, static fn (array $p): bool => ($p['required'] ?? false) === true),
-                '',
             );
         }
 
-        return $headers;
+        return $headers->toArray();
+    }
+
+    /**
+     * The parameters at one location, in name order — which is a TOTAL order here and nowhere breaks a
+     * tie, because {@see merge()} has already keyed the merged list by `(in, name)`: the pair OAS
+     * requires unique, and the pair an operation's drafts are keyed by. Nothing reaching this holds one
+     * name at one location twice, so no second key is needed and none is invented.
+     *
+     * @param  list<array<string, mixed>>  $parameters
+     * @return list<array<string, mixed>>
+     */
+    private static function in(array $parameters, string $in): array
+    {
+        $at = array_values(array_filter($parameters, static fn (array $p): bool => ($p['in'] ?? null) === $in));
+
+        usort($at, static fn (array $a, array $b): int => self::nameOf($a) <=> self::nameOf($b));
+
+        return $at;
     }
 
     /**

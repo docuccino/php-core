@@ -20,38 +20,43 @@ namespace Docuccino\Core\Provenance;
  * `regex:` rule are absolute-looking runs too, identical on every machine and worth exactly the
  * characters they are written with. So the two directions are ranked: a run that leaks is a
  * determinism defect, a run that is reduced wrongly is the product stating something the application
- * does not say — and the second is the one that must be impossible. Four things get us there:
+ * does not say — and the second is the one that must be impossible.
  *
- * 1. **Exclusions.** A run behind a `#` is a URI fragment, a `/` behind a `\` is an escape, a POSIX
- *    run carrying a backslash is a regex or a JSON string, a run carrying a brace is a URI template.
- *    None of those reaches the ladder at all, unless proof opened the run or a root already accounts
- *    for the text in front of the character objected to. What they refuse is the PATH RUN and not
- *    the sentence it sits in: a match crosses an interior space, so one routinely spans a template
- *    AND the file named after it, and refusing all of it published the file ({@see rewrite()}).
- * 2. **Proof.** A local stream wrapper (`phar://`), a Windows drive and a UNC share cannot be
- *    anything but a filesystem path, so those are always reduced. All three are proof from the first
- *    character, and nothing a template is spelled with opens that way — a route signature, a path
- *    template and a JSON pointer all start at a `/` or a `#` — so a run that OPENS with one is a path
- *    even where it also carries a brace, and the braces are a shell glob rather than a placeholder.
- *    What a wrapper proves stops at the first character of its tail, though — the compression
- *    wrappers filter another STREAM, so `compress.zlib://http://…` names a host. {@see WRAPPERS}
- *    holds that decision.
- * 3. **Attribution.** Where the ladder recognised a root — the base path, or a `composer.json`
- *    ancestor — the answer is a prefix strip, and a prefix strip cannot invent text. Asking whether
- *    it recognised one takes {@see PROBE}: the answer alone cannot say, since a root one segment up
- *    leaves the same bare name a root it never found leaves. The root also has to be deep enough to
- *    be a machine word ({@see deeplyRooted()}), which is the same question asked one segment EARLY,
- *    of the text an exclusion objects to, where it is the only thing that admits a run no proof
- *    opened ({@see anchored()}) — all a bare `/Users/…/{a,b}/*.php` has to be reduced by.
- * 4. **File shape.** A run the ladder could not attribute is reduced only when its last segment
- *    names a file (`Reader.php`). `/api/forms` and `/docs/reference/configuration` keep every
- *    character they had, because nothing here established they were ever paths. How far such a run
- *    reaches through a space is {@see pathRun()}. A braced run reaches this rung only behind proof:
- *    shape cannot tell `/api/users/{user}.json` from a file, so a braced POSIX run no root accounted
- *    for is published whole — a leak, taken knowingly, because the other direction is the one that
- *    must be impossible. A run under a root too shallow for reason 3 arrives here too, and so keeps
- *    its strip wherever shape says it was a path at all: {@see relativise()} goes back to the same
- *    ladder, so the second signal costs a shallow-rooted file nothing.
+ * What gets us there is a weighing, not a row of independent tests. Every reason for a rewrite
+ * ({@see PathReason}) declares the CLAIM it proves ({@see PathClaim}) and whether it settles that
+ * claim alone; every reason against one ({@see PathObjection}) declares the claim it denies and the
+ * same. They compose by one rule, and this is the only place it is written down:
+ *
+ * > A claim stands for a run when a reason proves it and no conclusive objection denies it. A rewrite
+ * > is authorised by a claim that stands and COVERS the text it removes, and by nothing else.
+ * > `RunIsAPath` covers the run; `PrefixIsAMachineWord` covers only the text in front of the character
+ * > an objection is spelled with, which is all a prefix strip takes. A suggestive reason authorises
+ * > nothing while an objection stands unanswered, and nothing answers a conclusive objection.
+ *
+ * Read against the members: a wrapper, a drive and a UNC share prove the run is a path from its first
+ * character — nothing a template is spelled with opens that way, since a route signature, a path
+ * template and a JSON pointer all start at a `/` or a `#` — so they overrule a brace and the braces in
+ * `glob://…/{Support,Http}/*.php` are the shell glob they look like. A root the ladder recognised
+ * proves only that the text in FRONT of the objected-to character is a machine word, which is exactly
+ * what a strip removes, so it overrules them too without ever admitting a template. Shape proves the
+ * weaker claim suggestively, so `/elsewhere/x/Reader.php` reduces while `/api/users/{user}/avatar.png`
+ * keeps every character — and a braced POSIX run no root accounted for is published whole, a leak
+ * taken knowingly because the other direction is the one that must be impossible.
+ *
+ * What a reason does NOT prove is a member of its own rather than silence: a wrapper's proof stops at
+ * the first character of its tail, since the compression wrappers filter another STREAM and
+ * `compress.zlib://http://…` names a host ({@see WRAPPERS} holds that decision); and a one-segment
+ * root proves nothing, `/app` being a prefix an application mounts routes under as readily as a
+ * container's checkout. Asking whether the ladder recognised a root at all takes {@see PROBE}, because
+ * its answer alone cannot say — a root one segment up leaves the same bare name a root it never found
+ * leaves.
+ *
+ * Ahead of the weighing are the exclusions the PATTERN spells: a `#` fragment, a `~` home-relative
+ * run, a `/` behind a `\`, a URL's scheme or host, an HTTP method in front of a route signature. Those
+ * produce no run at all, so they are not weighed; what is weighed is a run that was produced. And what
+ * an objection refuses is the PATH RUN and not the sentence it sits in — a match crosses an interior
+ * space, so one routinely spans a template AND the file named after it, and refusing all of it
+ * published the file ({@see rewrite()}). How far a run reaches through a space is {@see pathRun()}.
  *
  * Machine words that no path grammar reaches — the `include_path='…'` tail PHP appends to a failed
  * include, a temp directory — are redacted literally afterwards, by the prefixes this process can
@@ -189,8 +194,8 @@ final readonly class MessagePaths
         $run = rtrim($match);
         $trailing = substr($match, strlen($run));
 
-        if (! $this->couldBeAPath($run)) {
-            // An exclusion refuses a PATH RUN, not the sentence around it. {@see pathRun()} is where
+        if (! $this->admits($run)) {
+            // An objection refuses a PATH RUN, not the sentence around it. {@see pathRun()} is where
             // one ends, so the refused text keeps every character and what follows goes back through
             // the same pass — and since that answer is never empty, the recursion still shortens.
             $refused = self::pathRun($run);
@@ -207,84 +212,160 @@ final readonly class MessagePaths
         }
 
         $unattributed = self::pathRun($run);
-        $reduced = self::proven($unattributed) || self::namesAFile($unattributed)
-            ? $this->resolve($unattributed)
-            : $unattributed;
+        $reduced = $this->isAPath($unattributed) ? $this->resolve($unattributed) : $unattributed;
 
         return $reduced.$this->scrub(substr($run, strlen($unattributed)).$trailing);
     }
 
     /**
-     * The exclusions, and the two things that open ahead of them. A brace makes a run a URI template
-     * rather than a file anyone named, and a backslash inside a POSIX run makes it an escaped string —
-     * a `regex:` rule, a JSON pointer in a quoted message — not a path with a separator.
-     *
-     * Proof outranks both, whichever shape carries it (reason 2): a wrapper scheme, a Windows drive
-     * and a UNC share are each proof from the first character, and nothing a template is spelled with
-     * opens that way — a route signature, a path template and a JSON pointer all start at a `/` or a
-     * `#`. So the braces in `glob://…/{Support,Http}/*.php` and in `C:\checkout\{a,b}\x.php` are a
-     * shell glob, and refusing those runs over them keeps the machine word in front of them.
-     *
-     * A bare POSIX run has no such proof, so both exclusions still refuse it — unless a root the
-     * ladder recognised already accounts for the text in FRONT of the character they object to
-     * ({@see anchored()}), which is reason 3 asked one segment early. A run has to clear every
-     * exclusion it trips, so carrying both takes an anchor in front of both.
+     * Whether every objection this run trips against {@see PathClaim::RunIsAPath} is answered — the
+     * composition rule at the top of this class, asked of the claim a rewrite of the whole run needs.
+     * The other claim is asked of one candidate at a time, by {@see machineWord()}.
      */
-    private function couldBeAPath(string $run): bool
+    private function admits(string $run): bool
     {
-        if (self::opening($run) !== null) {
-            // Proof, or nothing: a run opening with a wrapper whose tail is another URL is a stream
-            // address rather than a path, and shape must not get a second go at it — its last segment
+        foreach ($this->objections(PathClaim::RunIsAPath, $run) as $objection) {
+            if (! $this->answered($objection, $run)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Whether a reason covers the text a rewrite would remove despite this objection. Nothing answers
+     * a conclusive one. A suggestive one takes a conclusive reason: for the run entire, or — where the
+     * rewrite is the prefix strip a recognised root buys — for the text in front of the character the
+     * objection is spelled with, since that is all such a strip removes and it is a directory this
+     * machine was configured from whatever the rest of the run turns out to be.
+     *
+     * A run has to answer every objection it trips, so carrying both a brace and a backslash takes a
+     * root in front of both.
+     */
+    private function answered(PathObjection $objection, string $run): bool
+    {
+        if ($objection->isConclusive()) {
+            return false;
+        }
+
+        return $this->conclusivelyAPath($run)
+            || $this->machineWord(substr($run, 0, strcspn($run, $objection->characters())));
+    }
+
+    /**
+     * Whether {@see PathClaim::RunIsAPath} stands for this run at all — the last thing asked of a run
+     * no root accounted for. {@see admits()} has answered every objection by the time this is reached,
+     * so a reason of any strength is enough: `/api/forms` and `/docs/reference/configuration` keep
+     * every character they had, because nothing proved they were ever paths.
+     */
+    private function isAPath(string $run): bool
+    {
+        return $this->reasons(PathClaim::RunIsAPath, $run) !== [];
+    }
+
+    /** Whether a CONCLUSIVE reason proves {@see PathClaim::RunIsAPath} for this run. */
+    private function conclusivelyAPath(string $run): bool
+    {
+        return array_filter(
+            $this->reasons(PathClaim::RunIsAPath, $run),
+            static fn (PathReason $reason): bool => $reason->isConclusive(),
+        ) !== [];
+    }
+
+    /**
+     * Whether {@see PathClaim::PrefixIsAMachineWord} stands for this text: the ladder recognised a
+     * root, and nothing conclusive denies what that proves. This is the one place the claim is
+     * decided, so the rewrite and the objections in front of it cannot come to disagree about which
+     * roots count.
+     *
+     * What a shallow root loses is only this claim: the run carries on to shape, so a path that names
+     * a file still relativises through the same ladder and `/app/src/Foo.php` is unchanged, while a
+     * path that names none (`/app/storage`) keeps its machine word. That is the trade — knowingly a
+     * leak, and a leak is the direction that may be traded.
+     */
+    private function machineWord(string $path): bool
+    {
+        return $this->reasons(PathClaim::PrefixIsAMachineWord, $path) !== []
+            && array_filter(
+                $this->objections(PathClaim::PrefixIsAMachineWord, $path),
+                static fn (PathObjection $objection): bool => $objection->isConclusive(),
+            ) === [];
+    }
+
+    /**
+     * The reasons that prove a claim for this run, keyed by case name so nothing can read an order
+     * into the answer: what the callers ask is whether the set is empty and whether it holds a
+     * conclusive member.
+     *
+     * @return array<string, PathReason>
+     */
+    private function reasons(PathClaim $claim, string $run): array
+    {
+        $standing = [];
+
+        foreach (PathReason::cases() as $reason) {
+            if ($reason->proves() === $claim && $this->stands($reason, $run)) {
+                $standing[$reason->name] = $reason;
+            }
+        }
+
+        return $standing;
+    }
+
+    /**
+     * The objections against a claim this run trips, keyed and read the same way.
+     *
+     * @return array<string, PathObjection>
+     */
+    private function objections(PathClaim $claim, string $run): array
+    {
+        $tripped = [];
+
+        foreach (PathObjection::cases() as $objection) {
+            if ($objection->opposes() === $claim && $this->trips($objection, $run)) {
+                $tripped[$objection->name] = $objection;
+            }
+        }
+
+        return $tripped;
+    }
+
+    /** Whether one reason stands for this run. */
+    private function stands(PathReason $reason, string $run): bool
+    {
+        return match ($reason) {
+            PathReason::LocalWrapper => self::wrapper($run) !== null,
+            PathReason::WindowsRoot => self::windowsRooted($run),
+            PathReason::RecognisedRoot => $this->stripped($run) !== null,
+            PathReason::FileShape => self::namesAFile($run),
+        };
+    }
+
+    /** Whether one objection trips on this run. */
+    private function trips(PathObjection $objection, string $run): bool
+    {
+        return match ($objection) {
+            // Shape must not get a second go at a wrapper whose tail is another URL: its last segment
             // names a file (`archive.gz`) exactly as a real path's does.
-            return self::wrapper($run) !== null;
-        }
-
-        if (self::proven($run)) {
-            return true;
-        }
-
-        if ((str_contains($run, '{') || str_contains($run, '}')) && ! $this->anchored($run, '{}')) {
-            return false;
-        }
-
-        return ! str_contains($run, '\\') || $this->anchored($run, '\\');
+            PathObjection::NestedScheme => self::opening($run) !== null && self::wrapper($run) === null,
+            PathObjection::ShallowRoot => ! self::deepEnoughForAMachine($this->rootOf($run)),
+            PathObjection::Brace => str_contains($run, '{') || str_contains($run, '}'),
+            PathObjection::Backslash => str_contains($run, '\\'),
+        };
     }
 
     /**
-     * Whether a root the ladder recognised accounts for the run in front of the character an
-     * exclusion objects to. That is reason 3's question asked before the rewrite rather than during
-     * it, and it is the only thing a bare POSIX run has instead of proof: the prefix is a directory
-     * this machine was configured from, so the text in front of the brace or the backslash is a
-     * machine word whatever the rest of the run turns out to be, and removing it is a strip of text
-     * the ladder matched rather than a guess at where a path ends.
+     * The root the ladder recognised in front of this path, or the empty string where it recognised
+     * none — a depth {@see PathObjection::ShallowRoot} trips on, harmlessly, since
+     * {@see PathReason::RecognisedRoot} does not stand there either.
      */
-    private function anchored(string $run, string $objection): bool
+    private function rootOf(string $path): string
     {
-        return $this->deeplyRooted(substr($run, 0, strcspn($run, $objection)));
-    }
+        $normalised = rtrim(str_replace('\\', '/', $path), '/');
+        $under = $this->stripped($normalised);
 
-    /**
-     * Whether the ladder recognised a root for this path AND the root is deep enough to be a machine
-     * word ({@see deepEnoughForAMachine()}). Both halves are the same question — is this prefix
-     * something only a machine would be spelling — and this is the one place it is asked of the
-     * ladder, because reason 3 and the exclusions in front of it must not disagree about which roots
-     * count.
-     *
-     * What a shallow root loses is only reason 3: the run carries on to reason 4, so a path that
-     * names a file still relativises through the same ladder and `/app/src/Foo.php` is unchanged.
-     * A path that names none (`/app/storage`) keeps its machine word, and that is the trade —
-     * knowingly a leak, and a leak is the direction that may be traded.
-     */
-    private function deeplyRooted(string $path): bool
-    {
-        $path = rtrim(str_replace('\\', '/', $path), '/');
-        $under = $this->stripped($path);
-
-        if ($under === null) {
-            return false;
-        }
-
-        return self::deepEnoughForAMachine(rtrim(substr($path, 0, strlen($path) - strlen($under)), '/'));
+        return $under === null ? '' : rtrim(substr($normalised, 0, strlen($normalised) - strlen($under)), '/');
     }
 
     /**
@@ -299,12 +380,6 @@ final readonly class MessagePaths
     private static function deepEnoughForAMachine(string $root): bool
     {
         return substr_count($root, '/') >= 2;
-    }
-
-    /** A wrapper scheme, a Windows drive or a UNC share — shapes nothing but a path has. */
-    private static function proven(string $run): bool
-    {
-        return self::windowsRooted($run) || self::wrapper($run) !== null;
     }
 
     /**
@@ -401,10 +476,10 @@ final readonly class MessagePaths
         return $run;
     }
 
-    /** The relative form, but only where the ladder recognised a root {@see deeplyRooted()} counts. */
+    /** The relative form, where {@see PathClaim::PrefixIsAMachineWord} stands for the run's path half. */
     private function attributed(string $run): ?string
     {
-        return $this->deeplyRooted(self::pathPart($run)) ? $this->resolve($run) : null;
+        return $this->machineWord(self::pathPart($run)) ? $this->resolve($run) : null;
     }
 
     /**

@@ -10,6 +10,7 @@ use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
 use Docuccino\Core\Document\PathItem;
 use Docuccino\Core\Document\UirDocument;
+use Docuccino\Core\SpecValidation\EmittedSpecCheck;
 use Docuccino\Core\Support\Arr;
 use Docuccino\Core\Support\JsonPointer;
 use stdClass;
@@ -259,11 +260,13 @@ final readonly class OpenApi31DownlevelEmitter implements ReportingEmitter
 
         $canonical = $this->canonicalizer->canonicalize($this->toOpenApiArray($document, $diagnostics, $options));
 
-        $output = $options->yaml
-            ? $this->yaml->serialize($canonical)
-            : $this->serializer->serialize($canonical);
+        // Checked in the carrier it is WRITTEN in, so the YAML writer answers for its own bytes.
+        $output = $options->yaml ? $this->yaml->serialize($canonical) : $this->serializer->serialize($canonical);
 
-        return new EmitResult($output, new EmitReport($diagnostics));
+        return new EmitResult(
+            $output,
+            new EmitReport([...$diagnostics, ...EmittedSpecCheck::diagnostics($this->format(), $output, $options->yaml)]),
+        );
     }
 
     /**

@@ -21,6 +21,9 @@ use Docuccino\Core\Provenance\Source;
  * a diagnostic, never a silent drop.
  *
  * @internal
+ *
+ * @phpstan-type NavEntry array{sort: array{0: int, 1: string, 2: string}, group: ?string, page: CompiledPage, node: NavNode}
+ * @phpstan-type NavPlacement array{sort: array{0: int, 1: string}, node: NavNode}
  */
 final readonly class ContentResolver
 {
@@ -97,7 +100,7 @@ final readonly class ContentResolver
      */
     private function buildNav(CompiledContent $content, array $navByPage, DocumentIndex $index, array &$diagnostics): array
     {
-        /** @var list<array{sort: array{0: int, 1: string, 2: string}, group: ?string, node: NavNode}> $entries */
+        /** @var list<NavEntry> $entries */
         $entries = [];
 
         foreach ($content->pages as $compiled) {
@@ -114,11 +117,12 @@ final readonly class ContentResolver
             $entries[] = [
                 'sort' => [$compiled->order ?? PHP_INT_MAX, (string) ($compiled->title ?? $compiled->slug), $compiled->slug],
                 'group' => $compiled->group,
+                'page' => $compiled,
                 'node' => $node,
             ];
         }
 
-        return $this->assembleTree($entries);
+        return $this->assembleTree($entries, $diagnostics);
     }
 
     /**
@@ -159,47 +163,106 @@ final readonly class ContentResolver
     /**
      * Fold the flat, per-page entries into a grouped, ordered tree.
      *
-     * @param  list<array{sort: array{0: int, 1: string, 2: string}, group: ?string, node: NavNode}>  $entries
+     * @param  list<NavEntry>  $entries
+     * @param  list<Diagnostic>  $diagnostics
      * @return list<NavNode>
      */
-    private function assembleTree(array $entries): array
+    private function assembleTree(array $entries, array &$diagnostics): array
     {
-        /** @var array<string, array{sort: array{0: int, 1: string}, children: list<array{sort: array{0: int, 1: string, 2: string}, node: NavNode}>}> $groups */
+        /** @var array<string, non-empty-list<NavEntry>> $groups */
         $groups = [];
-        /** @var list<array{sort: array{0: int, 1: string, 2: string}, node: NavNode}> $roots */
+        /** @var list<NavEntry> $roots */
         $roots = [];
 
         foreach ($entries as $entry) {
             if ($entry['group'] === null || $entry['group'] === '') {
-                $roots[] = ['sort' => $entry['sort'], 'node' => $entry['node']];
+                $roots[] = $entry;
 
                 continue;
             }
 
-            $name = $entry['group'];
-            if (! isset($groups[$name])) {
-                $groups[$name] = ['sort' => [PHP_INT_MAX, $name], 'children' => []];
-            }
-            // A group sorts by its least child order, then its name.
-            $groups[$name]['sort'] = [min($groups[$name]['sort'][0], $entry['sort'][0]), $name];
-            $groups[$name]['children'][] = ['sort' => $entry['sort'], 'node' => $entry['node']];
+            $groups[$entry['group']][] = $entry;
         }
 
-        /** @var list<array{sort: array{0: int, 1: string}, node: NavNode}> $rootEntries */
+        /** @var list<NavPlacement> $rootEntries */
         $rootEntries = [];
 
-        foreach ($roots as $root) {
+        foreach ($this->ordered($roots, $diagnostics) as $root) {
             $rootEntries[] = ['sort' => [$root['sort'][0], $root['sort'][1]], 'node' => $root['node']];
         }
 
-        foreach ($groups as $name => $group) {
-            usort($group['children'], static fn (array $a, array $b): int => $a['sort'] <=> $b['sort']);
-            $children = array_map(static fn (array $child): NavNode => $child['node'], $group['children']);
-            $rootEntries[] = ['sort' => $group['sort'], 'node' => new NavNode(type: 'group', title: $name, children: $children)];
+        foreach ($groups as $name => $members) {
+            $children = $this->ordered($members, $diagnostics);
+
+            // A group sorts by its least member order, then its name. Reading it off the members and
+            // reading it off the children it keeps are the same answer: `ordered()` sorts first and
+            // holds nothing back at the entry that sorts first, so the least-ordered member is always
+            // one of the children.
+            $least = min(array_map(static fn (array $member): int => $member['sort'][0], $members));
+
+            $rootEntries[] = [
+                'sort' => [$least, $name],
+                'node' => new NavNode(type: 'group', title: $name, children: array_map(static fn (array $child): NavNode => $child['node'], $children)),
+            ];
         }
 
         usort($rootEntries, static fn (array $a, array $b): int => $a['sort'] <=> $b['sort']);
 
         return array_map(static fn (array $entry): NavNode => $entry['node'], $rootEntries);
+    }
+
+    /**
+     * One nav parent's entries, ordered and with each destination held once.
+     *
+     * Two pages may both ask to be the link to one operation or tag, and a sidebar drawing the same
+     * destination twice in one section is a section with a dead-looking twin in it. The one kept is the
+     * one the parent's own order puts first — explicit `nav.order`, then title, then slug, which is
+     * total because slugs are unique — so it is a function of the pages contesting the link and not of
+     * the order they were compiled in. The whole losing node goes rather than a member of it: each node
+     * is one page's statement about itself, so blending two would publish a link neither page asked for.
+     *
+     * Deduping per parent, not across the tree: one endpoint surfaced under two sections is a
+     * navigation an author can reasonably want, and there would be no other way to write it.
+     *
+     * @param  list<NavEntry>  $entries
+     * @param  list<Diagnostic>  $diagnostics
+     * @return list<NavEntry>
+     */
+    private function ordered(array $entries, array &$diagnostics): array
+    {
+        usort($entries, static fn (array $a, array $b): int => $a['sort'] <=> $b['sort']);
+
+        $kept = [];
+        /** @var array<string, string> $held  destination → the slug holding it */
+        $held = [];
+
+        foreach ($entries as $entry) {
+            $ref = $entry['node']->ref;
+            // A `page` node refs its own page id, which slug dedup already made unique, so only an
+            // operation or a tag can be named twice.
+            $destination = $entry['node']->type.' '.$ref;
+
+            if ($ref !== null && isset($held[$destination])) {
+                $diagnostics[] = new Diagnostic(
+                    severity: Severity::Warning,
+                    code: 'content.duplicate-nav-ref',
+                    message: sprintf(
+                        'Page "%s" adds a second %s nav entry for "%s" in the same part of the tree; "%s" already links there, so this one is left out.',
+                        $entry['page']->slug,
+                        $entry['node']->type,
+                        $entry['page']->navRef ?? '',
+                        $held[$destination],
+                    ),
+                    source: new Source($entry['page']->sourceFile),
+                );
+
+                continue;
+            }
+
+            $held[$destination] = $entry['page']->slug;
+            $kept[] = $entry;
+        }
+
+        return $kept;
     }
 }

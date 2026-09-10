@@ -9,6 +9,7 @@ use Docuccino\Core\Canonical\CanonicalJsonSerializer;
 use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Document\NodeIdentity;
 use Docuccino\Core\Document\UirDocument;
+use Docuccino\Core\SpecValidation\EmittedSpecCheck;
 
 /**
  * Emits a {@see UirDocument} as pure OpenAPI 3.2 (JSON or YAML): every `x-docuccino` member goes,
@@ -43,7 +44,8 @@ final readonly class OpenApi32Emitter implements ReportingEmitter
 
     /**
      * 3.2 is the UIR's own OAS version, so nothing is downlevelled. What it can still report is a
-     * document member no OpenAPI version accepts as written — {@see ServerVariables} is the only one.
+     * document member no OpenAPI version accepts as written ({@see ServerVariables} is the only one),
+     * and any way the artifact fails its own published schema ({@see EmittedSpecCheck}).
      */
     public function emitWithReport(UirDocument $document, EmitOptions $options = new EmitOptions): EmitResult
     {
@@ -54,11 +56,13 @@ final readonly class OpenApi32Emitter implements ReportingEmitter
             ServerVariables::complete($this->toOpenApiArray($document, $options), $diagnostics),
         );
 
-        $output = $options->yaml
-            ? $this->yaml->serialize($canonical)
-            : $this->serializer->serialize($canonical);
+        // Checked in the carrier it is WRITTEN in, so the YAML writer answers for its own bytes.
+        $output = $options->yaml ? $this->yaml->serialize($canonical) : $this->serializer->serialize($canonical);
 
-        return new EmitResult($output, new EmitReport($diagnostics));
+        return new EmitResult(
+            $output,
+            new EmitReport([...$diagnostics, ...EmittedSpecCheck::diagnostics($this->format(), $output, $options->yaml)]),
+        );
     }
 
     /**

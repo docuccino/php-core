@@ -8,8 +8,9 @@ use Docuccino\Core\Document\UirDocument;
 use Docuccino\Core\Emit\EmitOptions;
 use Docuccino\Core\Emit\Postman\CollectionEmitter;
 use Docuccino\Core\Emit\Postman\Description;
+use Docuccino\Core\Emit\Postman\Headers;
+use Docuccino\Core\SpecValidation\SchemaFindings;
 use Docuccino\Core\Tests\Support\EmittedDocument;
-use Docuccino\Core\Tests\Support\SchemaFindings;
 use Opis\JsonSchema\Validator;
 
 /**
@@ -1219,4 +1220,237 @@ it('folds a shape reached down two branches at once, once, and keeps every field
         ['key' => 'name', 'value' => 'string', 'type' => 'text', 'disabled' => true],
         ['key' => 'size', 'value' => '0', 'type' => 'text'],
     ]]);
+});
+
+/**
+ * A header list is Postman's send list: every enabled entry goes on the wire, so one name held twice is
+ * two headers on one message. The name is the slot, case-insensitively, exactly as HTTP reads it.
+ *
+ * Over every fixture and every list — the request's and each saved response's — because the two are
+ * built by different producers and a rule only one of them learns is the defect back on one side.
+ */
+it('holds each header name once, in every request and every saved response', function (): void {
+    $lists = 0;
+    $contested = 0;
+
+    $collect = function (mixed $node, callable $collect): array {
+        $found = [];
+
+        if (! is_array($node)) {
+            return $found;
+        }
+
+        foreach ($node as $key => $value) {
+            if ($key === 'header' && is_array($value)) {
+                $found[] = $value;
+            }
+
+            $found = [...$found, ...$collect($value, $collect)];
+        }
+
+        return $found;
+    };
+
+    foreach (postmanSchemaFixtures() as $fixture) {
+        foreach ($collect(postman(loadFixture($fixture)), $collect) as $list) {
+            $names = array_map(
+                static fn (mixed $entry): string => strtolower(is_array($entry) && is_string($entry['key'] ?? null) ? $entry['key'] : ''),
+                $list,
+            );
+
+            $lists++;
+            $contested += count($names) > 1 ? 1 : 0;
+
+            expect(array_unique($names))->toHaveCount(count($names), 'a header name is held twice in '.$fixture.': '.implode(', ', $names));
+        }
+    }
+
+    // A collection emitting no headers at all would satisfy every assertion above — and so would one
+    // where every list holds a single entry, which is the denominator that matters here: only a list
+    // of two or more can carry the duplicate this is looking for.
+    expect($lists)->toBeGreaterThan(80)
+        ->and($contested)->toBeGreaterThan(15);
+});
+
+/**
+ * OAS: a header parameter named `Accept`, `Content-Type` or `Authorization` SHALL be ignored, and so
+ * SHALL a response header named `Content-Type`. Ignored means ignored — the declaration contributes no
+ * value, no requiredness and no prose, so what stands is what the collection itself carries.
+ */
+it('ignores the header declarations OAS says are not declarations', function (string $leaf, string $name, array $expected): void {
+    $leaves = postmanLeaves(postman(loadFixture('postman-surface.uir.json'))['item']);
+    $request = $leaves[$leaf]['request'];
+
+    $matching = array_values(array_filter(
+        $name === 'response' ? $leaves[$leaf]['response'][0]['header'] : $request['header'],
+        static fn (array $entry): bool => strtolower($entry['key']) === strtolower($name === 'response' ? 'content-type' : $name),
+    ));
+
+    expect($matching)->toBe($expected);
+})->with([
+    // The form body is written in urlencoded, so that is the Content-Type the request sends — not the
+    // `string` the ignored parameter's schema samples to, which today rode alongside it and enabled.
+    'a Content-Type parameter' => ['/Accounts/Open an account', 'Content-Type', [['key' => 'Content-Type', 'value' => 'application/x-www-form-urlencoded']]],
+    'an Accept parameter' => ['/Show the category tree', 'Accept', [['key' => 'Accept', 'value' => 'application/json']]],
+    // Postman injects the credential from the collection's auth block; a second one from a parameter is
+    // a second Authorization header.
+    'an Authorization parameter' => ['/Show the category tree', 'Authorization', []],
+    'a Content-Type response header' => ['/Accounts/List accounts', 'response', [['key' => 'Content-Type', 'value' => 'application/json']]],
+]);
+
+/**
+ * The one name OAS leaves to us. Postman has no cookie jar on a request, so declared cookies are
+ * assembled into a `Cookie` header — and an operation that ALSO declares that header by name is stating
+ * the same slot twice. The assembled value wins, because it is what this request carries; the
+ * declaration keeps its prose, and either side asking for the header to be sent is enough.
+ */
+it('merges a declared Cookie header with the jar assembled from the cookie parameters', function (): void {
+    $leaves = postmanLeaves(postman(loadFixture('postman-surface.uir.json'))['item']);
+
+    $cookies = array_values(array_filter(
+        $leaves['/Show the category tree']['request']['header'],
+        static fn (array $entry): bool => strtolower($entry['key']) === 'cookie',
+    ));
+
+    expect($cookies)->toBe([[
+        'key' => 'Cookie',
+        'value' => 'session=string; theme=dark',
+        'disabled' => true,
+        'description' => 'The raw cookie header.',
+    ]]);
+});
+
+/** The positive control: an ordinary header declaration is untouched by any of the rules above. */
+it('leaves an ordinary header parameter exactly as declared', function (): void {
+    $leaves = postmanLeaves(postman(loadFixture('postman-surface.uir.json'))['item']);
+
+    expect($leaves['/Show the category tree']['request']['header'])->toContain([
+        'key' => 'X-Tenant',
+        'value' => 'string',
+        'description' => 'Which tenant the tree belongs to.',
+    ]);
+});
+
+/**
+ * The one entry in $list whose name is $name, read case-insensitively as the wire reads it.
+ *
+ * @param  list<array<string, mixed>>  $list
+ * @return array<string, mixed>
+ */
+function postmanHeaderNamed(array $list, string $name): array
+{
+    $matching = array_values(array_filter(
+        $list,
+        static fn (array $entry): bool => strtolower(is_string($entry['key'] ?? null) ? $entry['key'] : '') === strtolower($name),
+    ));
+
+    expect($matching)->toHaveCount(1, 'expected exactly one '.$name.' header');
+
+    return $matching[0];
+}
+
+/**
+ * Two contributors reach one `Cookie` slot: the header the document declares by that name, and the
+ * header this collection assembles out of the cookie parameters beside it. Postman either sends an
+ * entry or it does not, so the two requirements are one answer — and either side asking is enough,
+ * because a header the document calls required does not become optional for having been described
+ * twice. Taking the last contributor's answer instead would leave that header sitting disabled.
+ */
+it('sends a contested header when either contributor asks for it', function (bool $declared, bool $cookie, bool $sent): void {
+    $collection = postman(postmanDocumentWithPaths(['/things' => ['get' => [
+        'parameters' => [
+            ['name' => 'Cookie', 'in' => 'header', 'required' => $declared, 'schema' => ['type' => 'string'], 'description' => 'The raw cookie header.'],
+            ['name' => 'session', 'in' => 'cookie', 'required' => $cookie, 'schema' => ['type' => 'string']],
+        ],
+        'responses' => [],
+    ]]]));
+
+    $entry = postmanHeaderNamed($collection['item'][0]['request']['header'], 'Cookie');
+
+    expect(array_key_exists('disabled', $entry))->toBe(! $sent);
+})->with([
+    // The declaration arrives first and the jar second, so this is the row a last-one-wins merge loses.
+    'the declaration requires it' => [true, false, true],
+    'a cookie parameter requires it' => [false, true, true],
+    'both require it' => [true, true, true],
+    'neither does' => [false, false, false],
+]);
+
+/**
+ * The two contributors also spell the name, and only one of them describes the message: the assembled
+ * jar IS the `Cookie` header this request sends, while the declaration is one document's word for that
+ * slot. So the derived spelling and value stand, and the declaration keeps the one thing only it has.
+ */
+it('spells a contested header the way the message carries it, not the way the document declared it', function (): void {
+    $collection = postman(postmanDocumentWithPaths(['/things' => ['get' => [
+        'parameters' => [
+            ['name' => 'cookie', 'in' => 'header', 'required' => false, 'schema' => ['type' => 'string'], 'description' => 'The raw cookie header.'],
+            ['name' => 'session', 'in' => 'cookie', 'required' => false, 'schema' => ['type' => 'string']],
+        ],
+        'responses' => [],
+    ]]]));
+
+    expect($collection['item'][0]['request']['header'])->toBe([[
+        'key' => 'Cookie',
+        'value' => 'session=string',
+        'disabled' => true,
+        'description' => 'The raw cookie header.',
+    ]]);
+});
+
+/**
+ * The slot itself, both ways round. Only one order is reachable through the emitter — the assembled
+ * jar is placed after the declarations, and the two derived headers a declaration could follow are
+ * the ones OAS says to ignore — so the other order is proven here or nowhere, and a rule about which
+ * contributor is right would quietly become a rule about which one arrived first.
+ */
+it('lets the derived contribution name and value a slot, whichever order the two reach it in', function (bool $derivedFirst): void {
+    $headers = new Headers;
+
+    if ($derivedFirst) {
+        $headers->derived('Cookie', 'session=abc');
+    }
+
+    $headers->declared('cookie', 'string', false, 'The raw cookie header.');
+
+    if (! $derivedFirst) {
+        $headers->derived('Cookie', 'session=abc');
+    }
+
+    expect($headers->toArray())->toBe([[
+        'key' => 'Cookie',
+        'value' => 'session=abc',
+        'description' => 'The raw cookie header.',
+    ]]);
+})->with([
+    'the derived contribution first' => [true],
+    'the declaration first' => [false],
+]);
+
+/**
+ * A location holds a name once. OAS requires `(name, in)` unique and lets an operation restate a path
+ * item's parameter to override it, so the merge keys by exactly that pair — which is also what makes
+ * ordering one location's parameters by name a TOTAL order, with no tie left for anything else to
+ * break. A merge that appended instead would hand the header list two `X-Trace` declarations and the
+ * cookie jar two `sid` values, and which of each spoke would be a fact about compilation order.
+ */
+it('holds one parameter per name and location, the operation\'s own declaration winning', function (): void {
+    $collection = postman(postmanDocumentWithPaths(['/things' => [
+        'parameters' => [
+            ['name' => 'X-Trace', 'in' => 'header', 'required' => false, 'schema' => ['type' => 'string'], 'description' => 'Written at the path item.'],
+            ['name' => 'sid', 'in' => 'cookie', 'required' => false, 'schema' => ['type' => 'string', 'examples' => ['from-the-path-item']]],
+        ],
+        'get' => [
+            'parameters' => [
+                ['name' => 'X-Trace', 'in' => 'header', 'required' => false, 'schema' => ['type' => 'string'], 'description' => 'Written at the operation.'],
+                ['name' => 'sid', 'in' => 'cookie', 'required' => false, 'schema' => ['type' => 'string', 'examples' => ['from-the-operation']]],
+            ],
+            'responses' => [],
+        ],
+    ]]));
+
+    expect($collection['item'][0]['request']['header'])->toBe([
+        ['key' => 'X-Trace', 'value' => 'string', 'disabled' => true, 'description' => 'Written at the operation.'],
+        ['key' => 'Cookie', 'value' => 'sid=from-the-operation', 'disabled' => true],
+    ]);
 });

@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Pipeline;
 
+use Docuccino\Core\Extensions\Context\DocumentConfig;
 use Docuccino\Core\Extensions\Context\RouteDependencies;
 use Docuccino\Core\Extensions\Context\RouteDescriptor;
+use Docuccino\Core\Extensions\ResolvedExtensions;
 use Docuccino\Core\Support\AtomicFile;
 use Docuccino\Core\Support\ConfinedPath;
 use Docuccino\Core\Support\GeneratedDirectory;
@@ -18,16 +20,15 @@ use JsonException;
  * output *except* the dependency files, then checks freshness by re-hashing the stored dependency
  * list. A hit reconstructs the fragment without ever invoking the type engine.
  *
- * key = sha256(tool ver ‖ spec ver ‖ identity-algo ver ‖ document id ‖ doc configHash ‖ resolved
- * extension signature (FQCNs + owning package versions) ‖ route cache-signature (method + URI + name +
- * resolved action + normalised middleware)). The document id is in there because a fragment carries
- * ids MINTED from it, so two documents that shape their routes alike — the same config written twice
- * under two `export` destinations, two API versions not yet given an `info.version` — would otherwise
- * share entries, and the second would be served the first's identity tree. The configHash cannot stand
- * in for it: it deliberately excludes `export`, and it is the document's PUBLISHED fingerprint, so
- * widening it to separate these would move emitted bytes. The entry also stores `sha256(each ActionAnalysis +
- * out-of-band dependency file)`, so any changed or removed dependency invalidates it. TraceReport
+ * key = sha256(tool ver ‖ spec ver ‖ identity-algo ver ‖ document scope ‖ fragment config hash ‖
+ * resolved extension signature (FQCNs + owning package versions) ‖ route cache-signature (method + URI
+ * + name + resolved action + normalised middleware)). The entry also stores `sha256(each ActionAnalysis
+ * + out-of-band dependency file)`, so any changed or removed dependency invalidates it. TraceReport
  * and {@see RouteDependencies} files merge into that one list — {@see put()} is the seam.
+ *
+ * The document SCOPE is usually empty, and that is the point: it is what lets two documents share one
+ * entry rather than building the same operation twice. {@see documentScope()} settles it, and says
+ * when a document has to keep its entries to itself instead.
  *
  * A dependency that ISN'T THERE is a state the manifest records, not a hash it fails to take: a route
  * may legitimately depend on a file nobody has written yet — an example file a `#[Example(file:)]`
@@ -55,7 +56,7 @@ use JsonException;
 final readonly class FragmentCache
 {
     /** The entry format {@see get()} will read. An entry stamped anything else is a miss. */
-    public const FORMAT = 7;
+    public const FORMAT = 8;
 
     /**
      * The manifest's stand-ins for the two things a digest cannot be. Neither can be mistaken for one:
@@ -94,17 +95,42 @@ final readonly class FragmentCache
     }
 
     /**
+     * What separates this document's entries from another document's — `''` whenever nothing has to,
+     * which is the usual answer, else the document's own identity.
+     *
+     * A fragment carries no identity of its own, so two documents that shape their routes alike build
+     * the same fragment and can share one entry: V API versions of R routes cost R analyses rather
+     * than R × V. That holds only while everything the build reads is in the key, and two things take
+     * a build outside it — committed example recordings, filed under the operation's DOCUMENT-scoped
+     * identity, and an extension this product did not ship, which can read whatever it likes off the
+     * context. Either one keys the document on itself, as every document did before sharing existed.
+     * Over-keying costs a rebuild per document; under-keying serves one document's answer to another,
+     * and a version set is where that is hardest to notice. Design §10 has the long form.
+     */
+    public static function documentScope(DocumentConfig $document, string $documentId, ResolvedExtensions $resolved): string
+    {
+        if ($document->recordingsDir() !== null || $resolved->foreignExtensions() !== []) {
+            return $documentId;
+        }
+
+        return '';
+    }
+
+    /**
      * @param  string  $routeSignature  the route cache-signature ({@see RouteDescriptor::cacheSignature()})
-     * @param  string  $documentId  the document identity every id in the fragment was minted from
+     * @param  string  $documentScope  {@see documentScope()}
+     * @param  string  $configHash  the fragment-cache view of the document's shaping config
+     *                              ({@see DocumentConfig::fragmentHash()}), which is not the
+     *                              document's published `configHash`
      * @param  list<string>  $extensionSignature  resolved extension class-strings paired with owning package versions
      */
-    public function key(string $routeSignature, string $documentId, string $configHash, array $extensionSignature): string
+    public function key(string $routeSignature, string $documentScope, string $configHash, array $extensionSignature): string
     {
         return hash('sha256', implode("\0", [
             $this->toolVersion,
             $this->specVersion,
             $this->identityVersion,
-            $documentId,
+            $documentScope,
             $configHash,
             implode(',', $extensionSignature),
             $routeSignature,

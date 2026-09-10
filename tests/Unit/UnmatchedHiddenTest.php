@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Docuccino\Attributes\Hidden;
 use Docuccino\Core\Diagnostics\Severity;
 use Docuccino\Core\Extensions\BuiltIn\DefaultTypeMappers;
 use Docuccino\Core\Extensions\Schema\ComponentRegistry;
@@ -182,16 +183,18 @@ it('names every place that reads #[Hidden] off reflection rather than through th
             $path = (string) $file;
             $contents = (string) file_get_contents($path);
 
-            if (! str_contains($contents, 'Hidden::class')) {
+            // Both halves resolved through the file's own imports rather than matched as text. The
+            // prefilter used to be the substring `Hidden::class`, which the aliased import the line
+            // below claimed to cover could never reach: `use …\Hidden as Concealed` puts neither the
+            // reader nor the file it lives in anywhere the scan could see, so a third reader added that
+            // way incremented neither count. Three files name the attribute today.
+            if (! in_array(Hidden::class, phpReferencedClasses($contents), true)) {
                 continue;
             }
 
             $mentions++;
 
-            // Any spelling of the argument, aliased or fully qualified: a guard that reads a narrower
-            // grammar than the call it guards is a hole, and `\Docuccino\Attributes\Hidden::class`
-            // walks straight through one that only knows the aliases.
-            if (preg_match('/getAttributes\(\s*[\\\\A-Za-z0-9_]*Hidden::class/', $contents) === 1) {
+            if (in_array(Hidden::class, phpClassConstArguments($contents, 'getAttributes'), true)) {
                 $readers[] = basename($path);
             }
         }

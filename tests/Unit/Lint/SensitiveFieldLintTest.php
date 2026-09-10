@@ -9,6 +9,7 @@ use Docuccino\Core\Extensions\Context\DocumentContext;
 use Docuccino\Core\Extensions\Document\UirDocumentDraft;
 use Docuccino\Core\Lint\SensitiveFieldLint;
 use Docuccino\Core\Lint\SensitiveFieldLintOptions;
+use Docuccino\Core\SpecValidation\OpenApiMetaSchema;
 
 /**
  * The data-leakage lint is core + framework-agnostic. Dataset coverage over EVERY heuristic entry,
@@ -296,7 +297,7 @@ it('reads a parameter name only where the URL carries the value', function (stri
  * held against the spec's own enum rather than against itself.
  */
 it('answers for every parameter location the OAS meta-schema declares', function (): void {
-    $schema = json_decode((string) file_get_contents(dirname(__DIR__, 2).'/Fixtures/openapi-v3.2.schema.json'), true);
+    $schema = json_decode((string) file_get_contents(OpenApiMetaSchema::path('openapi-3.2')), true);
     $declared = $schema['$defs']['parameter']['properties']['in']['enum'];
     $answered = array_keys(parameterLocationExpectations());
 

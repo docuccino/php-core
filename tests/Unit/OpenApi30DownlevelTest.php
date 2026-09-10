@@ -11,9 +11,9 @@ use Docuccino\Core\Emit\OpenApi30DownlevelEmitter;
 use Docuccino\Core\Emit\OpenApi31DownlevelEmitter;
 use Docuccino\Core\Emit\OpenApi32Emitter;
 use Docuccino\Core\Emit\ReportingEmitter;
+use Docuccino\Core\SpecValidation\OpenApiMetaSchema;
 use Docuccino\Core\SpecValidation\Validator;
 use Docuccino\Core\Tests\Support\EmittedDocument;
-use Docuccino\Core\Tests\Support\OpenApiMetaSchema;
 
 /**
  * The 3.0 downlevel. It chains off the 3.1 emitter, so the tests here cover only what 3.0 itself
@@ -43,7 +43,9 @@ function downlevel30(array $schema): array
         'openapi' => '3.2.0',
         'info' => ['title' => 'API', 'version' => '1.0.0'],
         'paths' => [],
-        'components' => ['schemas' => ['S' => $schema]],
+        // `Other` is what the rows that carry a `$ref` name: a document referencing a component it does
+        // not define is one no build emits, and the emitted-artifact check says so.
+        'components' => ['schemas' => ['S' => $schema, 'Other' => ['type' => 'object']]],
     ]));
 
     $decoded = json_decode($result->output, true, flags: JSON_THROW_ON_ERROR);
@@ -58,6 +60,38 @@ it('emits OpenAPI 3.0 JSON byte-identical to the committed golden', function ():
     $document = UirDocument::fromArray(downlevelFixture());
 
     expect((new OpenApi30DownlevelEmitter)->emit($document))->toBe(loadGolden('downlevel.openapi30.json'));
+});
+
+/**
+ * The fixture's `Status` carries `enumDescriptions` beside `x-enumDescriptions` — the vendor member
+ * written without its prefix, which is what an overlay or a hand-written schema fragment does. It is
+ * in the corpus because 3.0's Schema Object is CLOSED: publishing one member it does not enumerate
+ * makes the whole artifact invalid, so a 3.0 consumer loses the document rather than the member.
+ *
+ * The golden beside this pins the emitted bytes, and this names why they are those bytes. Neither the
+ * banned-keyword scan below nor any table in the emitter could have caught it: both answer for the
+ * keywords the PRODUCT knows, and this is one it does not.
+ */
+it('drops the fixture member 3.0 does not define, keeps its x- sibling, and says so', function (): void {
+    $result = (new OpenApi30DownlevelEmitter)->emitWithReport(UirDocument::fromArray(downlevelFixture()));
+
+    /** @var array<string, mixed> $decoded */
+    $decoded = json_decode($result->output, true, flags: JSON_THROW_ON_ERROR);
+    $status = $decoded['components']['schemas']['Status'];
+
+    expect($status)->not->toHaveKey('enumDescriptions')
+        ->and($status)->toHaveKey('x-enumDescriptions')
+        // The fixture really does carry both, or the assertion above is about nothing.
+        ->and(downlevelFixture()['components']['schemas']['Status'])->toHaveKeys(['enumDescriptions', 'x-enumDescriptions']);
+
+    $dropped = array_values(array_filter(
+        $result->report->diagnostics,
+        static fn (Diagnostic $d): bool => $d->code === 'downlevel.unsupported-keyword'
+            && str_contains($d->message, '`enumDescriptions`'),
+    ));
+
+    expect($dropped)->toHaveCount(1)
+        ->and($dropped[0]->message)->toContain('#/components/schemas/Status');
 });
 
 /**
@@ -485,10 +519,15 @@ describe('schema dialect conversions', function (): void {
             ['type' => 'string'],
             [],
         ],
-        'an unknown keyword passes through untouched' => [
+        // A keyword outside the product's own vocabulary — an overlay's, an attribute's, a JSON Schema
+        // revision newer than this — is dropped like any other 3.0 does not define. It used to pass
+        // through, and 3.0's Schema Object is closed: one unrecognised member made the whole artifact
+        // invalid, so a 3.0 consumer lost the document rather than the member. `x-` survives, being the
+        // one thing that object does admit.
+        'an unknown keyword is dropped, naming it' => [
             ['type' => 'string', 'x-enumDescriptions' => ['a' => 'A'], 'somethingNew' => 1],
-            ['type' => 'string', 'somethingNew' => 1, 'x-enumDescriptions' => ['a' => 'A']],
-            [],
+            ['type' => 'string', 'x-enumDescriptions' => ['a' => 'A']],
+            ['downlevel.unsupported-keyword'],
         ],
     ]);
 

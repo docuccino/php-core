@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Docuccino\Core\Canonical\Canonicalizer;
 use Docuccino\Core\Extensions\Schema\EnumDecoration;
 
 /**
@@ -11,7 +12,7 @@ use Docuccino\Core\Extensions\Schema\EnumDecoration;
  */
 
 /**
- * @param  list<string|int>  $values
+ * @param  list<mixed>  $values
  * @param  list<string>  $names
  * @param  array<string, string>  $descriptions
  * @return array<string, mixed>
@@ -86,3 +87,74 @@ it('leaves a schema without an enum member alone', function (mixed $enum): void 
     'an empty enum' => [[]],
     'a non-array enum' => ['draft'],
 ]);
+
+/**
+ * Every decoration shape is positional, and `enum` is a value list the canonicalizer holds each value
+ * once in. Decorating the list as handed in therefore leaves the names and the index-parallel prose
+ * one longer than the values they describe — so every member past the repeat takes the previous one's
+ * name and prose in a generated client, which is a confidently wrong answer rather than a missing one.
+ */
+it('decorates the values it publishes, not the ones it was handed', function (): void {
+    $schema = decorateEnum(
+        ['name', 'name', '-total'],
+        'names',
+        ['Name', 'Name', 'TotalDesc'],
+        ['name' => 'By name.', '-total' => 'Total, descending.'],
+    );
+
+    expect($schema)->toBe([
+        'type' => 'string',
+        'enum' => ['name', '-total'],
+        'x-enumDescriptions' => ['name' => 'By name.', '-total' => 'Total, descending.'],
+        'x-enum-descriptions' => ['By name.', 'Total, descending.'],
+        'x-enum-varnames' => ['Name', 'TotalDesc'],
+        'x-enumNames' => ['Name', 'TotalDesc'],
+    ]);
+});
+
+/**
+ * The alignment check is a length comparison, so it is only worth what it is compared against: the
+ * canonicalizer is what actually publishes `enum`, and a decoration that agreed with the minted list
+ * and not with that one would pass every check here and still ship the slide.
+ *
+ * So the rule is stated from the contract rather than from either side's code — entry i of every
+ * parallel array names value i of the enum the DOCUMENT carries — and the rows include the values two
+ * readings of sameness disagree about: `1` and `"1"` are two enum members, and a repeat can sit
+ * anywhere. Each occurrence of a repeated value is given its own name, so a name that slid one place
+ * shows up as the wrong name rather than as the same one twice.
+ */
+it('names the value at each published index, whatever the canonicalizer held back', function (array $values, array $names, array $enum, array $expected): void {
+    $schema = decorateEnum($values, 'names', $names);
+
+    $canonical = (new Canonicalizer)->canonicalize([
+        'openapi' => '3.2.0',
+        'info' => ['title' => 'T', 'version' => '1.0.0'],
+        'paths' => ['/a' => ['get' => ['responses' => ['200' => [
+            'description' => 'ok',
+            'content' => ['application/json' => ['schema' => $schema]],
+        ]]]]],
+    ]);
+
+    $published = $canonical['paths']['/a']['get']['responses']['200']['content']['application/json']['schema'];
+
+    // The decoration's own answer and the document's have to be the same list, or the names are
+    // parallel to a list nobody publishes.
+    expect($schema['enum'])->toBe($enum)
+        ->and($published['enum'])->toBe($enum)
+        ->and($published['x-enum-varnames'])->toBe($expected)
+        ->and($published['x-enumNames'])->toBe($expected);
+})->with([
+    'a value stated twice' => [['name', 'name', '-total'], ['Name', 'NameAgain', 'TotalDesc'], ['name', '-total'], ['Name', 'TotalDesc']],
+    'a value stated three times' => [['a', 'a', 'a'], ['A', 'ASecond', 'AThird'], ['a'], ['A']],
+    'a repeat that is not adjacent' => [[1, 2, 1], ['One', 'Two', 'OneAgain'], [1, 2], ['One', 'Two']],
+    'an int and its string spelling are two values' => [[1, '1'], ['One', 'OneText'], [1, '1'], ['One', 'OneText']],
+    'true and 1 are two values' => [[true, 1], ['Yes', 'One'], [true, 1], ['Yes', 'One']],
+    'nothing repeated' => [['draft', 'live'], ['Draft', 'Live'], ['draft', 'live'], ['Draft', 'Live']],
+]);
+
+/** Names that never lined up are dropped, deduping or not — a short array renames a prefix. */
+it('drops name hints that do not line up with the published values', function (): void {
+    $schema = decorateEnum(['name', 'name', '-total'], 'names', ['Name', 'TotalDesc']);
+
+    expect($schema)->toBe(['type' => 'string', 'enum' => ['name', '-total']]);
+});

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Docuccino\Core\Tests\Support;
+namespace Docuccino\Core\SpecValidation;
 
 use Docuccino\Core\Emit\Formats;
 use Opis\JsonSchema\Validator;
@@ -13,6 +13,11 @@ use stdClass;
  * The OpenAPI meta-schemas, vendored per version, as an oracle over emitted bytes: give it a format id
  * and a decoded document and it names every place the document does not answer to its own spec.
  *
+ * Shipped rather than test-only, because a defect in an emitted artifact is a defect for whoever
+ * generates a client from it, and our own corpus only ever contains the shapes we thought to write.
+ * {@see EmittedSpecCheck} is what the emitters call; this class stays the oracle both it and the
+ * suite read.
+ *
  * The vendored files are byte-exact as `spec.openapis.org` serves them at the dated (immutable) URIs in
  * {@see SCHEMAS} — all three verified SHA-256 identical to what those URIs answer, with zero external
  * `$ref`s in any of them, so nothing here resolves anything off disk or off the network.
@@ -22,9 +27,11 @@ use stdClass;
  * checked against what the file DECLARES about itself. The `sha256` is CONTENT: it catches an
  * edit to a file that keeps declaring the same id, which is the whole of what an editor of 1,650
  * lines of third-party JSON would leave alone. The content pin is the load-bearing one, because
- * the oracle reads its own gate patterns out of these files ({@see keyGateFindings()}) — so one
- * flipped `false`, or one `^/` widened to `^.`, weakens the validator and the recovered gates
- * together, with nothing else in the suite the wiser.
+ * these files are READ rather than merely validated against: the key gates come out of them
+ * ({@see keyGateFindings()}), and so does the member set the 3.0 downlevel closes its Schema Object
+ * to ({@see schemaMembers30()}). So one flipped `false`, or one `^/` widened to `^.`, weakens the
+ * validator, the recovered gates and what a 3.0 export PUBLISHES together. Both pins are asserted by
+ * `OpenApiMetaSchemaTest`, which is what keeps them honest now that the files ship.
  *
  * Neither pin is CURRENCY. A newer dated revision of any of the three would go unnoticed — the
  * `latest` alias 404s, so there is nothing offline to compare against — and catching that is a
@@ -75,16 +82,67 @@ final class OpenApiMetaSchema
      */
     private const array METHODS = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace', 'query'];
 
+    /**
+     * Members whose value is arbitrary DATA rather than a document node, so nothing inside one is read as
+     * a reference. `default`, `const` and `enum` are a Schema Object's literals; `example` and an Example
+     * Object's `value` are what an author wrote for a consumer to copy.
+     *
+     * @var list<string>
+     */
+    private const array LITERALS = ['example', 'default', 'const', 'enum', 'value'];
+
+    /**
+     * A Link Object's two members that hold ANY value — a literal body, or a map of literals and runtime
+     * expressions — so a `$ref` written inside one is data. Everywhere else `requestBody` and
+     * `parameters` hold document nodes, so this is a POSITION rather than another name in
+     * {@see LITERALS}: blanket-skipping either name would blind the walk at an operation.
+     *
+     * @var list<string>
+     */
+    private const array LINK_LITERALS = ['requestBody', 'parameters'];
+
+    /**
+     * JSON Schema's own members whose value is a map of NAMES, so a key inside one is never a keyword —
+     * the fact both walks over a SCHEMA turn on ({@see opensNameMap()}), and the JSON-Schema half of
+     * {@see nameMaps()}. Not a copy of the subschema-position table: `dependentSchemas` carries
+     * subschemas and is absent, `definitions` carries them under a dialect we lift away and is present.
+     *
+     * @var list<string>
+     */
+    private const array SCHEMA_NAME_MAPS = ['properties', 'definitions', 'patternProperties', '$defs'];
+
+    /**
+     * The same fact for OpenAPI's own members, for the walk over an INSTANCE. Kept as a union across
+     * versions and positions: a member that is a LIST where it appears (`parameters` in a path item) is
+     * walked as a list and never consults this at all.
+     *
+     * @var list<string>
+     */
+    private const array OAS_NAME_MAPS = [
+        'additionalOperations', 'callbacks', 'content', 'encoding', 'examples', 'headers', 'mapping',
+        'mediaTypes', 'parameters', 'paths', 'pathItems', 'requestBodies', 'responses', 'schemas',
+        'scopes', 'securitySchemes', 'variables', 'webhooks',
+    ];
+
     /** @var array<string, Validator> */
     private static array $validators = [];
 
     /** @var array<string, KeyGates> */
     private static array $keyGates = [];
 
-    /** The vendored file for $format. */
+    /** @var list<string>|null */
+    private static ?array $schemaMembers30 = null;
+
+    /**
+     * The vendored file for $format.
+     *
+     * Package-relative, never monorepo-relative, for the reason {@see Validator::defaultSchemaPath()}
+     * gives: these resolve the same from a `vendor/docuccino/core` install, where no monorepo root
+     * exists. `SchemaShippingTest` guards it.
+     */
     public static function path(string $format): string
     {
-        return dirname(__DIR__).'/Fixtures/'.self::row($format)['file'];
+        return dirname(__DIR__, 2).'/resources/openapi/'.self::row($format)['file'];
     }
 
     /** The dated, immutable URI the vendored file was fetched from. */
@@ -99,6 +157,24 @@ final class OpenApiMetaSchema
         return self::row($format)['sha256'];
     }
 
+    /**
+     * The members OpenAPI 3.0's Schema Object enumerates.
+     *
+     * 3.0 closes that object with `additionalProperties: false`, so this IS the set a 3.0 schema may
+     * carry, plus `^x-`. Read out of the vendored file for the reason the key gates are
+     * ({@see keyGates()}): the emitter that has to honour the set and the oracle that checks it must
+     * read the same one, or the guard agrees with whatever the emitter does.
+     *
+     * @return list<string>
+     */
+    public static function schemaMembers30(): array
+    {
+        return self::$schemaMembers30 ??= array_keys(get_object_vars(self::member(
+            self::member(self::member(self::decode('openapi-3.0'), 'definitions'), 'Schema'),
+            'properties',
+        )));
+    }
+
     /** @return VendoredSchema */
     private static function row(string $format): array
     {
@@ -106,9 +182,50 @@ final class OpenApiMetaSchema
     }
 
     /** The vendored file, decoded to the object graph opis validates against. */
-    public static function decode(string $format): mixed
+    public static function decode(string $format): stdClass
     {
-        return json_decode((string) file_get_contents(self::path($format)), flags: JSON_THROW_ON_ERROR);
+        $decoded = json_decode((string) file_get_contents(self::path($format)), flags: JSON_THROW_ON_ERROR);
+
+        return $decoded instanceof stdClass
+            ? $decoded
+            : throw new RuntimeException('Vendored meta-schema is not a JSON object: '.self::path($format));
+    }
+
+    /**
+     * A member of $node that the vendored file must declare as an object. Reading these is what the
+     * key gates and the 3.0 member set are, so a file that stopped carrying one is a broken vendored
+     * file rather than a document to degrade over.
+     */
+    private static function member(stdClass $node, string $name): stdClass
+    {
+        $value = $node->{$name} ?? null;
+
+        return $value instanceof stdClass
+            ? $value
+            : throw new RuntimeException(sprintf('Vendored meta-schema declares no object at "%s".', $name));
+    }
+
+    /**
+     * The members of $value where it is an object, and none where it is anything else — for the
+     * OPTIONAL positions, which a document may legitimately not carry.
+     *
+     * Keys come back as strings because that is what a member name is; PHP turns a numeric one into an
+     * int on the way into an array, and a `responses` map is keyed by status code.
+     *
+     * @return array<string, mixed>
+     */
+    private static function members(mixed $value): array
+    {
+        if (! $value instanceof stdClass) {
+            return [];
+        }
+
+        $members = [];
+        foreach (get_object_vars($value) as $name => $member) {
+            $members[(string) $name] = $member;
+        }
+
+        return $members;
     }
 
     /**
@@ -119,15 +236,37 @@ final class OpenApiMetaSchema
      * ({@see EmittedDocument::parseYaml()}). Hand it an associative array and every map in the document
      * reads as a JSON array, which is the blindness this oracle exists to remove.
      *
-     * The key gates {@see keyGateFindings()} recovers are folded in here, so every caller gets them.
+     * The whole oracle: the schema itself, the key gates {@see keyGateFindings()} recovers, and the two
+     * rules JSON Schema cannot state about an instance at all ({@see referenceFindings()},
+     * {@see operationIdFindings()}). That is what a test over the corpus wants — a caller reporting to
+     * a PERSON wants the halves apart instead, because they address different people.
      *
      * @return list<string>
      */
     public static function findings(string $format, mixed $instance): array
     {
         return [
-            ...self::keyGateFindings($format, $instance),
+            ...self::emitterFindings($format, $instance),
             ...self::operationIdFindings($instance),
+        ];
+    }
+
+    /**
+     * The findings whose cause can only be ours. A key a gate refuses, a `$ref` that resolves to
+     * nothing, a shape the version does not accept: an application reaches none of them through its
+     * route table, so the reader of one of these is being told about a defect in the emitter.
+     *
+     * Kept apart from {@see operationIdFindings()} for exactly that reason — a duplicate `operationId`
+     * is usually the application's own, and bucketing the two makes one of them address the wrong
+     * person. {@see EmittedSpecCheck} is where that split becomes two diagnostic codes.
+     *
+     * @return list<string>
+     */
+    public static function emitterFindings(string $format, mixed $instance): array
+    {
+        return [
+            ...self::keyGateFindings($format, $instance),
+            ...self::referenceFindings($instance),
             ...SchemaFindings::of(self::validator($format), $instance, 'https://docuccino.test/'.$format.'.json'),
         ];
     }
@@ -137,6 +276,9 @@ final class OpenApiMetaSchema
      * API, and no meta-schema can say so — JSON Schema has no way to express uniqueness across positions —
      * so a duplicate validates clean at every version while a generated client loses a method to a name
      * collision. This is the assertion that sees it.
+     *
+     * The one finding here whose cause is usually the APPLICATION's, which is why it is asked for
+     * separately from {@see emitterFindings()} and reported under a code of its own.
      *
      * @return list<string>
      */
@@ -168,6 +310,138 @@ final class OpenApiMetaSchema
         sort($findings);
 
         return $findings;
+    }
+
+    /**
+     * Every local `$ref` the document publishes that resolves to nothing.
+     *
+     * The other spec rule no meta-schema can carry, and for a deeper reason than
+     * {@see operationIdFindings()}'s: a `$ref` in an INSTANCE is an ordinary string member, so JSON
+     * Schema never follows it. A generated client loses the whole node behind a dangling one — the type
+     * it names is simply absent — and every version accepts the document.
+     *
+     * Only `#`-rooted pointers are followed. An external reference needs I/O to settle and an anchor
+     * (`#name`) names nothing we mint, so both are left alone rather than guessed at; a
+     * `discriminator.mapping` value is a reference too and is left alone for the same reason, since the
+     * spec also lets it hold a bare component name.
+     *
+     * The walk is conservative on purpose, because a false finding here accuses the emitter of a defect
+     * it does not have. A key is only read as `$ref` where it is a KEYWORD: inside a map of NAMES
+     * ({@see nameMaps()}) every key is a name, so `properties.$ref` is a property and `responses.default`
+     * is a Response Object rather than a literal; and the members that hold arbitrary DATA
+     * ({@see LITERALS}, a Schema Object's `examples` list, a Link Object's {@see LINK_LITERALS}, any
+     * `x-` extension) are not descended into at all, so a `$ref` written inside an example is data and
+     * stays data.
+     *
+     * @return list<string>
+     */
+    public static function referenceFindings(mixed $instance): array
+    {
+        if (! $instance instanceof stdClass) {
+            return [];
+        }
+
+        $findings = [];
+        self::walkReferences($instance, $instance, '', false, false, $findings);
+        sort($findings);
+
+        return $findings;
+    }
+
+    /**
+     * @param  bool  $isLink  whether $node is a Link Object, whose two data members {@see LINK_LITERALS}
+     *                        names are not descended into
+     * @param  list<string>  $findings
+     */
+    private static function walkReferences(mixed $node, stdClass $root, string $pointer, bool $inNameMap, bool $isLink, array &$findings): void
+    {
+        if (is_array($node)) {
+            foreach ($node as $index => $item) {
+                self::walkReferences($item, $root, $pointer.'/'.$index, false, false, $findings);
+            }
+
+            return;
+        }
+
+        if (! $node instanceof stdClass) {
+            return;
+        }
+
+        foreach (get_object_vars($node) as $name => $value) {
+            $key = (string) $name;
+            $at = $pointer.'/'.self::escape($key);
+
+            if ($isLink && in_array($key, self::LINK_LITERALS, true)) {
+                continue;
+            }
+
+            if (! $inNameMap) {
+                if ($key === '$ref') {
+                    if (is_string($value) && str_starts_with($value, '#/') && ! self::resolves($root, $value)) {
+                        $findings[] = sprintf('%s $ref: "%s" names nothing this document defines', $at, $value);
+                    }
+
+                    continue;
+                }
+
+                if (in_array($key, self::LITERALS, true) || str_starts_with($key, 'x-')) {
+                    continue;
+                }
+
+                // A Schema Object's `examples` is a LIST of literals; a Media Type Object's is a MAP of
+                // Example Objects, each of which may be a reference. The kind is what tells them apart.
+                if ($key === 'examples' && ! $value instanceof stdClass) {
+                    continue;
+                }
+            }
+
+            // A `links` map holds Link Objects, so the flag is raised on the MAP and consumed one level
+            // down, where each Link Object's own members are read.
+            if (! $inNameMap && $key === 'links') {
+                self::walkReferences($value, $root, $at, true, true, $findings);
+
+                continue;
+            }
+
+            self::walkReferences(
+                $value,
+                $root,
+                $at,
+                ! $inNameMap && in_array($key, self::nameMaps(), true),
+                $inNameMap && $isLink,
+                $findings,
+            );
+        }
+    }
+
+    /** Whether the JSON pointer in $ref lands on a node $root actually carries. */
+    private static function resolves(stdClass $root, string $ref): bool
+    {
+        $node = $root;
+
+        foreach (explode('/', substr($ref, 2)) as $token) {
+            $token = str_replace(['~1', '~0'], ['/', '~'], rawurldecode($token));
+
+            if ($node instanceof stdClass) {
+                if (! property_exists($node, $token)) {
+                    return false;
+                }
+
+                $node = $node->{$token};
+
+                continue;
+            }
+
+            if (is_array($node) && $token !== '' && ctype_digit($token) && array_key_exists((int) $token, $node)) {
+                $node = $node[(int) $token];
+
+                continue;
+            }
+
+            return false;
+        }
+
+        return true;
     }
 
     /**
@@ -258,18 +532,19 @@ final class OpenApiMetaSchema
             return self::$keyGates[$format];
         }
 
-        $defs = self::decode($format)->{'$defs'};
+        $defs = self::member(self::decode($format), '$defs');
+        $extensions = array_keys(get_object_vars(self::member(self::member($defs, 'specification-extensions'), 'patternProperties')));
 
-        $patterns = static function (string $def) use ($defs): array {
-            $node = $defs->{$def};
+        $patterns = static function (string $def) use ($defs, $extensions): array {
+            $node = self::member($defs, $def);
 
-            $found = array_keys(get_object_vars($node->patternProperties));
+            $found = array_keys(get_object_vars(self::member($node, 'patternProperties')));
 
-            foreach (array_keys(get_object_vars($node->properties ?? new stdClass)) as $literal) {
-                $found[] = '^'.preg_quote((string) $literal, '~').'$';
+            foreach (array_keys(self::members($node->properties ?? null)) as $literal) {
+                $found[] = '^'.preg_quote($literal, '~').'$';
             }
 
-            return [...$found, ...array_keys(get_object_vars($defs->{'specification-extensions'}->patternProperties))];
+            return [...$found, ...$extensions];
         };
 
         return self::$keyGates[$format] = [
@@ -328,7 +603,7 @@ final class OpenApiMetaSchema
 
                     // A callback maps a runtime EXPRESSION to a path item, which is the same shape as the
                     // containers above — so each one goes back through the loop and its operations count.
-                    foreach (get_object_vars($operation->callbacks ?? new stdClass) as $name => $callback) {
+                    foreach (self::members($operation->callbacks ?? null) as $name => $callback) {
                         if ($callback instanceof stdClass) {
                             $containers[$pointer.'/'.$method.'/callbacks/'.self::escape((string) $name)] = $callback;
                         }
@@ -336,7 +611,7 @@ final class OpenApiMetaSchema
                 }
 
                 // 3.2 lets a path item carry operations under names of its own choosing.
-                foreach (get_object_vars($item->additionalOperations ?? new stdClass) as $method => $operation) {
+                foreach (self::members($item->additionalOperations ?? null) as $method => $operation) {
                     if ($operation instanceof stdClass) {
                         $operations[$pointer.'/additionalOperations/'.self::escape((string) $method)] = $operation;
                     }
@@ -419,6 +694,8 @@ final class OpenApiMetaSchema
      * keywords, so a property genuinely called `id` survives. Draft-04's boolean
      * `exclusiveMinimum`/`exclusiveMaximum` needs nothing: opis reads it under
      * `allowExclusiveMinMaxAsBool`, which is on by default.
+     *
+     * @return ($node is stdClass ? stdClass : mixed)
      */
     private static function dialect(mixed $node, bool $inMap = false): mixed
     {
@@ -463,6 +740,8 @@ final class OpenApiMetaSchema
      *   unreachable rather than harmless — measured either way, in `OpenApiUnevaluatedScopeTest`, beside
      *   the row proving the mutual exclusion of `query` and `querystring` is NOT lost with it (that rides
      *   a `not`/`allOf` opis reads correctly), which is what bounds the loss to the cap alone.
+     *
+     * @return ($node is stdClass ? stdClass : mixed)
      */
     private static function opisWorkarounds(mixed $node, bool $inMap = false): mixed
     {
@@ -502,6 +781,17 @@ final class OpenApiMetaSchema
     /** Whether $key's value is a map of NAMES (so its keys are never keywords), given where we are. */
     private static function opensNameMap(bool $inMap, string $key): bool
     {
-        return ! $inMap && in_array($key, ['properties', 'definitions', 'patternProperties', '$defs'], true);
+        return ! $inMap && in_array($key, self::SCHEMA_NAME_MAPS, true);
+    }
+
+    /**
+     * Every member whose value is a map of names, for a walk over an OpenAPI document — which carries
+     * Schema Objects, so it is both halves.
+     *
+     * @return list<string>
+     */
+    private static function nameMaps(): array
+    {
+        return [...self::SCHEMA_NAME_MAPS, ...self::OAS_NAME_MAPS];
     }
 }

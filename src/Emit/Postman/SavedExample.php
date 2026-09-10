@@ -109,10 +109,10 @@ final class SavedExample
      */
     private static function headers(?string $mediaType, array $response, array $components, SchemaExampleFactory $examples): array
     {
-        $headers = [];
+        $headers = new Headers;
 
         if ($mediaType !== null) {
-            $headers[] = ['key' => 'Content-Type', 'value' => $mediaType];
+            $headers->derived('Content-Type', $mediaType);
         }
 
         $declared = Arr::stringKeyed(is_array($response['headers'] ?? null) ? $response['headers'] : []);
@@ -120,6 +120,12 @@ final class SavedExample
         sort($names, SORT_STRING);
 
         foreach ($names as $name) {
+            // OAS: a response header named `Content-Type` SHALL be ignored — the media type the
+            // response is written in is what the example carries, and it is already above.
+            if (Headers::ignoredResponseHeader($name)) {
+                continue;
+            }
+
             // A header object may be written as a `$ref` exactly as the response around it may, and a
             // header read off the pointer node has no `schema` — so it would drop out of the example
             // for having been shared.
@@ -131,17 +137,15 @@ final class SavedExample
                 continue;
             }
 
-            $entry = ['key' => $name, 'value' => is_scalar($member[0]) ? (string) $member[0] : ''];
-
-            $description = Description::text($header['description'] ?? null);
-            if ($description !== '') {
-                $entry['description'] = $description;
-            }
-
-            $headers[] = $entry;
+            $headers->declared(
+                $name,
+                is_scalar($member[0]) ? (string) $member[0] : '',
+                true,
+                Description::text($header['description'] ?? null),
+            );
         }
 
-        return $headers;
+        return $headers->toArray();
     }
 
     /**

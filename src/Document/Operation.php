@@ -66,6 +66,49 @@ final readonly class Operation
     }
 
     /**
+     * The same operation carrying `$id` in its `x-docuccino` — {@see OperationIdentities} stamps it
+     * after the fragment cache, so a stored fragment holds none.
+     */
+    public function withIdentity(?string $id): self
+    {
+        $docuccino = ($this->docuccino ?? new NodeExtension)->withId($id);
+
+        return $this->rebuilt($this->parameters, $this->responses, $docuccino->isEmpty() ? null : $docuccino);
+    }
+
+    /**
+     * The same operation with these parameters and responses — the other half of what
+     * {@see OperationIdentities} restamps, since a child's id lives on the child.
+     *
+     * @param  list<Parameter>  $parameters
+     * @param  array<string, ResponseObject>  $responses
+     */
+    public function withChildren(array $parameters, array $responses): self
+    {
+        return $this->rebuilt($parameters, $responses, $this->docuccino);
+    }
+
+    /**
+     * @param  list<Parameter>  $parameters
+     * @param  array<string, ResponseObject>  $responses
+     */
+    private function rebuilt(array $parameters, array $responses, ?NodeExtension $docuccino): self
+    {
+        return new self(
+            operationId: $this->operationId,
+            summary: $this->summary,
+            description: $this->description,
+            tags: $this->tags,
+            deprecated: $this->deprecated,
+            parameters: $parameters,
+            responses: $responses,
+            security: $this->security,
+            docuccino: $docuccino,
+            rest: $this->rest,
+        );
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function toArray(): array

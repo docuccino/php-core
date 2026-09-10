@@ -44,6 +44,41 @@ final class Arr
     }
 
     /**
+     * The values with each held once, and the source index each kept value came from — so a caller
+     * holding an array PARALLEL to the values (SDK member names, per-value prose) reindexes it by the
+     * same answer rather than deciding distinctness a second time and hoping the two agree.
+     *
+     * Identity is the value's JSON bytes: `1` and `"1"` are two values, and two arrays carrying the
+     * same members in the same order are one. A value `json_encode` refuses has no bytes, so it shares
+     * one key with every other such value and the first of them stands for all — vague and honest,
+     * where the alternative is a key that is not a function of the value at all.
+     *
+     * @param  list<mixed>  $values
+     * @return array{values: list<mixed>, indexes: list<int>}
+     */
+    public static function distinctValues(array $values): array
+    {
+        $kept = [];
+        $indexes = [];
+        $seen = [];
+
+        foreach ($values as $index => $value) {
+            $key = json_encode($value);
+            $key = is_string($key) ? $key : '';
+
+            if (isset($seen[$key])) {
+                continue;
+            }
+
+            $seen[$key] = true;
+            $kept[] = $value;
+            $indexes[] = $index;
+        }
+
+        return ['values' => $kept, 'indexes' => $indexes];
+    }
+
+    /**
      * The value at a key-path; null if a segment is missing or the walk hits a non-array.
      *
      * @param  array<array-key, mixed>  $document

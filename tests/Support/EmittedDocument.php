@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Tests\Support;
 
+use Docuccino\Core\Emit\YamlSerializer;
 use stdClass;
-use Symfony\Component\Yaml\Yaml;
 
 /**
  * An emitted document as an object graph — `stdClass` per map, `array` per sequence — plus the
@@ -14,9 +14,10 @@ use Symfony\Component\Yaml\Yaml;
  *
  * `Yaml::parse()` answers a PHP array for a mapping AND a PHP array for a sequence, so `paths: {}` and
  * `paths: []` decode identically — which is why every round-trip assertion in the suite stayed green while
- * `--yaml` shipped `paths: []` for a `paths` that is an empty MAP. {@see parseYaml()} uses
- * `PARSE_OBJECT_FOR_MAP`, which answers `stdClass` for a mapping, so the two serialisations of one
- * document become comparable position by position.
+ * `--yaml` shipped `paths: []` for a `paths` that is an empty MAP. {@see parseYaml()} goes through
+ * {@see YamlSerializer::parse()}, which keeps the carrier, so the two serialisations of one document
+ * become comparable position by position — and so the suite reads emitted YAML back exactly the way
+ * the shipped check does.
  *
  * Two comparisons read that graph and they split the work deliberately: {@see differences()} answers
  * kinds, presence and scalar values, and {@see orderDifferences()} answers member ORDER, which
@@ -24,10 +25,10 @@ use Symfony\Component\Yaml\Yaml;
  */
 final class EmittedDocument
 {
-    /** Emitted YAML, read back without losing the map/sequence distinction. */
+    /** Emitted YAML, read back through the same parse the shipped check uses. */
     public static function parseYaml(string $yaml): mixed
     {
-        return Yaml::parse($yaml, Yaml::PARSE_OBJECT_FOR_MAP);
+        return (new YamlSerializer)->parse($yaml);
     }
 
     /**

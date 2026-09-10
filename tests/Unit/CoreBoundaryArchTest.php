@@ -14,6 +14,13 @@ declare(strict_types=1);
  */
 use Docuccino\Core\Contract\ContractIndex;
 use Docuccino\Core\Extensions\Validation\ValidationField;
+use Docuccino\Core\Tests\Fixtures\Boundary\DocblockLeakProbe;
+use Docuccino\Core\TypeGrammar\ImportContext;
+use Docuccino\Core\TypeGrammar\PhpDocParserStack;
+use PHPStan\PhpDocParser\Ast\AbstractNodeVisitor;
+use PHPStan\PhpDocParser\Ast\Node as PhpDocParserNode;
+use PHPStan\PhpDocParser\Ast\NodeTraverser as PhpDocNodeTraverser;
+use PHPStan\PhpDocParser\Ast\Type\IdentifierTypeNode;
 
 arch('core never depends on the Laravel framework')
     ->expect('Docuccino\Core')
@@ -36,26 +43,158 @@ arch('core never depends on the Laravel adapter')
  * name types that are public themselves. Annotate the method `@internal` if it really is pipeline-only
  * (Draft::guard()), or promote the return type to a contract (TypeSchemaConverter).
  */
-it('never hands a public API consumer a type marked @internal', function (): void {
-    $internal = static function (?ReflectionType $type): array {
-        $named = match (true) {
+/**
+ * The types one docblock names, resolved the way PHP would resolve them in $file. Parsed through the
+ * product's own phpdoc stack rather than matched: a reflection sweep sees `array`, and `list<Draft>` in
+ * the docblock beside it is the type a caller actually receives.
+ *
+ * @return list<string>
+ */
+function coreDocBlockTypes(?string $docComment, ?string $file): array
+{
+    $parsed = (new PhpDocParserStack)->parseDocBlock($docComment);
+    if ($parsed === null) {
+        return [];
+    }
+
+    $visitor = new class extends AbstractNodeVisitor
+    {
+        /** @var list<string> */
+        public array $names = [];
+
+        public function enterNode(PhpDocParserNode $node)
+        {
+            if ($node instanceof IdentifierTypeNode) {
+                $this->names[] = $node->name;
+            }
+
+            return null;
+        }
+    };
+
+    (new PhpDocNodeTraverser([$visitor]))->traverse([$parsed]);
+
+    $imports = ImportContext::forFile($file);
+    $names = [];
+    foreach ($visitor->names as $name) {
+        $names[] = $imports->resolve($name);
+    }
+
+    sort($names);
+
+    return array_values(array_unique($names));
+}
+
+/**
+ * Every public promise the given classes make in an `@internal` type, as a readable sentence each.
+ *
+ * A function rather than an inline loop so the state it must REFUSE can be run through it: a guard that
+ * only ever sees a clean surface passes just as well written `return []`.
+ *
+ * @param  list<class-string>  $classes
+ * @return list<string>
+ */
+function coreInternalLeaks(array $classes): array
+{
+    $internal = static function (string $name): bool {
+        if (! class_exists($name) && ! interface_exists($name) && ! enum_exists($name)) {
+            return false;
+        }
+
+        return str_contains((string) (new ReflectionClass($name))->getDocComment(), '@internal');
+    };
+
+    $native = static function (?ReflectionType $type, ReflectionClass $owner) use ($internal): array {
+        $flat = match (true) {
             $type instanceof ReflectionUnionType, $type instanceof ReflectionIntersectionType => $type->getTypes(),
             $type instanceof ReflectionNamedType => [$type],
             default => [],
         };
 
-        return array_values(array_filter(array_map(
-            static fn (ReflectionType $one): string => $one instanceof ReflectionNamedType && ! $one->isBuiltin() ? $one->getName() : '',
-            $named,
-        ), static function (string $name): bool {
-            if ($name === '' || (! class_exists($name) && ! interface_exists($name))) {
-                return false;
+        $names = [];
+        foreach ($flat as $one) {
+            if (! $one instanceof ReflectionNamedType || $one->isBuiltin()) {
+                continue;
             }
 
-            return str_contains((string) (new ReflectionClass($name))->getDocComment(), '@internal');
-        }));
+            // `self` and `static` name the class itself, `parent` its base — all three name a type a
+            // reader has to look up, and `parent` can name one that was never meant to be public.
+            $name = match (strtolower($one->getName())) {
+                'self', 'static' => $owner->getName(),
+                'parent' => ($owner->getParentClass() ?: null)?->getName() ?? '',
+                default => $one->getName(),
+            };
+
+            if ($name !== '' && $internal($name)) {
+                $names[] = $name;
+            }
+        }
+
+        return $names;
     };
 
+    $documented = static function (?string $doc, ?string $file) use ($internal): array {
+        return array_values(array_filter(coreDocBlockTypes($doc === false || $doc === null ? null : $doc, $file), $internal));
+    };
+
+    $leaks = [];
+    foreach ($classes as $class) {
+        $reflection = new ReflectionClass($class);
+        $file = $reflection->getFileName() === false ? null : $reflection->getFileName();
+
+        foreach ($reflection->getMethods(ReflectionMethod::IS_PUBLIC) as $method) {
+            // A method that says it's internal is honest about it; the rule is about the silent ones.
+            if ($method->getDeclaringClass()->getName() !== $class || str_contains((string) $method->getDocComment(), '@internal')) {
+                continue;
+            }
+
+            $doc = $method->getDocComment() === false ? null : $method->getDocComment();
+
+            foreach ($native($method->getReturnType(), $reflection) as $name) {
+                $leaks[] = "{$class}::{$method->getName()}() returns {$name}";
+            }
+
+            foreach ($documented($doc, $file) as $name) {
+                $leaks[] = "{$class}::{$method->getName()}() documents {$name}";
+            }
+
+            foreach ($method->getParameters() as $parameter) {
+                foreach ($native($parameter->getType(), $reflection) as $name) {
+                    $leaks[] = "{$class}::{$method->getName()}(\${$parameter->getName()}) takes {$name}";
+                }
+            }
+        }
+
+        foreach ($reflection->getProperties(ReflectionProperty::IS_PUBLIC) as $property) {
+            if ($property->getDeclaringClass()->getName() !== $class) {
+                continue;
+            }
+
+            foreach ($native($property->getType(), $reflection) as $name) {
+                $leaks[] = "{$class}::\${$property->getName()} is {$name}";
+            }
+
+            $doc = $property->getDocComment() === false ? null : $property->getDocComment();
+            foreach ($documented($doc, $file) as $name) {
+                $leaks[] = "{$class}::\${$property->getName()} documents {$name}";
+            }
+        }
+    }
+
+    sort($leaks);
+
+    return array_values(array_unique($leaks));
+}
+
+/**
+ * The frozen public surface: the extension-author contracts plus the two context objects an extension is
+ * passed, the DType hierarchy those contracts take and hand back, and the contract-testing surface an
+ * adapter's assertions are built on.
+ *
+ * @return list<class-string>
+ */
+function corePublicSurface(): array
+{
     $surface = ['Docuccino\Core\Extensions\Context\RouteContext', 'Docuccino\Core\Extensions\Context\DocumentContext'];
     foreach ((array) glob(__DIR__.'/../../src/Extensions/Contracts/*.php') as $file) {
         $surface[] = 'Docuccino\Core\Extensions\Contracts\\'.basename((string) $file, '.php');
@@ -77,6 +216,13 @@ it('never hands a public API consumer a type marked @internal', function (): voi
             }
         }
     }
+
+    /** @var list<class-string> $surface */
+    return $surface;
+}
+
+it('never hands a public API consumer a type marked @internal', function (): void {
+    $surface = corePublicSurface();
 
     // A glob that stops matching would turn this into a test of nothing, and one that stopped honouring
     // `@internal` would turn it into a test of everything.
@@ -102,34 +248,77 @@ it('never hands a public API consumer a type marked @internal', function (): voi
         expect($surface)->not->toContain($marked);
     }
 
-    $leaks = [];
-    foreach ($surface as $class) {
+    expect(coreInternalLeaks($surface))->toBe([]);
+});
+
+it('reads the type a member DOCUMENTS as well as the one it declares', function (): void {
+    // The reflection sweep answers for native signatures only, and 9 of the surface's public members
+    // declare `array` or `iterable` natively with the real type in the docblock beside it — so an
+    // `@internal` class promised as `list<LocalWrites>` behind a native `array` was a v1 promise nothing
+    // was reading. Written out rather than assumed: the probe makes both promises, and the sweep must
+    // name both.
+    $leaks = coreInternalLeaks([DocblockLeakProbe::class]);
+
+    expect($leaks)->toBe([
+        DocblockLeakProbe::class.'::natively() returns Docuccino\Core\Inference\LocalWrites',
+        DocblockLeakProbe::class.'::onlyInTheDocblock() documents Docuccino\Core\Inference\LocalWrites',
+    ]);
+
+    // …and a member promising nothing internal is not reported, so the rows above are about what the
+    // sweep found and not about one that reports everything.
+    expect(coreInternalLeaks([ContractIndex::class]))->toBe([]);
+});
+
+it('reads a docblock type through the imports of the file that wrote it', function (string $doc, string $named): void {
+    // The imported short name, the ALIASED one and the fully-qualified spelling all have to answer with
+    // the same class — an alias is the spelling a name scan cannot follow, and the surface freezes at v1,
+    // so a promise made through one is as binding as a promise made through any other.
+    $file = __DIR__.'/../Fixtures/Boundary/DocblockLeakProbe.php';
+
+    expect(coreDocBlockTypes($doc, $file))->toContain($named);
+})->with([
+    'an imported short name' => ['/** @return list<LocalWrites> */', 'Docuccino\Core\Inference\LocalWrites'],
+    'an aliased import' => ['/** @return array<string, Concealed> */', 'Docuccino\Core\Inference\LocalWrites'],
+    'a fully-qualified name' => ['/** @return \\Docuccino\\Core\\Inference\\LocalWrites|null */', 'Docuccino\Core\Inference\LocalWrites'],
+    'a nullable short name' => ['/** @return ?LocalWrites */', 'Docuccino\Core\Inference\LocalWrites'],
+    'a union member' => ['/** @return LocalWrites|false */', 'Docuccino\Core\Inference\LocalWrites'],
+    'a parameter rather than a return' => ['/** @param  list<LocalWrites>  $writes */', 'Docuccino\Core\Inference\LocalWrites'],
+]);
+
+it('reads a docblock on the frozen surface itself, not just on a probe', function (): void {
+    // The denominator the docblock half owes: a parser that stopped parsing, or an import context that
+    // stopped resolving, would report a clean surface over an empty set of docblocks and pass forever.
+    // The surface really does describe its collections in prose — MEASURE it rather than assume.
+    $classes = 0;
+    foreach (corePublicSurface() as $class) {
         $reflection = new ReflectionClass($class);
+        $file = $reflection->getFileName() === false ? null : $reflection->getFileName();
+
         foreach ($reflection->getMethods(ReflectionMethod::IS_PUBLIC) as $method) {
-            // A method that says it's internal is honest about it; the rule is about the silent ones.
-            if ($method->getDeclaringClass()->getName() !== $class || str_contains((string) $method->getDocComment(), '@internal')) {
-                continue;
-            }
-
-            foreach ($internal($method->getReturnType()) as $name) {
-                $leaks[] = "{$class}::{$method->getName()}() returns {$name}";
-            }
-
-            foreach ($method->getParameters() as $parameter) {
-                foreach ($internal($parameter->getType()) as $name) {
-                    $leaks[] = "{$class}::{$method->getName()}(\${$parameter->getName()}) takes {$name}";
+            foreach (coreDocBlockTypes($method->getDocComment() === false ? null : $method->getDocComment(), $file) as $name) {
+                if (class_exists($name) || interface_exists($name) || enum_exists($name)) {
+                    $classes++;
                 }
-            }
-        }
-
-        foreach ($reflection->getProperties(ReflectionProperty::IS_PUBLIC) as $property) {
-            foreach ($internal($property->getType()) as $name) {
-                $leaks[] = "{$class}::\${$property->getName()} is {$name}";
             }
         }
     }
 
-    expect($leaks)->toBe([]);
+    expect($classes)->toBeGreaterThanOrEqual(20);
+});
+
+it('names no class for a docblock that promises none', function (): void {
+    // The other direction, so the rows above are about what the reader found. A keyword is qualified
+    // against the file's namespace the way PHP qualifies an unimported single segment, which resolves to
+    // nothing and so promises nothing — what the caller asks of each name is whether it is an `@internal`
+    // CLASS, and none of these is a class at all.
+    $file = __DIR__.'/../Fixtures/Boundary/DocblockLeakProbe.php';
+
+    foreach (coreDocBlockTypes('/** @return list<int>|array<string, bool> */', $file) as $name) {
+        expect(class_exists($name) || interface_exists($name) || enum_exists($name))->toBeFalse();
+    }
+
+    expect(coreDocBlockTypes(null, $file))->toBe([])
+        ->and(coreDocBlockTypes('/** just prose */', $file))->toBe([]);
 });
 
 /**

@@ -153,7 +153,15 @@
       },
       "Status": {
         "type": "string",
-        "enum": ["draft", "published"]
+        "enum": ["draft", "published"],
+        "enumDescriptions": {
+          "draft": "Not visible to anyone but its author",
+          "published": "Visible to everyone"
+        },
+        "x-enumDescriptions": {
+          "draft": "Not visible to anyone but its author",
+          "published": "Visible to everyone"
+        }
       }
     },
     "responses": {

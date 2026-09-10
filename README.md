@@ -71,3 +71,7 @@ monorepo — commits pushed here are overwritten. See
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+This package redistributes the OpenAPI Initiative's specification JSON Schemas under the
+Apache License 2.0, unmodified, and validates every document it emits against them. See
+[NOTICE](NOTICE).

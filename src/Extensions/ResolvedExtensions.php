@@ -22,6 +22,7 @@ use Docuccino\Core\Extensions\Contracts\TypeToSchema;
 use Docuccino\Core\Extensions\Ordering\ExtensionSorter;
 use Docuccino\Core\Extensions\Schema\ConfigurationDigest;
 use Docuccino\Core\Extensions\Schema\DeclarationFiles;
+use Docuccino\Core\Pipeline\FragmentCache;
 use ReflectionClass;
 use Throwable;
 
@@ -38,6 +39,22 @@ use Throwable;
  */
 final readonly class ResolvedExtensions
 {
+    /**
+     * The composer packages this product ships — the whole of what {@see shippedHere()} trusts. Named
+     * one by one rather than matched on the `docuccino/` vendor segment, because nothing reserves that
+     * segment: a fork, a path repository, a private registry or a first-party package living outside
+     * this monorepo can all publish under it, and a prefix would hand any of them the sharing an
+     * unreviewed extension is not entitled to.
+     *
+     * @var list<string>
+     */
+    public const array SHIPPED_PACKAGES = [
+        'docuccino/attributes',
+        'docuccino/core',
+        'docuccino/inference-phpstan',
+        'docuccino/laravel',
+    ];
+
     /**
      * What separates a {@see cacheSignature()} entry from its position in its run. Neither a class name
      * nor a hex digest can hold it, so an entry carrying one is unambiguous.
@@ -175,6 +192,51 @@ final readonly class ResolvedExtensions
         sort($signature);
 
         return $signature;
+    }
+
+    /**
+     * The classes of the resolved extensions that did not ship with this product, sorted — every one
+     * an application or a third-party package contributes. Read from the composer package the class's
+     * FILE belongs to and not from its namespace, because a namespace is a string anyone can write and
+     * an anonymous class is named after the interface it implements, which is one of ours.
+     *
+     * Why a caller sharing one stored fragment between documents owes these a refusal:
+     * {@see FragmentCache::documentScope()}.
+     *
+     * @return list<class-string>
+     */
+    public function foreignExtensions(): array
+    {
+        $classes = [];
+        foreach ($this->instances() as $extension) {
+            if (! self::shippedHere($extension)) {
+                $classes[$extension::class] = true;
+            }
+        }
+
+        $classes = array_keys($classes);
+        sort($classes);
+
+        return $classes;
+    }
+
+    /**
+     * Whether an extension's declaring file belongs to one of this product's own packages
+     * ({@see SHIPPED_PACKAGES}).
+     */
+    private static function shippedHere(object $extension): bool
+    {
+        try {
+            $file = (new ReflectionClass($extension))->getFileName();
+        } catch (Throwable) {
+            return false;
+        }
+
+        if ($file === false) {
+            return false;
+        }
+
+        return in_array(self::composerNameFor($file), self::SHIPPED_PACKAGES, true);
     }
 
     /**

@@ -1049,6 +1049,17 @@
           {
             "key": "Accept",
             "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "session=string; theme=dark",
+            "disabled": true,
+            "description": "The raw cookie header."
+          },
+          {
+            "key": "X-Tenant",
+            "value": "string",
+            "description": "Which tenant the tree belongs to."
           }
         ],
         "url": {
@@ -1070,6 +1081,17 @@
               {
                 "key": "Accept",
                 "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "session=string; theme=dark",
+                "disabled": true,
+                "description": "The raw cookie header."
+              },
+              {
+                "key": "X-Tenant",
+                "value": "string",
+                "description": "Which tenant the tree belongs to."
               }
             ],
             "url": {

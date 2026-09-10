@@ -203,7 +203,11 @@
         "enum": [
           "draft",
           "published"
-        ]
+        ],
+        "x-enumDescriptions": {
+          "draft": "Not visible to anyone but its author",
+          "published": "Visible to everyone"
+        }
       },
       "Thing": {
         "type": "object",

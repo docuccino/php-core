@@ -12,7 +12,7 @@ use Docuccino\Core\Emit\EmitOptions;
 use Docuccino\Core\Emit\Formats;
 use Docuccino\Core\Emit\OpenApi30DownlevelEmitter;
 use Docuccino\Core\Identity\ContentHasher;
-use Docuccino\Core\Tests\Support\OpenApiMetaSchema;
+use Docuccino\Core\SpecValidation\OpenApiMetaSchema;
 
 /**
  * A boolean at a subschema position, at every position 2020-12 has one, through every artifact the

@@ -327,26 +327,6 @@ final class OperationDraft
     }
 
     /**
-     * Assigns identities to every child parameter and response draft. The response callback gets the
-     * primary media type (`''` when there isn't one, e.g. a `$ref`) and may return null to leave the
-     * response id-less.
-     *
-     * @param  callable(string $in, string $name): ?string  $parameterId
-     * @param  callable(string $status, string $primaryMediaType): ?string  $responseId
-     */
-    public function assignChildIds(callable $parameterId, callable $responseId): void
-    {
-        foreach ($this->parameters as $draft) {
-            $draft->assignId($parameterId($draft->in, $draft->name));
-        }
-
-        foreach ($this->responses as $status => $draft) {
-            // PHP coerces numeric-string keys like '200' to ints; the callback wants a string.
-            $draft->assignId($responseId((string) $status, $draft->primaryMediaType()));
-        }
-    }
-
-    /**
      * @internal Not part of the frozen extension-author surface — it hands back the (also
      * `@internal`) {@see Operation} document model. Extensions hand drafts back to the pipeline,
      * which freezes them.

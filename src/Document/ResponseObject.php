@@ -62,6 +62,24 @@ final readonly class ResponseObject
     }
 
     /**
+     * The same response carrying `$id` in its `x-docuccino` — {@see OperationIdentities} stamps it
+     * after the fragment cache, so a stored fragment holds none.
+     */
+    public function withIdentity(?string $id): self
+    {
+        $docuccino = ($this->docuccino ?? new NodeExtension)->withId($id);
+
+        return new self(
+            ref: $this->ref,
+            description: $this->description,
+            headers: $this->headers,
+            content: $this->content,
+            docuccino: $docuccino->isEmpty() ? null : $docuccino,
+            rest: $this->rest,
+        );
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function toArray(): array

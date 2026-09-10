@@ -40,16 +40,13 @@ function versioningKeywordRule(): array
  */
 function versioningKeywordArms(string $relative): array
 {
+    // Read off the parsed `match` rather than out of a slice bounded by an indentation and a quote
+    // style: an arm in double quotes, or a closing brace that moved, dropped the keyword out of the
+    // universe entirely — and a keyword neither table is asked about is one that can join a single
+    // table with both of these guards green.
     $source = (string) file_get_contents(dirname(__DIR__, 4).'/'.$relative);
 
-    preg_match('/match \(\$keyword\) \{(.*?)\n {8}};/s', $source, $body);
-
-    preg_match_all("/'([^']*)' =>/", $body[1] ?? '', $arms);
-
-    $found = $arms[1];
-    sort($found);
-
-    return $found;
+    return phpMatchArmLiterals($source, 'keyword');
 }
 
 it('answers one keyword the same way in both tables', function (string $keyword, string $policy, ?string $order): void {

@@ -7,8 +7,8 @@ use Docuccino\Core\Diff\DocumentDiffer;
 use Docuccino\Core\Document\UirDocument;
 use Docuccino\Core\Emit\EmitOptions;
 use Docuccino\Core\Emit\Formats;
+use Docuccino\Core\SpecValidation\OpenApiMetaSchema;
 use Docuccino\Core\Tests\Support\EmittedReferences;
-use Docuccino\Core\Tests\Support\OpenApiMetaSchema;
 
 /**
  * A boolean at a SCHEMA SLOT — where a Schema Object hangs off something that is not one — through the

@@ -23,6 +23,7 @@ use Docuccino\Core\Patch\Contribution;
 use Docuccino\Core\Support\ConfinedPath;
 use Docuccino\Core\Support\Fqcn;
 use Docuccino\Core\Support\LineEndings;
+use Docuccino\Core\Support\RouteOperationId;
 
 /**
  * The overrides layer: docblock summary/description (docblock precedence), then the operation
@@ -263,21 +264,28 @@ final class AttributeOverridesExtension implements OperationExtension
 
     /**
      * The operationId the representation policy dictates: `route-name` uses the route's name,
-     * `controller-method` builds `{ShortController}@{method}` — falling back to the route name for a
-     * closure route with no class.
+     * `controller-method` builds `{ShortController}@{method}`.
+     *
+     * Neither source is always there — an unnamed route is the ordinary case in a Laravel
+     * application, and a closure route has no class — and publishing nothing does not leave the
+     * consumer without a method name, it leaves them with whatever name their generator invents,
+     * which differs between generators. So whichever strategy is in force, a source that cannot
+     * answer falls through to {@see RouteOperationId}, which mints one from the operation's own
+     * method and path.
      */
-    private function defaultOperationId(RouteContext $context): ?string
+    private function defaultOperationId(RouteContext $context): string
     {
-        if ($context->representation()->operationId !== 'controller-method') {
+        if ($context->representation()->operationId === 'controller-method') {
+            $class = $context->actionRef->class;
+
+            if ($class !== null) {
+                return Fqcn::short($class).'@'.$context->actionRef->method;
+            }
+        } elseif ($context->route->name !== null && $context->route->name !== '') {
             return $context->route->name;
         }
 
-        $class = $context->actionRef->class;
-        if ($class === null) {
-            return $context->route->name;
-        }
-
-        return Fqcn::short($class).'@'.$context->actionRef->method;
+        return RouteOperationId::mint($context->httpMethod(), $context->route->uri);
     }
 
     /**

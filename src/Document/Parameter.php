@@ -72,6 +72,26 @@ final readonly class Parameter
     }
 
     /**
+     * The same parameter carrying `$id` in its `x-docuccino` — {@see OperationIdentities} stamps it
+     * after the fragment cache, so a stored fragment holds none.
+     */
+    public function withIdentity(?string $id): self
+    {
+        $docuccino = ($this->docuccino ?? new NodeExtension)->withId($id);
+
+        return new self(
+            name: $this->name,
+            in: $this->in,
+            description: $this->description,
+            required: $this->required,
+            deprecated: $this->deprecated,
+            schema: $this->schema,
+            docuccino: $docuccino->isEmpty() ? null : $docuccino,
+            rest: $this->rest,
+        );
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function toArray(): array

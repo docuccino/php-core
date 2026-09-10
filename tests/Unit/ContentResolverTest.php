@@ -218,6 +218,83 @@ it('diagnoses a duplicate slug and keeps only the first page', function (): void
         ->and($diagnostics[0]->severity)->toBe(Severity::Error);
 });
 
+/**
+ * Two pages may each ask to be the sidebar link to one operation or tag. The sidebar draws a section
+ * once, so the section holds the destination once — and the one kept is the one the section's own order
+ * puts first, which is a fact about the pages and not about which was compiled first.
+ */
+it('holds one nav entry per destination in a section, whichever order the pages arrive in', function (array $pages): void {
+    $content = new CompiledContent(array_map(
+        static fn (array $page): CompiledPage => makePage($page[0], [
+            'title' => $page[1],
+            'order' => $page[2],
+            'group' => 'Reference',
+            'navType' => 'operation',
+            'navRef' => 'GET /api/forms',
+        ]),
+        $pages,
+    ));
+
+    [$extension, $diagnostics] = (new ContentResolver)->resolve($content, contentIndexDoc());
+
+    expect($extension->nav)->toHaveCount(1)
+        ->and($extension->nav[0]->type)->toBe('group')
+        ->and(array_map(static fn ($n) => [$n->type, $n->ref, $n->title], $extension->nav[0]->children))
+        ->toBe([['operation', 'op:v1:formsindex00000', 'Forms']]);
+
+    // Both pages still compile — only the second link is left out.
+    expect($extension->pages)->toHaveCount(2);
+
+    expect($diagnostics)->toHaveCount(1)
+        ->and($diagnostics[0]->code)->toBe('content.duplicate-nav-ref')
+        ->and($diagnostics[0]->severity)->toBe(Severity::Warning)
+        ->and($diagnostics[0]->message)->toContain('forms-again')
+        ->and($diagnostics[0]->message)->toContain('GET /api/forms')
+        ->and($diagnostics[0]->message)->toContain('"forms"');
+})->with([
+    'ordered first' => [[['forms', 'Forms', 1], ['forms-again', 'Forms, again', 2]]],
+    'ordered last' => [[['forms-again', 'Forms, again', 2], ['forms', 'Forms', 1]]],
+]);
+
+/**
+ * Per section, not per document: surfacing one endpoint under two headings is a navigation an author
+ * can reasonably want, and nothing else would express it.
+ */
+it('keeps one destination reached from two different sections', function (): void {
+    $content = new CompiledContent([
+        makePage('start/forms', ['title' => 'Forms', 'group' => 'Getting started', 'navType' => 'operation', 'navRef' => 'GET /api/forms']),
+        makePage('reference/forms', ['title' => 'Forms', 'group' => 'Reference', 'navType' => 'operation', 'navRef' => 'forms.index']),
+    ]);
+
+    [$extension, $diagnostics] = (new ContentResolver)->resolve($content, contentIndexDoc());
+
+    expect(array_map(static fn ($n) => $n->title, $extension->nav))->toBe(['Getting started', 'Reference'])
+        ->and($extension->nav[0]->children[0]->ref)->toBe('op:v1:formsindex00000')
+        ->and($extension->nav[1]->children[0]->ref)->toBe('op:v1:formsindex00000')
+        ->and($diagnostics)->toBe([]);
+});
+
+/**
+ * A section sits where its least-ordered member puts it, never where its name alone would. Deduping
+ * cannot move it either: the entry a section's order puts first is the one nothing is ever held back
+ * at, so the least order is in the published children whatever else was dropped.
+ */
+it('positions a group by its least member order, not by its name', function (): void {
+    $content = new CompiledContent([
+        makePage('zeta/first', ['title' => 'Forms', 'order' => 9, 'group' => 'Zeta', 'navType' => 'operation', 'navRef' => 'forms.index']),
+        makePage('zeta/second', ['title' => 'Forms twin', 'order' => 1, 'group' => 'Zeta', 'navType' => 'operation', 'navRef' => 'GET /api/forms']),
+        makePage('alpha/page', ['title' => 'Alpha page', 'order' => 5, 'group' => 'Alpha']),
+    ]);
+
+    [$extension] = (new ContentResolver)->resolve($content, contentIndexDoc());
+
+    // Zeta's order-1 member puts it ahead of Alpha, whose name would sort it first; the order-9 twin
+    // is the entry the dedupe dropped, and it is not what either section's position was read off.
+    expect(array_map(static fn ($n) => $n->title, $extension->nav))->toBe(['Zeta', 'Alpha'])
+        ->and($extension->nav[0]->children)->toHaveCount(1)
+        ->and($extension->nav[0]->children[0]->title)->toBe('Forms twin');
+});
+
 it('returns an empty extension with no diagnostics for empty content', function (): void {
     [$extension, $diagnostics] = (new ContentResolver)->resolve(new CompiledContent, contentIndexDoc());
 

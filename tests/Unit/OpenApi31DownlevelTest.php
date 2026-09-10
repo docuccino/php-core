@@ -6,9 +6,9 @@ use Docuccino\Core\Document\UirDocument;
 use Docuccino\Core\Emit\EmitOptions;
 use Docuccino\Core\Emit\Formats;
 use Docuccino\Core\Emit\OpenApi31DownlevelEmitter;
+use Docuccino\Core\SpecValidation\OpenApiMetaSchema;
 use Docuccino\Core\Tests\Support\EmittedReferences;
 use Docuccino\Core\Tests\Support\OpenApiMemberDelta;
-use Docuccino\Core\Tests\Support\OpenApiMetaSchema;
 use Docuccino\Core\Tests\Support\OpenApiValueDelta;
 
 /**

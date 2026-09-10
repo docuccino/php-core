@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-use Docuccino\Core\Tests\Support\OpenApiMetaSchema;
+use Docuccino\Core\SpecValidation\OpenApiMetaSchema;
 
 /**
  * What the meta-schema oracle actually catches, measured rather than claimed.

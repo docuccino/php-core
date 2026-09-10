@@ -375,3 +375,57 @@ it('names an extension whose declaration no file holds, and no other', function 
     expect($mixed->unhashableExtensions())->toBe([$evald])
         ->and((new ResolvedExtensions(documentTransformers: [new ConfiguredTransformer('a')]))->unhashableExtensions())->toBe([]);
 });
+
+/*
+ * Which of the resolved extensions did not ship with this product. A caller sharing one stored
+ * fragment between two documents refuses to when any of them is resolved: the claim that nothing the
+ * build reads differs between those documents is checked for the extensions shipped here and cannot
+ * be checked for anyone else's.
+ */
+it('separates the extensions that shipped here from the ones an application wrote', function (): void {
+    $ours = new ConfiguredTransformer('a');
+    $theirs = applicationOwnedExtension();
+
+    $mixed = new ResolvedExtensions(operationExtensions: [$theirs], documentTransformers: [$ours]);
+
+    expect($mixed->foreignExtensions())->toBe([$theirs::class])
+        // Both directions: a set of only our own reports none, so this is not a method that answers
+        // "everything" whatever it is handed.
+        ->and((new ResolvedExtensions(documentTransformers: [$ours]))->foreignExtensions())->toBe([]);
+});
+
+it('reads ownership off the declaring file rather than the namespace', function (): void {
+    // PHP names an anonymous class after the interface it implements, so one an application wrote is
+    // called `Docuccino\…\DocumentTransformer@anonymous`. Both of these are, and only one of them is
+    // ours — a namespace test would call them both ours and share a fragment it may not.
+    $ours = new class implements DocumentTransformer
+    {
+        public function transform(UirDocumentDraft $document, DocumentContext $context): void {}
+    };
+    $theirs = applicationOwnedAnonymousTransformer();
+
+    expect($ours::class)->toStartWith('Docuccino\\')
+        ->and($theirs::class)->toStartWith('Docuccino\\')
+        ->and((new ResolvedExtensions(documentTransformers: [$ours]))->foreignExtensions())->toBe([])
+        ->and((new ResolvedExtensions(documentTransformers: [$theirs]))->foreignExtensions())->toBe([$theirs::class]);
+});
+
+it('trusts a package this product ships and no other name under the same vendor', function (string $package, bool $ours): void {
+    // Nothing reserves the `docuccino/` vendor segment: a fork, a path repository, a private registry
+    // or a first-party package living outside this monorepo can all publish under it. A prefix test
+    // hands every one of them the sharing only a reviewed extension has earned, with no byte-identity
+    // check behind it — so the gate NAMES the packages ({@see ResolvedExtensions::SHIPPED_PACKAGES},
+    // held to the monorepo's own directories by the tools suite).
+    $extension = packageOwnedExtension($package);
+    $foreign = (new ResolvedExtensions(documentTransformers: [$extension]))->foreignExtensions();
+
+    expect($foreign)->toBe($ours ? [] : [$extension::class]);
+})->with([
+    'core' => ['docuccino/core', true],
+    'attributes' => ['docuccino/attributes', true],
+    'laravel' => ['docuccino/laravel', true],
+    'inference-phpstan' => ['docuccino/inference-phpstan', true],
+    'another package under our vendor' => ['docuccino/community-extras', false],
+    'a name one of ours is a prefix of' => ['docuccino/core-extras', false],
+    'somebody else entirely' => ['acme/api-docs', false],
+]);

@@ -10,6 +10,8 @@ use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
 use Docuccino\Core\Document\UirDocument;
 use Docuccino\Core\Draft\SchemaKeywords;
+use Docuccino\Core\SpecValidation\EmittedSpecCheck;
+use Docuccino\Core\SpecValidation\OpenApiMetaSchema;
 use Docuccino\Core\Support\Arr;
 use Docuccino\Core\Support\JsonPointer;
 
@@ -196,11 +198,13 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
         $array = $this->downlevel($this->oas31->toOpenApiArray($document, $diagnostics, $options), $diagnostics);
         $canonical = $this->canonicalizer->canonicalize($array);
 
-        $output = $options->yaml
-            ? $this->yaml->serialize($canonical)
-            : $this->serializer->serialize($canonical);
+        // Checked in the carrier it is WRITTEN in, so the YAML writer answers for its own bytes.
+        $output = $options->yaml ? $this->yaml->serialize($canonical) : $this->serializer->serialize($canonical);
 
-        return new EmitResult($output, new EmitReport($diagnostics));
+        return new EmitResult(
+            $output,
+            new EmitReport([...$diagnostics, ...EmittedSpecCheck::diagnostics($this->format(), $output, $options->yaml)]),
+        );
     }
 
     /**
@@ -1065,6 +1069,46 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
 
         foreach (self::SILENT_SCHEMA_KEYWORDS as $keyword) {
             unset($schema[$keyword]);
+        }
+
+        return $this->closeSchema($schema, $pointer, $diagnostics);
+    }
+
+    /**
+     * Everything 3.0's closed Schema Object still would not accept, dropped with the same note.
+     *
+     * The list above answers for the keywords the PRODUCT knows; this answers for the ones it does not.
+     * A member an overlay or an attribute wrote — a JSON Schema keyword newer than the vocabulary, a
+     * misspelling, anything at all — used to pass straight through into an object 3.0 closes with
+     * `additionalProperties: false`, which makes the whole artifact invalid for one member a 3.0
+     * consumer could not have read anyway. Dropping it with a warning is what the emitter already does
+     * for every keyword it recognises; this is the same answer for the rest.
+     *
+     * `$ref` survives because a schema position holding one is a Reference Object, not a Schema Object
+     * ({@see HANDLED_SCHEMA_KEYWORDS}), and `x-` survives because 3.0's Schema Object admits it.
+     *
+     * @param  array<string, mixed>  $schema
+     * @param  list<Diagnostic>  $diagnostics
+     * @return array<string, mixed>
+     */
+    private function closeSchema(array $schema, string $pointer, array &$diagnostics): array
+    {
+        $defined = OpenApiMetaSchema::schemaMembers30();
+
+        foreach (array_keys($schema) as $key) {
+            $keyword = (string) $key;
+
+            if ($keyword === '$ref' || str_starts_with($keyword, 'x-') || in_array($keyword, $defined, true)) {
+                continue;
+            }
+
+            unset($schema[$keyword]);
+            $diagnostics[] = new Diagnostic(
+                severity: Severity::Warning,
+                code: 'downlevel.unsupported-keyword',
+                message: sprintf('Dropped the schema keyword `%s` at %s, which OpenAPI 3.0 does not define.', $keyword, $pointer),
+                help: 'Keep the 3.1 or 3.2 artifact for consumers that validate against the full constraint.',
+            );
         }
 
         return $schema;

@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Docuccino\Core\SpecValidation\OpenApiMetaSchema;
 use Docuccino\Core\SpecValidation\Validator;
 
 /**
@@ -71,4 +72,29 @@ it('resolves the schema from a simulated vendor/docuccino/core install layout', 
     ] as $dir) {
         @rmdir($dir);
     }
+});
+
+/**
+ * The same packaging invariant for the OpenAPI meta-schemas, which now ship for the same reason the
+ * UIR schema does: the emitters validate what they emit against them on every build, so a
+ * `vendor/docuccino/core` install that resolved them out of `tests/` would have no validation at all —
+ * and `tests/` is `export-ignore`d, so it would have no files either.
+ */
+it('ships every vendored OpenAPI meta-schema inside php/core/resources', function (): void {
+    $corePackage = dirname(__DIR__, 2); // php/core
+
+    expect(OpenApiMetaSchema::SCHEMAS)->toHaveCount(3);
+
+    foreach (array_keys(OpenApiMetaSchema::SCHEMAS) as $format) {
+        $path = OpenApiMetaSchema::path($format);
+
+        expect($path)->toStartWith($corePackage.'/resources/openapi/')
+            ->and(is_file($path))->toBeTrue($format);
+    }
+
+    // `/tests` is export-ignored and `/resources` is not, which is the whole of why they moved.
+    $attributes = (string) file_get_contents($corePackage.'/.gitattributes');
+
+    expect($attributes)->toContain('/tests           export-ignore')
+        ->and($attributes)->not->toContain('/resources');
 });

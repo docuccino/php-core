@@ -19,7 +19,8 @@ use Docuccino\Core\Extensions\Context\DocumentConfig;
 
 /**
  * A document bag shaped like a real one: every top-level key the shipped config carries, and every
- * `viewer` key the reference documents.
+ * `viewer` key the reference documents. Held to the files by the first test below — the two sweeps
+ * are total over the bag they are HANDED, so a key missing from it is outside the guard entirely.
  *
  * @return array<string, mixed>
  */
@@ -32,11 +33,15 @@ function configHashBag(): array
         'security' => ['schemes' => ['bearer' => ['type' => 'http', 'scheme' => 'bearer']]],
         'error_responses' => 'default',
         'tags' => ['default_strategy' => 'controller'],
+        'webhooks' => ['dir' => 'app/Webhooks'],
         'content' => ['dir' => 'resources/docs/api'],
+        'examples' => ['recordings' => 'docs/recordings'],
+        'coverage' => ['log' => 'storage/docuccino/coverage'],
         'overlays' => ['docs/overlays/*.json'],
         'representation' => ['nullability' => 'union'],
         'versioning' => 'semver',
         'integrations' => ['sanctum' => ['enabled' => true]],
+        'api_version' => ['header' => 'X-Api-Version', 'changes' => ['app/Api/Versions']],
         'export' => ['path' => 'docs/openapi.json'],
         'viewer' => configHashViewerBag(),
     ];
@@ -65,6 +70,30 @@ function configHashOf(array $raw): string
 {
     return (new DocumentConfig(key: 'default', info: [], raw: $raw))->hash();
 }
+
+/**
+ * @param  array<string, mixed>  $raw
+ */
+function fragmentHashOf(array $raw): string
+{
+    return (new DocumentConfig(key: 'default', info: [], raw: $raw))->fragmentHash();
+}
+
+it('carries every document key the two shipped files declare', function (): void {
+    // The guard the sweeps below cannot be: a hand-written bag proves only the rows it lists, and
+    // `fragmentHash()`'s exclusion list is the single thing standing between one document's fragments
+    // and another's. Three keys were short of the shipped file and every sweep passed.
+    $declared = shippedDocumentSettingKeys();
+    $bag = array_keys(configHashBag());
+    sort($bag);
+
+    expect(count($declared))->toBeGreaterThan(12)
+        // A reader that stopped seeing either file's shapes returns a short list that a comparison
+        // against a bag trimmed to match would happily accept, so both sources are asked for a member.
+        ->and($declared)->toContain('info')
+        ->and($declared)->toContain('viewer')
+        ->and($bag)->toBe($declared);
+});
 
 it('hashes the config bag minus export and viewer, and nothing else', function (): void {
     // Total over the bag's own keys: dropping one changes the hash if and only if it is excluded. So
@@ -160,4 +189,60 @@ it('moves the hash for each key that DOES shape the document', function (string 
     'representation' => ['representation', ['nullability' => 'nullable']],
     'versioning' => ['versioning', 'none'],
     'integrations' => ['integrations', ['sanctum' => ['enabled' => false]]],
+    'api_version' => ['api_version', ['header' => 'X-Version']],
+    'webhooks' => ['webhooks', ['dir' => 'app/Events']],
+    'examples' => ['examples', ['recordings' => 'docs/other-recordings']],
+    'coverage' => ['coverage', ['log' => 'storage/elsewhere']],
 ]);
+
+/*
+ * {@see DocumentConfig::fragmentHash()} is the same bag minus two more keys, and the rule it owes is
+ * stated here for the same reason: it is what decides whether two documents may share one stored
+ * operation fragment. Excluding a key that DOES reach a fragment serves one document's answer to
+ * another; keeping one that does not makes an application serving V versions pay V times for one
+ * version's analysis.
+ */
+it('keys a fragment on the config bag minus export, viewer, info and api_version, and nothing else', function (): void {
+    $excluded = ['info', 'api_version', 'export', 'viewer'];
+
+    $bag = configHashBag();
+    $base = fragmentHashOf($bag);
+
+    $ignored = [];
+    $keyed = [];
+
+    foreach (array_keys($bag) as $key) {
+        $without = $bag;
+        unset($without[$key]);
+
+        if (fragmentHashOf($without) === $base) {
+            $ignored[] = $key;
+        } else {
+            $keyed[] = $key;
+        }
+    }
+
+    sort($excluded);
+    sort($ignored);
+
+    expect($ignored)->toBe($excluded)
+        ->and($keyed)->toBe(array_values(array_diff(array_keys($bag), $excluded)))
+        ->and(array_keys($bag))->toContain(...$excluded);
+});
+
+it('keys two versions of one API alike while publishing a different configHash for each', function (): void {
+    // The whole of what a version document is: the same application, said as of a different date.
+    $bag = configHashBag();
+
+    $older = $bag;
+    $older['info'] = ['title' => 'API Documentation', 'version' => '2025-01-01', 'description' => 'last year'];
+    $older['api_version'] = ['header' => 'X-Api-Version', 'changes' => ['app/Api/Versions']];
+
+    $newer = $bag;
+    $newer['info'] = ['title' => 'API Documentation', 'version' => '2026-01-01'];
+    $newer['api_version'] = ['header' => 'X-Pinned-Version'];
+
+    expect(fragmentHashOf($older))->toBe(fragmentHashOf($newer))
+        // …and the published fingerprint still tells them apart, which is the half that reaches bytes.
+        ->and(configHashOf($older))->not->toBe(configHashOf($newer));
+});

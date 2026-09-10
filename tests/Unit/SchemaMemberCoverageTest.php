@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Docuccino\Core\Canonical\Canonicalizer;
+use Docuccino\Core\SpecValidation\OpenApiMetaSchema;
 use Docuccino\Core\SpecValidation\Validator;
 
 /**
@@ -72,7 +73,7 @@ $publishedOrder = static function (array $node): array {
 
 it('spells every member OpenAPI 3.2 defines on each object it models', function () use ($readJson, $objectNode, $memberNames): void {
     $uir = $readJson(Validator::defaultSchemaPath());
-    $oas = $readJson(dirname(__DIR__).'/Fixtures/openapi-v3.2.schema.json');
+    $oas = $readJson(OpenApiMetaSchema::path('openapi-3.2'));
 
     // Each object the UIR schema models, under the name OAS 3.2 gives the same object.
     $objects = [

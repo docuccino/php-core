@@ -24,6 +24,10 @@ use Docuccino\Core\Support\Hydrate;
  * they travel here and are replayed into their {@see RouteNoteCollector} on every build, so the summary a
  * document transformer publishes is the same warm as cold ({@see RouteNotes}).
  *
+ * What a fragment does NOT carry is an identity: the id tree is stamped on the way out
+ * ({@see OperationIdentities}), so one stored entry serves every document whose shaping config
+ * matches rather than one entry per document.
+ *
  * A webhook is the same unit under a different heading — an operation the API promises to call — so it
  * travels as a fragment too, with {@see $webhook} set and {@see $path} holding its name.
  *
@@ -109,6 +113,31 @@ final readonly class OperationFragment
             componentSecuritySchemes: ComponentNames::rekey($this->componentSecuritySchemes, $securitySchemes),
             componentResponseBases: ComponentNames::rekey($this->componentResponseBases, $responses),
             componentSecuritySchemeBases: ComponentNames::rekey($this->componentSecuritySchemeBases, $securitySchemes),
+            notes: $this->notes,
+            webhook: $this->webhook,
+        );
+    }
+
+    /**
+     * The same fragment carrying `$operation` — what {@see OperationIdentities} stamping the id tree
+     * hands back, on the cold path and the warm one alike.
+     */
+    public function withOperation(Operation $operation): self
+    {
+        return new self(
+            path: $this->path,
+            method: $this->method,
+            operation: $operation,
+            routeSignature: $this->routeSignature,
+            diagnostics: $this->diagnostics,
+            componentSchemas: $this->componentSchemas,
+            componentSchemaIds: $this->componentSchemaIds,
+            componentResponses: $this->componentResponses,
+            actionClass: $this->actionClass,
+            componentSchemaBases: $this->componentSchemaBases,
+            componentSecuritySchemes: $this->componentSecuritySchemes,
+            componentResponseBases: $this->componentResponseBases,
+            componentSecuritySchemeBases: $this->componentSecuritySchemeBases,
             notes: $this->notes,
             webhook: $this->webhook,
         );

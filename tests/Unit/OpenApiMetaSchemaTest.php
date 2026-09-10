@@ -5,8 +5,8 @@ declare(strict_types=1);
 use Docuccino\Core\Document\UirDocument;
 use Docuccino\Core\Emit\EmitOptions;
 use Docuccino\Core\Emit\Formats;
+use Docuccino\Core\SpecValidation\OpenApiMetaSchema;
 use Docuccino\Core\Tests\Support\EmittedDocument;
-use Docuccino\Core\Tests\Support\OpenApiMetaSchema;
 
 /**
  * The meta-schema oracle: every OpenAPI artifact the emitters produce, in both serialisations, answers to
@@ -31,7 +31,7 @@ function metaSchemaSubjects(): array
 
     foreach (metaSchemaFixtures() as $fixture) {
         foreach (array_keys(OpenApiMetaSchema::SCHEMAS) as $format) {
-            $subjects[basename($fixture, '.json').' · '.$format] = [$fixture, $format];
+            $subjects[substr($fixture, 0, -5).' · '.$format] = [$fixture, $format];
         }
     }
 
@@ -39,26 +39,21 @@ function metaSchemaSubjects(): array
 }
 
 /**
- * Every UIR fixture in the tree, discovered rather than listed: a fixture added tomorrow is validated
- * without anyone remembering to name it here.
+ * Every UIR document in core's fixture tree, named the way {@see loadFixture()} takes them.
+ *
+ * The whole tree, not one directory of it. `Fixtures/` holds the hand-written INPUTS and
+ * `Fixtures/golden/` the recorded UIR OUTPUTS, and the second is not a re-spelling of the first: the
+ * three provenance renderings of the worked example exist only there, and a document carrying
+ * `x-docuccino` provenance is a different document to emit from. All five sat outside this glob.
+ *
+ * {@see uirDocuments()} owns the discovery, and `MetaSchemaCoverageTest` holds this half and the
+ * adapter's to the whole of it.
  *
  * @return list<string>
  */
 function metaSchemaFixtures(): array
 {
-    $fixtures = [];
-
-    foreach (glob(dirname(__DIR__).'/Fixtures/*.json') ?: [] as $path) {
-        $decoded = json_decode((string) file_get_contents($path), true);
-
-        if (is_array($decoded) && isset($decoded['uir'], $decoded['info'])) {
-            $fixtures[] = basename($path);
-        }
-    }
-
-    sort($fixtures);
-
-    return $fixtures;
+    return uirDocumentsUnder(dirname(__DIR__).'/Fixtures');
 }
 
 /** @return array{mixed, mixed} the JSON emission and the YAML emission of one document, both as graphs */
@@ -431,3 +426,62 @@ it('validates a plausible minimum of documents and positions', function (): void
         ->and($positions)->toBeGreaterThanOrEqual(5000)
         ->and($orderedMaps)->toBeGreaterThanOrEqual(300);
 });
+
+/**
+ * A scan that finds nothing must fail. Each floor is set from what the tree measures — 14 documents,
+ * 42 subjects, 4,150 positions, 2 empty maps, 479 ordered maps — close enough underneath that a
+ * truncated discovery drops through it, far enough that retiring one fixture does not.
+ *
+ * It counts what was VALIDATED rather than what sits on disk: summing the files would measure the
+ * INPUT, so an emitter answering `{}` for every one of them would clear the floor unchanged.
+ *
+ * The ordered-map floor is the one the order assertion needs — a map with fewer than two members has
+ * no order to get wrong — and the empty-map floor is the one this file's kind assertions need, which
+ * in core's small hand-written corpus is a population of two.
+ */
+it('validates a plausible minimum of documents, positions and empty maps', function (): void {
+    $positions = 0;
+    $emptyMaps = 0;
+    $orderedMaps = 0;
+
+    foreach (metaSchemaFixtures() as $fixture) {
+        [$json, $yaml] = metaSchemaEmissions($fixture, 'openapi-3.2');
+
+        $positions += EmittedDocument::nodes($json) + EmittedDocument::nodes($yaml);
+        $emptyMaps += count(EmittedDocument::emptyMaps($json));
+        $orderedMaps += EmittedDocument::orderedMaps($json);
+    }
+
+    expect(count(metaSchemaFixtures()))->toBeGreaterThanOrEqual(12)
+        ->and(count(metaSchemaSubjects()))->toBeGreaterThanOrEqual(36)
+        ->and($positions)->toBeGreaterThanOrEqual(3500)
+        ->and($emptyMaps)->toBeGreaterThanOrEqual(2)
+        ->and($orderedMaps)->toBeGreaterThanOrEqual(400);
+
+    // And the recorded half is really in there, not just the inputs it was added beside.
+    expect(metaSchemaFixtures())->toContain('golden/worked-example.uir.none.json');
+});
+
+/**
+ * The positive control the floors cannot give. Every assertion above passes when the oracle says
+ * nothing, and an oracle that had stopped looking says nothing too — so one real subject is broken in
+ * the way this file exists to catch and read back through the same call, in both carriers.
+ *
+ * The mutation is the one that shipped: an empty `paths` MAP arriving as a sequence.
+ */
+it('reports a finding when a discovered subject is broken', function (string $format): void {
+    $subject = metaSchemaFixtures()[0];
+
+    [$json, $yaml] = metaSchemaEmissions($subject, $format);
+
+    expect($json)->toBeInstanceOf(stdClass::class)
+        ->and($yaml)->toBeInstanceOf(stdClass::class)
+        ->and(OpenApiMetaSchema::findings($format, $json))->toBe([], $subject)
+        ->and(OpenApiMetaSchema::findings($format, $yaml))->toBe([], $subject);
+
+    $json->paths = [];
+    $yaml->paths = [];
+
+    expect(OpenApiMetaSchema::findings($format, $json))->not->toBe([], $subject)
+        ->and(OpenApiMetaSchema::findings($format, $yaml))->not->toBe([], $subject);
+})->with(array_keys(OpenApiMetaSchema::SCHEMAS));

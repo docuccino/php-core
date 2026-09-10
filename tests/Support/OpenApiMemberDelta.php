@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Tests\Support;
 
+use Docuccino\Core\SpecValidation\OpenApiMetaSchema;
 use RuntimeException;
 
 /**
@@ -119,8 +120,8 @@ final class OpenApiMemberDelta
      */
     private static function root(string $format): array
     {
-        $file = OpenApiMetaSchema::SCHEMAS[$format]['file'] ?? throw new RuntimeException("No meta-schema for {$format}.");
-        $decoded = json_decode((string) file_get_contents(dirname(__DIR__).'/Fixtures/'.$file), true, flags: JSON_THROW_ON_ERROR);
+        $file = OpenApiMetaSchema::path($format);
+        $decoded = json_decode((string) file_get_contents($file), true, flags: JSON_THROW_ON_ERROR);
 
         if (! is_array($decoded) || ! is_array($decoded['$defs'] ?? null)) {
             throw new RuntimeException("Meta-schema {$file} declares no \$defs.");

@@ -140,6 +140,113 @@ it('resolves to the same tags and issues whatever order the definitions are writ
     }
 });
 
+// One entry per name. OAS is explicit that "each tag name in the list MUST be unique", so two
+// entries sharing a name make the document invalid however tidy they look: a renderer draws the
+// section twice and a client generator mints the same type twice off the second one.
+
+it('merges definitions that share a name into the one entry the tags array allows', function (): void {
+    $config = tagConfig([
+        ['name' => 'Billing', 'summary' => 'Billing'],
+        ['name' => 'Billing', 'description' => 'Everything money.'],
+    ]);
+
+    // Silence is not a competing claim, so a member only one of them states is still carried.
+    expect($config->tagDefinitions())->toBe([
+        ['name' => 'Billing', 'summary' => 'Billing', 'description' => 'Everything money.'],
+    ])->and($config->tagDuplicates())->toBe([['tag' => 'Billing', 'count' => 2, 'dropped' => []]]);
+});
+
+it('publishes neither reading of a member two definitions of one tag contradict', function (): void {
+    $config = tagConfig([
+        ['name' => 'Billing', 'summary' => 'Money in', 'kind' => 'nav'],
+        ['name' => 'Billing', 'summary' => 'Money out', 'kind' => 'nav'],
+        ['name' => 'Billing', 'description' => 'Everything money.'],
+    ]);
+
+    // The reader cannot see the config, so a summary the other definition contradicts would be a
+    // confident lie; the members they agree on and the ones only one states survive.
+    expect($config->tagDefinitions())->toBe([
+        ['name' => 'Billing', 'description' => 'Everything money.', 'kind' => 'nav'],
+    ])->and($config->tagDuplicates())->toBe([['tag' => 'Billing', 'count' => 3, 'dropped' => ['summary']]]);
+});
+
+it('reports a merge under the name that was duplicated, ordered by name', function (): void {
+    $duplicates = tagConfig([
+        ['name' => 'Webhooks'],
+        ['name' => 'Billing', 'parent' => 'Webhooks'],
+        ['name' => 'Webhooks'],
+        ['name' => 'Billing', 'parent' => 'Nowhere'],
+    ])->tagDuplicates();
+
+    expect($duplicates)->toBe([
+        ['tag' => 'Billing', 'count' => 2, 'dropped' => ['parent']],
+        ['tag' => 'Webhooks', 'count' => 2, 'dropped' => []],
+    ]);
+});
+
+it('positions a merged tag at the lowest weight its definitions state', function (): void {
+    // A function of the definitions, not of which was written first: the same two entries either
+    // way round put Billing ahead of the tag weighted 5.
+    foreach ([[10, 1], [1, 10]] as [$first, $second]) {
+        $tags = tagConfig([
+            ['name' => 'Billing', 'weight' => $first],
+            ['name' => 'Billing', 'weight' => $second],
+            ['name' => 'Alerts', 'weight' => 5],
+        ])->tagDefinitions();
+
+        expect(array_column($tags, 'name'))->toBe(['Billing', 'Alerts']);
+    }
+});
+
+it('merges before the parent pass, so a duplicate cannot fabricate a cycle', function (): void {
+    // Two Billing entries, one of them parented to Invoices: merged first, the forest is a genuine
+    // Billing <-> Invoices cycle and the report says so once.
+    $config = tagConfig([
+        ['name' => 'Billing'],
+        ['name' => 'Billing', 'parent' => 'Invoices'],
+        ['name' => 'Invoices', 'parent' => 'Billing'],
+    ]);
+
+    expect($config->tagParentIssues())->toBe([['tag' => 'Invoices', 'parent' => 'Billing', 'cycle' => true]])
+        ->and(array_column($config->tagDefinitions(), 'name'))->toBe(['Billing', 'Invoices']);
+});
+
+it('projects one group per duplicated root rather than one per definition', function (): void {
+    // x-tagGroups is built off the definitions, so a duplicate root used to draw the same sidebar
+    // group twice.
+    expect(tagConfig([
+        ['name' => 'Billing'],
+        ['name' => 'Billing'],
+        ['name' => 'Invoices', 'parent' => 'Billing'],
+    ])->tagGroups())->toBe([['name' => 'Billing', 'tags' => ['Billing', 'Invoices']]]);
+});
+
+it('merges to the same bytes however the duplicate definitions are ordered', function (): void {
+    $definitions = [
+        ['name' => 'Billing', 'summary' => 'Money in', 'weight' => 3],
+        ['name' => 'Invoices', 'parent' => 'Billing'],
+        ['name' => 'Billing', 'description' => 'Everything money.', 'weight' => 1],
+        ['name' => 'Billing', 'summary' => 'Money out'],
+    ];
+
+    $expected = tagConfig($definitions)->tagDefinitions();
+    expect($expected)->toBe([
+        ['name' => 'Billing', 'description' => 'Everything money.'],
+        ['name' => 'Invoices', 'parent' => 'Billing'],
+    ]);
+
+    foreach ([[3, 2, 1, 0], [1, 3, 0, 2], [2, 0, 3, 1]] as $order) {
+        $shuffled = array_map(static fn (int $i): array => $definitions[$i], $order);
+
+        expect(tagConfig($shuffled)->tagDefinitions())->toBe($expected)
+            ->and(tagConfig($shuffled)->tagDuplicates())->toBe(tagConfig($definitions)->tagDuplicates());
+    }
+});
+
+it('reports no duplicate when every definition names a different tag', function (): void {
+    expect(tagConfig([['name' => 'Billing'], ['name' => 'Webhooks']])->tagDuplicates())->toBe([]);
+});
+
 it('emits no tags and no issues when definitions are absent or malformed', function (mixed $definitions): void {
     $config = new DocumentConfig('default', [], tags: ['definitions' => $definitions]);
 
