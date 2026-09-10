@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use Docuccino\Core\Diagnostics\Diagnostic;
+use Docuccino\Core\Diagnostics\Severity;
 use Docuccino\Core\Support\ExampleFile;
 
 /**
@@ -79,14 +81,22 @@ it('reports a payload it cannot parse instead of half-decoding it', function (st
     'a yaml tab' => ['broken.yaml', "root:\n\t- indented with a tab\n"],
 ]);
 
-it('escapes a parser message rather than letting file contents steer a terminal', function (): void {
+it('quotes a parser raw, and is made safe by the diagnostic that carries it', function (): void {
+    // The detail has one destination and it is a diagnostic, so it is stated as the parser said it —
+    // escaping here as well would be the per-producer call the constructor exists to retire, and a
+    // reader could not tell it from a load-bearing one. Both halves are asserted: raw as it leaves
+    // here, safe as a reader meets it.
     file_put_contents($this->base.'/broken.yaml', "root:\n\t- \x1b[31mred\n");
 
     $read = ExampleFile::read($this->base, 'broken.yaml');
 
     expect($read->error)->toBe(ExampleFile::INVALID)
-        ->and($read->detail)->not->toContain("\x1b")
-        ->and($read->detail)->not->toContain("\n");
+        ->and($read->detail)->toContain("\x1b");
+
+    $carried = new Diagnostic(severity: Severity::Warning, code: 'example-file.invalid', message: $read->detail);
+
+    expect($carried->message)->not->toContain("\x1b")
+        ->and($carried->message)->not->toContain("\n");
 });
 
 it('rejects a path that escapes the base without reading anything', function (): void {

@@ -22,7 +22,6 @@ use Docuccino\Core\Provenance\ClassNames;
 use Docuccino\Core\Provenance\MessagePaths;
 use Docuccino\Core\Provenance\RootRelativeSourcePathResolver;
 use Docuccino\Core\Provenance\SourcePathResolver;
-use Docuccino\Core\Support\PlainText;
 use Throwable;
 
 /**
@@ -689,7 +688,7 @@ final class Assembler
                 $this->classNames->of($transformer),
                 $reason === ''
                     ? $this->classNames->of($failure)
-                    : rtrim(PlainText::of($this->messagePaths->relative($reason)), '.'),
+                    : rtrim($this->messagePaths->relative($reason), '.'),
             ),
             help: 'The rest of the document was built and written. A built-in transformer throwing is a '
                 .'bug in Docuccino — report it with the message above; one of your own, or a package\'s, '

@@ -21,6 +21,10 @@ use Docuccino\Core\Support\PlainText;
  *
  * Ids, never paths: an id survives a path rename, so a renamed route reads as still covered rather
  * than as one operation appearing and another vanishing.
+ *
+ * Every label and id printed here came off an artifact nobody re-read first, so they go through
+ * {@see PlainText}. The report is rendered whole, and neither destination is a diagnostic: a CLI adds
+ * only its own markup escaping over the top, and a suite reads the same text out of an assertion.
  */
 final readonly class CoverageReport
 {

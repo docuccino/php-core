@@ -26,6 +26,9 @@ use Symfony\Component\Yaml\Yaml;
  * A file that parses is not yet a file that publishes: YAML spells values JSON has no form for, so the
  * decoded value is held to what the canonical writer will take before it is handed back.
  *
+ * {@see $detail} quotes a parser and is stated raw, all three ways it can be reached: its one caller
+ * puts it in a {@see Diagnostic}, which is where that text is made safe to print.
+ *
  * @internal
  */
 final readonly class ExampleFile
@@ -73,7 +76,7 @@ final readonly class ExampleFile
                 ? JsonValue::decode($contents)
                 : Yaml::parse($contents);
         } catch (JsonException|ParseException $exception) {
-            return new self($resolved, null, self::INVALID, PlainText::of($exception->getMessage()));
+            return new self($resolved, null, self::INVALID, $exception->getMessage());
         }
 
         // Parsing is not the same as being publishable. YAML has spellings JSON does not — `.nan` and

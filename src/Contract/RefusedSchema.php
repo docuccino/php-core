@@ -22,6 +22,10 @@ use Throwable;
  * nothing to say is named by its class instead, through {@see ClassNames} — an anonymous one names a
  * file too.
  *
+ * It is neutralised here as well as relativised, because the reason ends up in a contract failure a test
+ * runner prints rather than in a diagnostic: {@see Diagnostic} would have made it safe, and nothing on
+ * this path is one.
+ *
  * @internal
  */
 final class RefusedSchema

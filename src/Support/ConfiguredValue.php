@@ -9,8 +9,8 @@ namespace Docuccino\Core\Support;
  * value has to name what it found, and two readers describing the same float differently would make
  * the diagnostics unreadable as a set.
  *
- * Everything goes through {@see PlainText} because every byte here came out of a file: a setting can
- * hold anything somebody typed, and a diagnostic goes to a terminal and to CI logs.
+ * Every byte here came out of a file, so a setting can hold anything somebody typed; making that safe
+ * to print belongs to the diagnostic it is read back in, which is where every caller takes it.
  *
  * @internal
  */
@@ -30,11 +30,11 @@ final class ConfiguredValue
         };
     }
 
-    /** A value as it should be read back to its author — JSON notation, escaped for a terminal. */
+    /** A value as it should be read back to its author, in JSON notation. */
     public static function rendered(mixed $value): string
     {
         $json = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION);
 
-        return PlainText::of($json === false ? '(unprintable)' : $json);
+        return $json === false ? '(unprintable)' : $json;
     }
 }

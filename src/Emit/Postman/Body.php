@@ -10,6 +10,7 @@ use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
 use Docuccino\Core\Emit\SchemaExampleFactory;
 use Docuccino\Core\Support\Arr;
+use Docuccino\Core\Support\PlainText;
 use stdClass;
 
 /**
@@ -294,8 +295,13 @@ final class Body
      */
     private static function reportUnresolved(string $base, string $reference, string $signature, array &$diagnostics): void
     {
+        // The needle goes through the same escaping the message did, or a `$ref` carrying anything
+        // {@see PlainText} touches would never match the sentence it is already in — and the one
+        // warning this dedupes to would be one per operation again.
+        $needle = PlainText::of(sprintf('`%s`', $reference));
+
         foreach ($diagnostics as $diagnostic) {
-            if ($diagnostic->code === 'postman.body-unresolved' && str_contains($diagnostic->message, sprintf('`%s`', $reference))) {
+            if ($diagnostic->code === 'postman.body-unresolved' && str_contains($diagnostic->message, $needle)) {
                 return;
             }
         }
@@ -357,8 +363,12 @@ final class Body
      */
     private static function reportMediaType(string $base, array &$diagnostics): void
     {
+        // Escaped for the reason {@see reportUnresolved()} gives: both sides of the match have to read
+        // the same grammar.
+        $needle = PlainText::of(sprintf('`%s`', $base));
+
         foreach ($diagnostics as $diagnostic) {
-            if ($diagnostic->code === 'postman.body-media-type' && str_contains($diagnostic->message, sprintf('`%s`', $base))) {
+            if ($diagnostic->code === 'postman.body-media-type' && str_contains($diagnostic->message, $needle)) {
                 return;
             }
         }

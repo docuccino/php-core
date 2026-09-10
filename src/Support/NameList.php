@@ -10,10 +10,11 @@ namespace Docuccino\Core\Support;
  *
  * One owner because the two halves are policy rather than phrasing. The CAP is where a list stops being
  * read and starts being scrolled, and a report that names eight alternatives and one that names two
- * hundred are not the same report. The ESCAPING is not optional: every name here is recovered from an
- * application's own code — a validation rule key, a model attribute, a query string it composes — so it
- * reaches a terminal unread, and an escape sequence in one recolours the line it is printed on
- * ({@see PlainText}).
+ * hundred are not the same report. The ESCAPING stays here rather than moving to {@see Diagnostic}
+ * because a list is not owed to one destination: every name in it is recovered from an application's
+ * own code — a validation rule key, a model attribute, a query string it composes — and a caller may
+ * put the list somewhere that neutralises nothing. {@see PlainText} is idempotent, so a list on its way
+ * into a diagnostic pays nothing for being safe before it gets there.
  *
  * Only the list is shared. The sentence around it is the caller's, because each names a different kind
  * of thing, and a sentence that fits all of them would be true of none.

@@ -1103,6 +1103,47 @@ it('warns once per unresolved reference however many routes share it', function 
         ->toBe(['postman.body-unresolved']);
 });
 
+it('dedupes an unresolved reference whose name carries what the escaping rewrites', function (): void {
+    // The needle is matched against a message the diagnostic constructor has already made safe, so both
+    // sides have to read the same grammar. A `$ref` naming a direction override is the case that tells
+    // them apart: match on the raw name and nothing matches, and the one warning becomes one per route.
+    $operation = [
+        'requestBody' => ['content' => ['application/json' => ['schema' => ['$ref' => "#/components/schemas/Gone\u{202E}x"]]]],
+        'responses' => ['204' => ['description' => 'No content']],
+    ];
+
+    $report = postmanReport(postmanDocumentWithPaths([
+        '/things' => ['post' => $operation],
+        '/others' => ['post' => $operation],
+    ]));
+
+    $unresolved = array_values(array_filter($report, static fn (Diagnostic $d): bool => $d->code === 'postman.body-unresolved'));
+
+    expect($unresolved)->toHaveCount(1)
+        // The positive control: this is the name that had to be matched, and it reached the message escaped.
+        ->and($unresolved[0]->message)->toContain('#/components/schemas/Gone\u{202E}x');
+});
+
+it('dedupes a media type whose name carries what the escaping rewrites', function (): void {
+    // Same match, same grammar, one document over: a media type is deduped across the whole document.
+    $operation = static fn (string $type): array => ['post' => [
+        'requestBody' => ['content' => [$type => ['schema' => ['type' => 'string']]]],
+        'responses' => ['204' => ['description' => 'No content']],
+    ]];
+
+    $type = "application/x-\u{202E}odd";
+
+    $report = postmanReport(postmanDocumentWithPaths([
+        '/things' => $operation($type),
+        '/others' => $operation($type),
+    ]));
+
+    $media = array_values(array_filter($report, static fn (Diagnostic $d): bool => $d->code === 'postman.body-media-type'));
+
+    expect($media)->toHaveCount(1)
+        ->and($media[0]->message)->toContain('application/x-\u{202E}odd');
+});
+
 it('emits nothing for a path item behind a reference that names nothing, and everything for its neighbour', function (): void {
     $collection = postman(postmanDocumentWithPaths([
         '/gone' => ['$ref' => '#/components/pathItems/Gone'],

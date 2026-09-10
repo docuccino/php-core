@@ -7,7 +7,6 @@ namespace Docuccino\Core\Config;
 use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
 use Docuccino\Core\Support\Arr;
-use Docuccino\Core\Support\PlainText;
 use Symfony\Component\Yaml\Exception\ParseException;
 use Symfony\Component\Yaml\Yaml;
 
@@ -171,9 +170,9 @@ final class ConfigFile
                 message: sprintf(
                     '%s is not valid YAML, so the document is built from defaults alone: %s',
                     self::NAME,
-                    // The message quotes the line it choked on, so it carries file bytes — and a file
-                    // is authored text that can steer a terminal or forge a line of a CI log.
-                    PlainText::of($exception->getMessage()),
+                    // Quotes the line it choked on, so it carries file bytes; `Diagnostic` is what makes
+                    // them safe to print.
+                    $exception->getMessage(),
                 ),
                 help: 'Fix the line named above and run the build again.',
             )]);

@@ -11,7 +11,6 @@ use Docuccino\Core\Extensions\Contracts\DocumentTransformer;
 use Docuccino\Core\Extensions\Document\UirDocumentDraft;
 use Docuccino\Core\Lint\LintOperation;
 use Docuccino\Core\Support\ConfinedPath;
-use Docuccino\Core\Support\PlainText;
 
 /**
  * Says what is wrong with the committed recordings, once per document.
@@ -53,7 +52,7 @@ final readonly class RecordedExampleAudit implements DocumentTransformer
                     code: 'examples.recordings-escapes-base',
                     message: sprintf(
                         'examples.recordings "%s" does not name a path inside the application and was rejected, so the document publishes no recorded examples.',
-                        PlainText::of($configured),
+                        $configured,
                     ),
                     help: ConfinedPath::CONFIG_FILE_ESCAPED_HELP,
                 ));

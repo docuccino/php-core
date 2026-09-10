@@ -11,7 +11,6 @@ use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
 use Docuccino\Core\Provenance\ClassNames;
 use Docuccino\Core\Support\NameList;
-use Docuccino\Core\Support\PlainText;
 use ReflectionClass;
 
 /**
@@ -100,7 +99,7 @@ final class SchemaIdentity
                 code: 'attribute.hidden-unmatched',
                 message: sprintf(
                     "#[Hidden('%s')] on %s hid nothing: this schema publishes no property of that name. %s",
-                    PlainText::of($property),
+                    $property,
                     $site,
                     self::publishing($published),
                 ),
@@ -113,8 +112,8 @@ final class SchemaIdentity
 
     /**
      * What the schema publishes, capped — the half of the report that is a remedy rather than a
-     * complaint, since the typo is only visible beside the spelling that works. Capping and escaping are
-     * {@see NameList}'s, which is where a diagnostic's list of names is made safe to print.
+     * complaint, since the typo is only visible beside the spelling that works. The cap is
+     * {@see NameList}'s, which is where a diagnostic's list of names is capped and made safe to print.
      *
      * @param  list<string>  $published
      */

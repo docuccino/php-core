@@ -41,6 +41,21 @@ final class PlainText
     }
 
     /**
+     * The same, for text whose line breaks are LAYOUT rather than content — a diagnostic's `help`, which
+     * a reader meets as indented lines. Every line is made safe on its own and the breaks between them
+     * survive, normalised to LF so that one line ending cannot read as two.
+     *
+     * A break left in is safe wherever this text goes: a console writer indents each line past anything
+     * it could be mistaken for, and `json_encode` escapes a newline whatever else it leaves alone.
+     */
+    public static function lines(string $text): string
+    {
+        $normalised = str_replace(["\r\n", "\r"], "\n", $text);
+
+        return implode("\n", array_map(self::of(...), explode("\n", $normalised)));
+    }
+
+    /**
      * @param  array<int|string, string>  $match
      */
     private static function escape(array $match): string

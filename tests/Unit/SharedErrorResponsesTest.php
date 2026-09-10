@@ -1971,12 +1971,13 @@ it('names no producer for an illegal name an overlay wrote, because no record ow
         ->and(array_keys(transformedErrorDoc($overlaid)['components']['schemas']))->toBe(['Error404']);
 });
 
-it('quotes a rejected name exactly as the document states it', function (): void {
+it('quotes a rejected name as text rather than as the control sequence it was', function (): void {
     // The only names that reach this one are by definition ones nothing validated — an overlay states
-    // `x-docuccino.facts.component` on whatever it likes, and the hoist reads the document. The
-    // diagnostic quotes what it read, control characters and all: it travels to a JSON report and into
-    // the emitted document, where `json_encode` escapes, and the terminal it may also reach escapes at
-    // the write instead (`RendersDiagnostics`). Escaping here would garble both of those.
+    // `x-docuccino.facts.component` on whatever it likes, and the hoist reads the document. So the name
+    // is quoted as VISIBLE text: a diagnostic is published under `x-docuccino.diagnostics`, the document
+    // is written with `JSON_UNESCAPED_UNICODE`, and a reader who opens that artifact is handed whatever
+    // the sequence steers their terminal to do. `Diagnostic` owns that, so the producer states the name
+    // it read and the escape happens once, on the way in.
     $body = claimedBody("Evil\x1b[31m\nName", messageBody(), "acme\x07");
     $paths = ['paths' => [
         '/a' => ['get' => ['responses' => ['404' => $body]]],
@@ -1986,8 +1987,9 @@ it('quotes a rejected name exactly as the document states it', function (): void
     $rejected = array_values(array_filter(errorDocReport($paths), static fn ($d): bool => $d->code === 'components.name-invalid'));
 
     expect($rejected)->toHaveCount(1)
-        ->and($rejected[0]->message)->toContain("Evil\x1b[31m\nName")
-        ->and($rejected[0]->message)->toContain("acme\x07")
+        ->and($rejected[0]->message)->toContain('Evil\x1B[31m\x0AName')
+        ->and($rejected[0]->message)->toContain('acme\x07')
+        ->and($rejected[0]->message)->not->toContain("\x1b")
         // …and the component the body actually got is the status fallback, unaffected.
         ->and(array_keys(transformedErrorDoc($paths)['components']['schemas']))->toBe(['Error404']);
 });

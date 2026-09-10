@@ -17,6 +17,9 @@ use Docuccino\Core\Versioning\VersionOrder;
  * Reading a date version is {@see VersionOrder}'s job, not this class's: the same two versions are
  * ordered again wherever an older document is derived, and one grammar read in two places is one that
  * eventually answers two things.
+ *
+ * The versions go through {@see PlainText} here for the reason {@see SemverPolicy} gives: a verdict is
+ * not a diagnostic, and nothing downstream of it neutralises anything.
  */
 final class DateVersionPolicy implements VersioningPolicy
 {

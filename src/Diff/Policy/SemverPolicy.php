@@ -17,6 +17,10 @@ use Docuccino\Core\Versioning\VersionOrder;
  * Reading a semver string is {@see VersionOrder}'s job, not this class's: the same versions are ordered
  * again wherever an older document is derived, and one grammar read in two places is one that eventually
  * answers two things.
+ *
+ * A verdict is not a diagnostic: `docuccino:diff` prints it and `--format=json` writes it into a payload
+ * a gate reads, and both versions came off an artifact nobody re-read first, so they go through
+ * {@see PlainText} here — the only place either destination would get it from.
  */
 final class SemverPolicy implements VersioningPolicy
 {

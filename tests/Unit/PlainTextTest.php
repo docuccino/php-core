@@ -69,3 +69,36 @@ it('escapes a line separator that would otherwise forge a line of a web-rendered
     // and the reader is handed a second line stating a verdict nothing produced.
     expect(PlainText::of("Pet\u{2028}0 changes (0 breaking)"))->toBe('Pet\u{2028}0 changes (0 breaking)');
 });
+
+it('answers the same on text it has already made safe', function (string $raw): void {
+    // Load-bearing rather than tidy: {@see Diagnostic} escapes at construction, a warm fragment-cache
+    // hit rebuilds a diagnostic through that constructor, and a producer may still escape on its own
+    // way in. Any of those gaining a layer of escapes per pass would be a slow garbling of the text.
+    $once = PlainText::of($raw);
+
+    expect(PlainText::of($once))->toBe($once)
+        ->and(PlainText::lines(PlainText::lines($raw)))->toBe(PlainText::lines($raw));
+})->with([
+    'an ANSI sequence' => "\x1B[31mred\x1B[0m",
+    'a C1 introducer' => "\u{009B}31m",
+    'a direction override' => "user\u{202E}exe.tnetnoc",
+    'a line separator' => "Pet\u{2028}0 changes",
+    'CRLF' => "a\r\nb",
+    'a NUL' => "a\x00b",
+    'malformed UTF-8' => "lone\xFFbyte",
+    'text that already reads as an escape' => '\x1B[31m and \u{202E}',
+    'a backslash' => '\\',
+    'legitimate text' => 'café — 日本語 array<int, string>',
+    'nothing at all' => '',
+]);
+
+it('keeps the line breaks in text whose breaks are layout, and escapes the rest of each line', function (): void {
+    expect(PlainText::lines("first\x07\r\nsecond\u{202E}\rthird\n"))
+        ->toBe('first'.'\x07'."\nsecond".'\u{202E}'."\nthird\n");
+});
+
+it('escapes a line separator even where a real line break is layout', function (): void {
+    // U+2028 is not a line ending anything here reads as one — it is a line ending a web-rendered log
+    // reads as one, which is the forged verdict all over again.
+    expect(PlainText::lines("verdict\u{2028}0 breaking"))->toBe('verdict\u{2028}0 breaking');
+});

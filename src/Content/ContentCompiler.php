@@ -10,7 +10,6 @@ use Docuccino\Core\Extensions\Context\DocumentConfig;
 use Docuccino\Core\Support\ConfiguredFlag;
 use Docuccino\Core\Support\ConfinedPath;
 use Docuccino\Core\Support\Hydrate;
-use Docuccino\Core\Support\PlainText;
 use FilesystemIterator;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
@@ -49,7 +48,7 @@ final readonly class ContentCompiler
             return [new CompiledContent, [new Diagnostic(
                 severity: Severity::Warning,
                 code: 'content.dir-escapes-base',
-                message: sprintf('The content directory "%s" does not name a path inside the application and was ignored.', PlainText::of($configured)),
+                message: sprintf('The content directory "%s" does not name a path inside the application and was ignored.', $configured),
             )]];
         }
 
