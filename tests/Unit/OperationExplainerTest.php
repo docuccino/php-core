@@ -274,5 +274,8 @@ it('publishes the whole trail as data for a tool to read', function (): void {
                 ]],
             ],
         ],
+        // What the build decided ABOUT the node, beside what it wrote into it: no producer owns a
+        // fact, so it has no rung to sit on and travels as itself.
+        'facts' => ['component' => 'Created'],
     ]);
 });

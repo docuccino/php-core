@@ -49,7 +49,18 @@ final class ResponseDraft
      */
     public const EXAMPLE_PLACEHOLDERS = 'examplePlaceholders';
 
+    /**
+     * Frozen under `x-docuccino.facts` when this response's status is a STAND-IN — a key the document
+     * cannot do without rather than a number anything read. Public because it is that wire contract:
+     * it is what lets a reader, and a build gate, tell a status the code stated from one nothing did
+     * ({@see recordStatusPlacement()}).
+     */
+    public const STATUS_UNPLACED = 'statusUnplaced';
+
     private readonly PatchGuard $guard;
+
+    /** Whether EVERY producer that keyed this response called its status a stand-in; null until one does. */
+    private ?bool $statusUnplaced = null;
 
     /**
      * @var array<string, SchemaDraft>
@@ -192,6 +203,35 @@ final class ResponseDraft
         return $this->componentNamesResponse;
     }
 
+    /**
+     * Whether the status this response is keyed at was READ or stood in for — recorded once per producer
+     * that reaches the status, and true only where every one of them stood in. A status two producers
+     * meet at, one having read it, is a status something read.
+     *
+     * Not a guarded field, and that is the whole point of the accumulation: precedence keeps the first
+     * writer at a tie, so a guarded flag would answer whichever of two equal producers arrived first and
+     * make what the document says a function of throw order. An `and` over the set is a function of the
+     * set.
+     */
+    public function recordStatusPlacement(bool $unplaced): void
+    {
+        if (! $unplaced) {
+            $this->statusUnplaced = false;
+
+            return;
+        }
+
+        if ($this->statusUnplaced === null) {
+            $this->statusUnplaced = true;
+        }
+    }
+
+    /** Whether the status is a stand-in ({@see recordStatusPlacement()}); false until something says so. */
+    public function statusIsUnplaced(): bool
+    {
+        return $this->statusUnplaced === true;
+    }
+
     public function content(string $mediaType): SchemaDraft
     {
         // A bodyless status hands back a detached draft: callers write into it as usual, but nothing
@@ -245,6 +285,8 @@ final class ResponseDraft
         foreach ($other->examples as $mediaType => $example) {
             $this->setExample((string) $mediaType, $example, $other->examplePlaceholders[$mediaType] ?? []);
         }
+
+        $this->recordStatusPlacement($other->statusIsUnplaced());
     }
 
     /**
@@ -543,6 +585,10 @@ final class ResponseDraft
 
         if ($placeholders !== []) {
             $facts += [self::EXAMPLE_PLACEHOLDERS => $placeholders];
+        }
+
+        if ($this->statusUnplaced === true) {
+            $facts += [self::STATUS_UNPLACED => true];
         }
 
         $docuccino = new NodeExtension(

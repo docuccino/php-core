@@ -27,6 +27,12 @@ final class ResponseDraftApplier
         $response = $operation->response($draft->status);
         $contribution = Contribution::forProducer($producer, $source);
 
+        // Whether this producer READ the status it keyed at or stood in for one travels with the merge,
+        // and every producer reaching a status contributes — so a status one of them read is never left
+        // looking like a stand-in ({@see ResponseDraft::recordStatusPlacement()}). Before the `$ref`
+        // return, because a shared component answers a status the same way an inline body does.
+        $response->recordStatusPlacement($draft->statusIsUnplaced());
+
         // A mapper referencing a shared `#/components/responses/*` component freezes as a `$ref` — so the
         // status entry becomes that reference rather than an inline body.
         if ($frozen->ref !== null) {

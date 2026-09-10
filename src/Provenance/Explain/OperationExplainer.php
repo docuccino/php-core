@@ -91,7 +91,7 @@ final class OperationExplainer
         $trails = $this->trails($document, $node, $ref);
 
         if ($trails !== []) {
-            $nodes[] = new ExplainedNode($label, $pointer, $trails, $ref);
+            $nodes[] = new ExplainedNode($label, $pointer, $trails, $ref, self::factsOf($node));
         }
 
         if ($ref !== null) {
@@ -259,6 +259,28 @@ final class OperationExplainer
     private static function join(string $prefix, string $segment): string
     {
         return $prefix === '' ? $segment : $prefix.'.'.$segment;
+    }
+
+    /**
+     * The node's own `x-docuccino.facts`, name-sorted so a reader meets them in one order however the
+     * build wrote them.
+     *
+     * @param  array<string, mixed>  $node
+     * @return array<string, mixed>
+     */
+    private static function factsOf(array $node): array
+    {
+        $extension = $node['x-docuccino'] ?? null;
+        $facts = is_array($extension) ? ($extension['facts'] ?? null) : null;
+
+        if (! is_array($facts)) {
+            return [];
+        }
+
+        /** @var array<string, mixed> $facts */
+        ksort($facts);
+
+        return $facts;
     }
 
     /**
