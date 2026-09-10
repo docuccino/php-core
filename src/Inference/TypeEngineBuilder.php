@@ -21,6 +21,12 @@ interface TypeEngineBuilder
      * @param  string  $vendorPath  the app's vendor dir: readable for types, never descended into
      * @param  list<string>  $primePaths  source roots whose file bodies must stay intact
      * @param  list<string>  $descendPaths  the narrower set interprocedural descent is confined to
+     * @param  list<string>  $declaredPaths  the descend scope BEFORE the host narrowed it — the source
+     *                                       roots the application declares. Descent never enters it;
+     *                                       it is only the yardstick for whether a declined hop is the
+     *                                       host's own narrowing, which the engine may report, or the
+     *                                       engine's containment, which it may not. Empty says the host
+     *                                       offers no yardstick, and nothing is reported
      * @param  string|null  $configFile  the application's own analyzer config file, merged into the one
      *                                   the engine writes for itself, so a project's existing analyzer
      *                                   extensions shape what inference recovers; null runs on the
@@ -33,6 +39,7 @@ interface TypeEngineBuilder
         string $vendorPath,
         array $primePaths,
         array $descendPaths,
+        array $declaredPaths = [],
         ?string $configFile = null,
     ): TypeEngine;
 }
