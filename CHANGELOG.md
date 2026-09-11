@@ -7,6 +7,26 @@ User-facing changes to `docuccino/core` — features, fixes, performance work an
 taken from the commit messages scoped `core`. Entries begin after v0.1.2; older history is in
 the [repository](https://github.com/docuccino/docuccino) git log.
 
+## v0.17.0
+
+### Breaking changes
+
+- name an operation whose route has no name ([#453](https://github.com/docuccino/docuccino/pull/453))
+  - every operation whose route has no name now publishes an `operationId` minted from its method and path, in the form `get.api.forms.@form`. A client generated from the document names its methods after those ids instead of deriving them from the path. Named routes and `#[OperationId]` are unaffected; name the route or set the attribute to pin a name of your own.
+
+### Features
+
+- validate every emitted OpenAPI artifact against its own published schema ([#450](https://github.com/docuccino/docuccino/pull/450))
+- share one stored fragment between the documents that build it alike ([#449](https://github.com/docuccino/docuccino/pull/449))
+
+### Bug fixes
+
+- state the contested-slot policy once, and read the ignored-header rule once ([#466](https://github.com/docuccino/docuccino/pull/466))
+- publish no machine directory in a diagnostic that names one ([#465](https://github.com/docuccino/docuccino/pull/465))
+- hold one entry per name in the collections a document must not repeat ([#452](https://github.com/docuccino/docuccino/pull/452))
+- make every reason the message scrubber weighs say what it proves ([#448](https://github.com/docuccino/docuccino/pull/448))
+- publish one tags entry per name, whatever the config defines twice ([#447](https://github.com/docuccino/docuccino/pull/447))
+
 ## v0.16.0
 
 ### Bug fixes
