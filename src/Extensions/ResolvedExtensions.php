@@ -14,6 +14,7 @@ use Docuccino\Core\Extensions\Contracts\PayloadMediaTypeResolver;
 use Docuccino\Core\Extensions\Contracts\ResponseAnalysisTarget;
 use Docuccino\Core\Extensions\Contracts\ResponseStatusResolver;
 use Docuccino\Core\Extensions\Contracts\RouteBindingFieldSchemaResolver;
+use Docuccino\Core\Extensions\Contracts\RouteBindingKeyResolver;
 use Docuccino\Core\Extensions\Contracts\RouteBindingSchemaResolver;
 use Docuccino\Core\Extensions\Contracts\RouteNoteCollector;
 use Docuccino\Core\Extensions\Contracts\RouteResolver;
@@ -84,6 +85,7 @@ final readonly class ResolvedExtensions
      * @param  list<PayloadMediaTypeResolver>  $payloadMediaTypeResolvers  gated response media-type matchers
      * @param  list<RouteBindingSchemaResolver>  $routeBindingSchemaResolvers  gated route-key schema typers
      * @param  list<RouteBindingFieldSchemaResolver>  $routeBindingFieldSchemaResolvers  gated `{post:slug}` column typers
+     * @param  list<RouteBindingKeyResolver>  $routeBindingKeyResolvers  gated namers of the column a binding matches on
      * @param  list<EnvironmentDigestContributor>  $environmentDigestContributors  gated booted-app cache-digest segments
      * @param  list<RouteNoteCollector>  $routeNoteCollectors  gated aggregators of per-route notes a document transformer reports
      */
@@ -99,6 +101,7 @@ final readonly class ResolvedExtensions
         public array $payloadMediaTypeResolvers = [],
         public array $routeBindingSchemaResolvers = [],
         public array $routeBindingFieldSchemaResolvers = [],
+        public array $routeBindingKeyResolvers = [],
         public array $environmentDigestContributors = [],
         public array $routeNoteCollectors = [],
     ) {
@@ -321,7 +324,7 @@ final readonly class ResolvedExtensions
      */
     private function partitions(): array
     {
-        return [$this->routeResolvers, $this->operationExtensions, $this->typeToSchema, $this->exceptionToResponse, $this->documentTransformers, $this->ruleTransformers, $this->responseAnalysisTargets, $this->responseStatusResolvers, $this->payloadMediaTypeResolvers, $this->routeBindingSchemaResolvers, $this->routeBindingFieldSchemaResolvers, $this->environmentDigestContributors, $this->routeNoteCollectors];
+        return [$this->routeResolvers, $this->operationExtensions, $this->typeToSchema, $this->exceptionToResponse, $this->documentTransformers, $this->ruleTransformers, $this->responseAnalysisTargets, $this->responseStatusResolvers, $this->payloadMediaTypeResolvers, $this->routeBindingSchemaResolvers, $this->routeBindingFieldSchemaResolvers, $this->routeBindingKeyResolvers, $this->environmentDigestContributors, $this->routeNoteCollectors];
     }
 
     /**

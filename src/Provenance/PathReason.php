@@ -25,15 +25,23 @@ enum PathReason
     /** The ladder recognised a root in front of this text — the base path, or a `composer.json` ancestor. */
     case RecognisedRoot;
 
+    /**
+     * A prefix this process can name for ITSELF stands in front of this text — the temp directory, an
+     * include path, the home directory the build ran out of ({@see MessagePaths::machineRoots()}).
+     * The same claim as the root above and as sure: it is where a global cache and an analyser's own
+     * state directory sit, and neither names a file for shape to recognise.
+     */
+    case MachineRoot;
+
     /** The last segment names a file (`Reader.php`), which is all shape has left to go on. */
     case FileShape;
 
-    /** What it establishes. Only one reason speaks about a prefix; the rest speak about the run. */
+    /** What it establishes. The two roots speak about a prefix; the rest speak about the run. */
     public function proves(): PathClaim
     {
         return match ($this) {
             self::LocalWrapper, self::WindowsRoot, self::FileShape => PathClaim::RunIsAPath,
-            self::RecognisedRoot => PathClaim::PrefixIsAMachineWord,
+            self::RecognisedRoot, self::MachineRoot => PathClaim::PrefixIsAMachineWord,
         };
     }
 
@@ -45,7 +53,7 @@ enum PathReason
     public function isConclusive(): bool
     {
         return match ($this) {
-            self::LocalWrapper, self::WindowsRoot, self::RecognisedRoot => true,
+            self::LocalWrapper, self::WindowsRoot, self::RecognisedRoot, self::MachineRoot => true,
             self::FileShape => false,
         };
     }

@@ -212,14 +212,14 @@ final readonly class ContentResolver
     }
 
     /**
-     * One nav parent's entries, ordered and with each destination held once.
+     * One nav parent's entries, ordered and with each destination held once — winner-takes-the-node,
+     * the shape docs/design/uir-and-extensions.md §2 "A contested published slot" hands an indivisible
+     * statement, because each node is one page's statement about itself.
      *
      * Two pages may both ask to be the link to one operation or tag, and a sidebar drawing the same
-     * destination twice in one section is a section with a dead-looking twin in it. The one kept is the
-     * one the parent's own order puts first — explicit `nav.order`, then title, then slug, which is
-     * total because slugs are unique — so it is a function of the pages contesting the link and not of
-     * the order they were compiled in. The whole losing node goes rather than a member of it: each node
-     * is one page's statement about itself, so blending two would publish a link neither page asked for.
+     * destination twice in one section is a section with a dead-looking twin in it. The one kept is
+     * the one the parent's own order puts first — explicit `nav.order`, then title, then slug, which
+     * is total because slugs are unique.
      *
      * Deduping per parent, not across the tree: one endpoint surfaced under two sections is a
      * navigation an author can reasonably want, and there would be no other way to write it.

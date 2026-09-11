@@ -48,7 +48,9 @@ final class Arr
      * holding an array PARALLEL to the values (SDK member names, per-value prose) reindexes it by the
      * same answer rather than deciding distinctness a second time and hoping the two agree.
      *
-     * Identity is the value's JSON bytes: `1` and `"1"` are two values, and two arrays carrying the
+     * The dedupe docs/design/uir-and-extensions.md §2 "A contested published slot" separates from a
+     * merge: identity is the value's whole published form, so two contributors on one key said exactly
+     * the same thing and nothing is dropped. `1` and `"1"` are two values, and two arrays carrying the
      * same members in the same order are one. A value `json_encode` refuses has no bytes, so it shares
      * one key with every other such value and the first of them stands for all — vague and honest,
      * where the alternative is a key that is not a function of the value at all.

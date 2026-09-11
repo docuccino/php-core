@@ -28,20 +28,26 @@ final class Formats
     public const string DEFAULT = 'openapi-3.2';
 
     /**
-     * format id => [emitter, serialises YAML, the viewer can serve it].
+     * format id => [emitter, serialises YAML, the viewer can serve it, held to a published schema].
      *
      * A format that cannot serialise YAML is one whose consumer parses JSON and nothing else: a `.yaml`
      * path on such a target is rejected rather than filled with JSON, because a file that lies about
      * its own extension is worse than no file.
      *
-     * @var array<string, array{class-string<ReportingEmitter>, bool, bool}>
+     * The last column is whether the emitter reads its own output back against a published
+     * specification for the version it claims. Only the OpenAPI formats have one: UIR answers to its
+     * own schema on every build, before any emission, and a Postman collection has no published schema
+     * at all. It is a column rather than an implicit fact about which emitter calls what, because a
+     * caller asking "is this artifact sound" needs to know when the answer is that nobody can say.
+     *
+     * @var array<string, array{class-string<ReportingEmitter>, bool, bool, bool}>
      */
     private const array TABLE = [
-        'openapi-3.2' => [OpenApi32Emitter::class, true, true],
-        'openapi-3.1' => [OpenApi31DownlevelEmitter::class, true, true],
-        'openapi-3.0' => [OpenApi30DownlevelEmitter::class, true, true],
-        'uir' => [UirEmitter::class, false, true],
-        'postman' => [CollectionEmitter::class, false, false],
+        'openapi-3.2' => [OpenApi32Emitter::class, true, true, true],
+        'openapi-3.1' => [OpenApi31DownlevelEmitter::class, true, true, true],
+        'openapi-3.0' => [OpenApi30DownlevelEmitter::class, true, true, true],
+        'uir' => [UirEmitter::class, false, true, false],
+        'postman' => [CollectionEmitter::class, false, false, false],
     ];
 
     /**
@@ -73,6 +79,15 @@ final class Formats
     public static function serialisesYaml(string $format): bool
     {
         return self::TABLE[$format][1] ?? false;
+    }
+
+    /**
+     * Whether emitting this format holds the bytes it wrote to a published schema for the version they
+     * claim, so a caller can tell a clean check from one nobody ran. Unknown formats: false.
+     */
+    public static function checksEmittedArtifact(string $format): bool
+    {
+        return self::TABLE[$format][3] ?? false;
     }
 
     /**

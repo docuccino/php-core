@@ -11,7 +11,7 @@ use Docuccino\Core\Emit\Postman\Description;
 use Docuccino\Core\Emit\Postman\Headers;
 use Docuccino\Core\SpecValidation\SchemaFindings;
 use Docuccino\Core\Tests\Support\EmittedDocument;
-use Opis\JsonSchema\Validator;
+use Docuccino\Core\Tests\Support\PostmanSchema;
 
 /**
  * The Postman collection emitter: what the format can carry, what it cannot, and the ordering rules
@@ -84,39 +84,6 @@ function postmanLeaves(array $items, string $prefix = ''): array
 }
 
 /**
- * Postman's collection schema is published as draft-04, which opis does not parse. This lifts the
- * dialect WITHOUT touching anything that constrains an instance: the draft-04 `id` anchors are dropped
- * (every `$ref` in the file is a `#/definitions/…` pointer that resolves without them) and the dialect
- * is redeclared. Keys inside a `properties` or `definitions` map are names, not keywords, so a property
- * genuinely called `id` survives.
- */
-function liftPostmanSchema(mixed $node, bool $inMap = false): mixed
-{
-    if (is_array($node)) {
-        return array_map(static fn (mixed $v): mixed => liftPostmanSchema($v), $node);
-    }
-
-    if (! $node instanceof stdClass) {
-        return $node;
-    }
-
-    $out = new stdClass;
-    foreach (get_object_vars($node) as $key => $value) {
-        if (! $inMap && ($key === 'id' || $key === '$schema') && is_string($value)) {
-            continue;
-        }
-
-        $out->{$key} = liftPostmanSchema($value, ! $inMap && in_array($key, ['properties', 'definitions'], true));
-    }
-
-    if (! $inMap && isset($node->{'$schema'})) {
-        $out->{'$schema'} = 'http://json-schema.org/draft-07/schema#';
-    }
-
-    return $out;
-}
-
-/**
  * A minimal document carrying $paths (and optionally $tags), for the ordering and naming rules.
  *
  * @param  array<string, mixed>  $paths
@@ -163,35 +130,6 @@ function postmanSchemaFixtures(): array
     return $fixtures;
 }
 
-/** The vendored Postman schema, cached — parsing it per assertion is the cost worth avoiding. */
-function postmanSchemaValidator(): Validator
-{
-    static $validator = null;
-
-    if ($validator instanceof Validator) {
-        return $validator;
-    }
-
-    // Postman publishes its collection schema as draft-04, which opis does not parse. The vendored file
-    // stays byte-exact as Postman ships it and the dialect is lifted here: the draft-04 `id` anchors go
-    // (every `$ref` in the file is a `#/definitions/…` pointer that resolves without them) and the
-    // dialect is declared draft-07. Nothing that constrains an instance is touched.
-    $schema = liftPostmanSchema(json_decode(
-        (string) file_get_contents(dirname(__DIR__).'/Fixtures/postman-collection-v2.1.0.schema.json'),
-        flags: JSON_THROW_ON_ERROR,
-    ));
-
-    $validator = new Validator;
-    $validator->setMaxErrors(50);
-
-    // An oracle may not touch what it reads: opis writes schema `default`s INTO the instance otherwise.
-    $validator->parser()->setOption('allowDefaults', false);
-
-    $validator->resolver()?->registerRaw($schema, 'https://docuccino.test/postman-collection.json');
-
-    return $validator;
-}
-
 /** The emitted collection for $fixture, decoded to the object graph the oracle reads. */
 function postmanCollection(string $fixture): mixed
 {
@@ -203,9 +141,9 @@ function postmanCollection(string $fixture): mixed
 
 it('emits a schema-valid v2.1.0 collection for every fixture', function (string $fixture): void {
     expect(SchemaFindings::of(
-        postmanSchemaValidator(),
+        PostmanSchema::validator(),
         postmanCollection($fixture),
-        'https://docuccino.test/postman-collection.json',
+        PostmanSchema::URI,
     ))->toBe([]);
 })->with(postmanSchemaFixtures());
 
@@ -1453,4 +1391,35 @@ it('holds one parameter per name and location, the operation\'s own declaration 
         ['key' => 'X-Trace', 'value' => 'string', 'disabled' => true, 'description' => 'Written at the operation.'],
         ['key' => 'Cookie', 'value' => 'sid=from-the-operation', 'disabled' => true],
     ]);
+});
+
+/**
+ * The header list a request carries is a function of the declarations, never of the order they were
+ * written in — the second obligation of design §2 "A contested published slot", which the header slot
+ * satisfies by reading each location in name order rather than by trusting the list it was handed.
+ * A `parameters` array is written by hand, generated, and rewritten by overlays; nothing about it is a
+ * decision a consumer should be able to see.
+ */
+it('builds a request\'s headers from the declarations, not from the order they were written', function (): void {
+    $parameters = [
+        ['name' => 'X-Trace', 'in' => 'header', 'required' => true, 'schema' => ['type' => 'string'], 'description' => 'Trace id.'],
+        ['name' => 'Cookie', 'in' => 'header', 'required' => false, 'schema' => ['type' => 'string'], 'description' => 'The raw cookie header.'],
+        ['name' => 'X-Tenant', 'in' => 'header', 'required' => false, 'schema' => ['type' => 'string'], 'description' => 'The tenant.'],
+        ['name' => 'Accept', 'in' => 'header', 'required' => true, 'schema' => ['type' => 'string'], 'description' => 'Ignored by every reader.'],
+        ['name' => 'session', 'in' => 'cookie', 'required' => true, 'schema' => ['type' => 'string']],
+        ['name' => 'theme', 'in' => 'cookie', 'required' => false, 'schema' => ['type' => 'string']],
+    ];
+
+    $headers = static fn (array $written): array => postman(postmanDocumentWithPaths(['/things' => ['get' => [
+        'parameters' => $written,
+        'responses' => ['200' => ['description' => 'OK', 'content' => ['application/json' => ['schema' => ['type' => 'object']]]]],
+    ]]]))['item'][0]['request']['header'];
+
+    $baseline = $headers($parameters);
+
+    // Not an empty list dressed up as agreement: the request really does carry the derived Accept, the
+    // assembled cookie jar and both ordinary declarations, which is what makes the comparison mean
+    // something.
+    expect(array_column($baseline, 'key'))->toBe(['Accept', 'Cookie', 'X-Tenant', 'X-Trace'])
+        ->and($headers(array_reverse($parameters)))->toBe($baseline);
 });

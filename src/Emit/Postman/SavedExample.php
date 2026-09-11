@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Docuccino\Core\Emit\Postman;
 
 use Docuccino\Core\Canonical\CanonicalJsonSerializer;
+use Docuccino\Core\Document\IgnoredHeaders;
 use Docuccino\Core\Emit\SchemaExampleFactory;
 use Docuccino\Core\Support\Arr;
 use stdClass;
@@ -122,7 +123,7 @@ final class SavedExample
         foreach ($names as $name) {
             // OAS: a response header named `Content-Type` SHALL be ignored — the media type the
             // response is written in is what the example carries, and it is already above.
-            if (Headers::ignoredResponseHeader($name)) {
+            if (IgnoredHeaders::responseHeader($name)) {
                 continue;
             }
 

@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Document\UirDocument;
 use Docuccino\Core\Emit\EmitOptions;
 use Docuccino\Core\Emit\Formats;
@@ -105,4 +106,44 @@ it('carries no shared default for provenance, so each format keeps its own', fun
 
     expect(Formats::emit('uir', $document, new EmitOptions(provenance: ProvenanceLevel::Full))->output)->toContain('"provenance"')
         ->and(Formats::emit('uir', $document, new EmitOptions(provenance: ProvenanceLevel::None))->output)->not->toContain('"provenance"');
+});
+
+/**
+ * The column saying which formats hold their own output to a published specification, asked of the
+ * BEHAVIOUR rather than of the table that claims it. A caller — `docuccino:validate` is the one that
+ * needs it — has to be able to tell a clean check from one nobody ran, and a table column agreeing
+ * only with itself would let a format stop being checked with the row still reading `true`.
+ *
+ * Driven over every id in the table, so a format added without a meta-schema behind it fails here
+ * rather than quietly answering "valid" for an artifact nothing looked at.
+ */
+it('reports an invalid artifact for exactly the formats the table says it checks', function (string $format): void {
+    $document = workedExample();
+    // Accepted by every meta-schema as an ordinary string member, so the reference walk inside the
+    // check is the only thing that can see it — which makes this a probe of the check and nothing else.
+    $document['components']['schemas']['Dangling'] = ['$ref' => '#/components/schemas/NobodyDefinesThis'];
+
+    $report = Formats::emit($format, UirDocument::fromArray($document), new EmitOptions)->report;
+
+    $found = array_filter(
+        $report->diagnostics,
+        static fn (Diagnostic $d): bool => $d->code === 'document.openapi-invalid',
+    );
+
+    expect($found !== [])->toBe(Formats::checksEmittedArtifact($format));
+})->with(fn (): array => Formats::ids());
+
+/**
+ * And the two counts behind that row, so neither half of it can go vacuous: a table where nothing is
+ * checked would satisfy every row above, and so would one where everything is.
+ */
+it('splits the formats into the ones with a published schema behind them and the ones without', function (): void {
+    $checked = array_values(array_filter(Formats::ids(), Formats::checksEmittedArtifact(...)));
+    $unchecked = array_values(array_filter(Formats::ids(), static fn (string $f): bool => ! Formats::checksEmittedArtifact($f)));
+
+    expect($checked)->toBe(['openapi-3.2', 'openapi-3.1', 'openapi-3.0'])
+        // UIR answers to its own schema on every build, before any emission; a Postman collection has
+        // no published specification to be held to at all.
+        ->and($unchecked)->toBe(['uir', 'postman'])
+        ->and(Formats::checksEmittedArtifact('swagger-2.0'))->toBeFalse();
 });

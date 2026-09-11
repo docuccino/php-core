@@ -178,8 +178,9 @@ it('leaves alone every run that a machine did not put there', function (string $
     // The price of reason 4, and the shape that stays open because of it: a directory under no root
     // names no file, and nothing tells it from the link above. Reducing it would state a path the
     // application never wrote, which is the direction that must be impossible — so it stands, spaced
-    // `$HOME` and all.
-    ['a directory under no root at all', 'scandir(/Users/ca rol/Library/Caches) failed'],
+    // `$HOME` and all. What closes it where it matters is a root rather than a rule: this run is
+    // under nobody's home that THIS process can name, and one that is reduces (the sweep below).
+    ['a directory no root of this machine\'s accounts for', 'scandir(/Users/ca rol/Library/Caches) failed'],
     ['a home-relative path', 'Reading ~/Projects/app/config.php failed'],
     ['a URL', 'GET https://api.example.com/v1/forms returned 500'],
     ['a URL naming a file', 'Fetching https://cdn.example.com/assets/app.js failed'],
@@ -625,11 +626,13 @@ it('still refuses a backslash run no root accounts for', function (string $case,
     // says regex or JSON string, and those rows are the ones that must never be rewritten. The third
     // is the leak that buys it — the same trade the braced run makes, in the same direction.
     //
-    // Reading the objection over the whole run rather than over the text a rewrite would touch is
-    // what leaks it, and narrowing it is refused rather than unexamined: the third row and
-    // `Unknown route /api/users.json for App\Foo` are the same shape — a path or a route, then an
-    // FQCN — so no scope rule separates them, and narrowing trades this leak for over-scrubbing that
-    // signature. A leak is the direction that may be traded and an over-scrub is not.
+    // Narrowing the objection's SCOPE is refused rather than unexamined, and the refusal still
+    // stands: the third row and `Unknown route /api/users.json for App\Foo` are the same shape — a
+    // path or a route, then an FQCN — so no positional rule separates them, and narrowing trades
+    // this leak for over-scrubbing that signature. A leak is the direction that may be traded and an
+    // over-scrub is not. What separates them is evidence, not position: the third row reduces on the
+    // machine whose home it names ({@see the row below this dataset}) because a root then accounts
+    // for it, and the signature has no root on any machine, so it never moves.
     expect((new MessagePaths(new RootRelativeSourcePathResolver('/Users/ca rol/checkout')))->relative($message))
         ->toBe($message);
 })->with([
@@ -985,3 +988,301 @@ it('draws the two-segment line once, for the ladder\'s roots and for its own', f
         expect($deepEnough->invoke(null, $root))->toBeTrue();
     }
 });
+
+/*
+ * The rungs below are the two roots read as one domain. `PrefixIsAMachineWord` has two proofs — a
+ * root the ladder was CONFIGURED with and a prefix the process names for ITSELF — and only the first
+ * was ever weighed, so a directory under `$HOME` had nothing but shape to go on and shape has nothing
+ * to say about a directory. Two guards over two subsets would leave the same gap one level up, so
+ * these state the union: every member of the domain gets a row, including the members that are owed
+ * no answer at all.
+ */
+it('publishes no machine word for a directory, whatever sentence carries it and whatever it is spelled with', function (): void {
+    // The sweep. Every shape a path is written in, crossed with every sentence a thrown message
+    // wraps one in — a directory is the population, because a file has shape to speak for it and a
+    // directory has nothing. The home is an INPUT: a row reading the host's own would assert the
+    // reduced answer where the host was deep and the leak where it was `/root`.
+    $home = '/machine/ca rol';
+    $restore = getenv('HOME');
+
+    $templates = [
+        'scandir(%s) failed',
+        'mkdir(%s): Permission denied',
+        'Could not open %s',
+        'Analysed files in %s',
+        'file_get_contents(%s): Failed to open stream',
+        'Configuration file %s not found',
+        'Failed in %s on line 3',
+        '%s is not writable',
+        'Analysed files in %s for App\\Http\\Kernel',
+        'Directory %s does not exist',
+    ];
+
+    // Each shape with the word that must not survive it. The Windows and UNC rows carry their own,
+    // since a drive and a share are proof from the first character and never reach a machine root.
+    $subjects = [
+        'a POSIX directory' => [$home.'/Library/Caches', 'ca rol'],
+        'a trailing separator' => [$home.'/Library/Caches/', 'ca rol'],
+        'a dotted directory' => [$home.'/.composer/cache', 'ca rol'],
+        'a directory with no extension anywhere' => [$home.'/bin/build', 'ca rol'],
+        'a braced directory' => [$home.'/secret/{a,b}', 'ca rol'],
+        'a backslash past the directory' => [$home.'/secret/x'.'\\'.'d+', 'ca rol'],
+        'a colon inside a segment' => [$home.'/Caches/2026-08-25T10:30:00/repo', 'ca rol'],
+        'the directory a wrapper names' => ['file://'.$home.'/Library/Caches', 'ca rol'],
+        'a glob under the directory' => ['glob://'.$home.'/{Support,Http}/*.php', 'ca rol'],
+        'a Windows drive' => ['C:\\Users\\bob\\AppData\\Local\\Temp', 'bob'],
+        'a UNC share' => ['\\\\build01\\share\\cache', 'build01'],
+        'a file, for the control' => [$home.'/Library/Caches/Reader.php', 'ca rol'],
+    ];
+
+    $leaked = [];
+    $rewritten = 0;
+
+    try {
+        putenv('HOME='.$home);
+        $paths = new MessagePaths(new RootRelativeSourcePathResolver($home.'/checkout'));
+
+        foreach ($templates as $template) {
+            foreach ($subjects as $case => [$subject, $word]) {
+                $message = sprintf($template, $subject);
+                $scrubbed = $paths->relative($message);
+
+                $rewritten += $scrubbed === $message ? 0 : 1;
+
+                if (str_contains($scrubbed, $word)) {
+                    $leaked[] = $case.': '.$scrubbed;
+                }
+            }
+        }
+    } finally {
+        putenv($restore === false ? 'HOME' : 'HOME='.$restore);
+    }
+
+    expect($leaked)->toBe([])
+        // Anti-vacuity, both ends. A corpus that shrank to nothing, and a matcher that stopped
+        // seeing these shapes, both satisfy an empty leak list forever — so the denominator is
+        // asserted and every row has to have been rewritten for the list to be empty honestly.
+        ->and(count($templates) * count($subjects))->toBe(120)
+        ->and($rewritten)->toBe(120);
+});
+
+it('leaves the same corpus whole where the machine cannot name the prefix, which is what the rows above are worth', function (): void {
+    // The positive control for the sweep: the same shapes under a home this process does NOT own
+    // must still be published whole, or the guard above would pass for a scrubber that reduced
+    // everything and proved nothing about the direction that must be impossible.
+    $paths = new MessagePaths(new RootRelativeSourcePathResolver('/app/root'));
+
+    $whole = [
+        'scandir(/elsewhere/dana/Library/Caches) failed',
+        'Analysed files in /elsewhere/dana/.composer/cache',
+        'Could not open /elsewhere/dana/secret/{a,b}',
+        'See /docs/reference/configuration for the key.',
+    ];
+
+    foreach ($whole as $message) {
+        expect($paths->relative($message))->toBe($message);
+    }
+});
+
+it('accounts for every kind of root, and says which members are owed no answer at all', function (string $case, string $path, ?string $root, string $expected): void {
+    // The union, stated against the domain rather than left to two guards over two subsets. `$root`
+    // names which proof accounts for the path — the ladder's, the machine's, or NEITHER, which is a
+    // row of its own rather than a gap: a member owed no answer says so here instead of falling
+    // between the two subsets and being noticed as a leak later.
+    $home = '/machine/ca rol';
+    $restore = getenv('HOME');
+
+    try {
+        putenv('HOME='.$home);
+        $scrubbed = (new MessagePaths(new RootRelativeSourcePathResolver($home.'/checkout')))
+            ->relative('scandir('.$path.') failed');
+    } finally {
+        putenv($restore === false ? 'HOME' : 'HOME='.$restore);
+    }
+
+    expect($scrubbed)->toBe('scandir('.$expected.') failed')
+        ->and($root === null)->toBe($scrubbed === 'scandir('.$path.') failed');
+})->with([
+    // The ladder's own root wins wherever it reaches, so a project path is placed against the
+    // project even though the home is a root of it too.
+    ['the base path', '/machine/ca rol/checkout/storage', 'ladder', 'storage'],
+    ['the base path itself', '/machine/ca rol/checkout', 'ladder', ''],
+    // The machine's own, which is where the leaks were.
+    ['a directory under the home', '/machine/ca rol/Library/Caches', 'machine', 'Library/Caches'],
+    ['the home itself', '/machine/ca rol', 'machine', ''],
+    ['a directory beside the checkout', '/machine/ca rol/other/vendor', 'machine', 'other/vendor'],
+    // Owed no answer: nothing proves either claim, so every character stands. Each of these is text
+    // an author could have written, which is why the answer is no answer rather than a basename.
+    ['a documentation link', '/docs/reference/configuration', null, '/docs/reference/configuration'],
+    ['another machine\'s home', '/elsewhere/dana/Library/Caches', null, '/elsewhere/dana/Library/Caches'],
+    ['a route prefix', '/api/v1/forms', null, '/api/v1/forms'],
+]);
+
+it('reduces the application\'s own root when a class name follows it, exactly as when nothing does', function (string $case, string $message, string $expected): void {
+    // A claim answers an objection by covering the text a rewrite would REMOVE, and no rewrite here
+    // removes text past the path run — so measuring the claim over the sentence carrying on
+    // afterwards demanded proof about text nothing would touch. The root is the shape that shows it:
+    // there is no tail under it for the ladder to answer with, so the prefix cut at the backslash
+    // ran past the root and no root accounted for it.
+    $scrubbed = (new MessagePaths(new RootRelativeSourcePathResolver('/app/root')))->relative($message);
+
+    expect($scrubbed)->toBe($expected)
+        ->and($scrubbed)->not->toContain('/app/root');
+})->with([
+    ['the root alone, as it always worked', 'Analysed files in /app/root', 'Analysed files in '],
+    ['the root, then a class', 'Analysed files in /app/root for App\\Http\\Kernel', 'Analysed files in  for App\\Http\\Kernel'],
+    ['the root, then a class and more', 'Analysed files in /app/root for App\\Http\\Kernel on line 3', 'Analysed files in  for App\\Http\\Kernel on line 3'],
+    ['the root, then a braced template', 'Analysed files in /app/root for /api/users/{user}', 'Analysed files in  for /api/users/{user}'],
+    // A directory one under the root already worked, because its own tail put the objected-to
+    // character back inside something a root accounts for. Pinned so the two cannot come apart.
+    ['a directory under the root, then a class', 'Analysed files in /app/root/storage for App\\Foo', 'Analysed files in storage for App\\Foo'],
+]);
+
+it('will not narrow an objection into over-scrubbing a route, which is what the span is not', function (string $case, string $base, string $message): void {
+    // The guard executed rather than claimed. What changed is the span a claim has to COVER, not the
+    // span the objection is read over: a run outside every root still keeps every character, so the
+    // route signature and the path beside it — one shape, an absolute run then an FQCN — are both
+    // left alone. Rewriting either would be the product stating something the application never said.
+    expect((new MessagePaths(new RootRelativeSourcePathResolver($base)))->relative($message))
+        ->toBe($message);
+})->with([
+    ['a route with a format suffix, followed by a class', '/app/root', 'Unknown route /api/users.json for App\\Foo'],
+    ['a route with no suffix, followed by a class', '/app/root', 'Unknown route /api/users for App\\Foo'],
+    ['a path outside every root, followed by a class', '/elsewhere/checkout', 'Failed in /somewhere/secret/X.php for App\\Foo'],
+    ['a documentation link, followed by a class', '/app/root', 'See /docs/reference/configuration for App\\Foo'],
+    ['a rule whose regex holds a separator', '/app/root', 'Rule "regex:/^\\d+\\/\\d+$/" could not be read'],
+    // A root the ladder recognised but which is one segment deep is still no evidence, whether or
+    // not a class follows: the depth line is read over every root that accounts for the text.
+    ['a route under a one-segment root, followed by a class', '/app', 'Unknown route /app/users/profile for App\\Foo'],
+]);
+
+it('answers one directory one way, whether or not an objection refused the run', function (): void {
+    // Two readers of `machineRoots()` used to answer differently for the same directory: the literal
+    // pass strips the prefix, the ladder answers a bare name, and which one got there first was
+    // decided by whether a brace happened to be in the run. So `/opt/php/build/x.php` came out
+    // `x.php` and `/opt/php/build/{a,b}/x.php` came out `build/{a,b}/x.php` — one machine root, two
+    // notions of a publishable path.
+    $restore = (string) ini_get('include_path');
+
+    try {
+        ini_set('include_path', '.'.PATH_SEPARATOR.'/opt/php');
+        $paths = new MessagePaths(new RootRelativeSourcePathResolver('/app/root'));
+
+        expect($paths->relative('Could not open /opt/php/build/x.php'))->toBe('Could not open build/x.php')
+            ->and($paths->relative('Could not open /opt/php/build/{a,b}/x.php'))->toBe('Could not open build/{a,b}/x.php')
+            ->and($paths->relative('scandir(/opt/php/build/cache) failed'))->toBe('scandir(build/cache) failed')
+            ->and($paths->relative('Failed in /opt/php/build/x.php for App\\Foo'))->toBe('Failed in build/x.php for App\\Foo');
+    } finally {
+        ini_set('include_path', $restore);
+    }
+});
+
+it('removes a machine root where a path would end, and not out of the longer name beside it', function (string $case, string $message, string $expected): void {
+    // The guard executed: the message the redaction must refuse to touch, written out rather than
+    // argued about. A root is a PREFIX of every longer name that starts the same way, and a literal
+    // replace has nothing to tell them apart — so `/opt/phpstan/bin/x` was published as `stan/bin/x`,
+    // a directory nobody has, which is the over-scrub direction reached by the one pass that exists
+    // to prevent a leak. The boundary is the punctuation the matcher reads, so the bare form PHP's
+    // failed-include tail spells still goes.
+    $restore = (string) ini_get('include_path');
+
+    try {
+        ini_set('include_path', '.'.PATH_SEPARATOR.'/opt/php');
+        $scrubbed = (new MessagePaths(new RootRelativeSourcePathResolver('/app/root')))->relative($message);
+    } finally {
+        ini_set('include_path', $restore);
+    }
+
+    expect($scrubbed)->toBe($expected);
+})->with([
+    ['a sibling whose name starts with the root', 'Could not open /opt/phpstan/bin/x', 'Could not open /opt/phpstan/bin/x'],
+    ['a word starting with the root', 'Could not read /opt/phpx', 'Could not read /opt/phpx'],
+    ['the root standing bare in a tail', "Failed opening required 'x.php' (include_path='.:/opt/php')", "Failed opening required 'x.php' (include_path='.:')"],
+    ['the root as a prefix, separator and all', 'Could not open /opt/php/lib/x.php', 'Could not open lib/x.php'],
+    ['the root at the very end of a sentence', 'Nothing under /opt/php', 'Nothing under '],
+]);
+
+it('keeps every row in this file independent of the host it ran on', function (): void {
+    // The denominator, asserted rather than assumed. Now that `$HOME` and the temp directory feed
+    // `machineRoots()`, a row whose fixture path happened to sit under the host's own would answer
+    // one thing on a developer's mac and another on a runner — the class of defect this file has
+    // already met twice. Every prefix the rows are written with is checked against what THIS host
+    // can name for itself, so an unlucky machine fails here with the reason rather than in a row.
+    /** @var list<string> $roots */
+    $roots = (new ReflectionMethod(MessagePaths::class, 'machineRoots'))->invoke(null);
+
+    $fixtures = ['/app/root', '/app', '/api', '/docs', '/elsewhere', '/Users/ca rol', '/home/alice', '/opt/php', '/somewhere', '/machine', '/var/www', '/root'];
+
+    foreach ($fixtures as $fixture) {
+        foreach ($roots as $root) {
+            expect(str_starts_with($fixture.'/', $root.'/'))->toBeFalse();
+        }
+    }
+
+    // Anti-vacuity: a `machineRoots()` that answered nothing would satisfy every pair above forever.
+    // The temp directory is the one entry a host is guaranteed to have, and it is only in the list
+    // when it is deep enough to be a machine word, which `/tmp` is not.
+    expect($fixtures)->toHaveCount(12)
+        ->and(count($roots) > 0 || sys_get_temp_dir() === '/tmp')->toBeTrue();
+});
+
+it('reduces the run the row above refuses, on the machine whose home it names', function (): void {
+    // The two halves of the recorded trade, side by side. The refusal above is positional — no rule
+    // about WHERE the backslash sits separates a path from a route signature — and it is upheld: the
+    // route keeps every character here too. What moves the path is a root accounting for it, which
+    // the route has on no machine and this path has on exactly one: the one it came from.
+    $home = '/machine/ca rol';
+    $restore = getenv('HOME');
+
+    try {
+        putenv('HOME='.$home);
+        $paths = new MessagePaths(new RootRelativeSourcePathResolver($home.'/checkout'));
+
+        expect($paths->relative('Failed in '.$home.'/secret/X.php for App\\Foo'))
+            ->toBe('Failed in secret/X.php for App\\Foo')
+            ->and($paths->relative('Unknown route /api/users.json for App\\Foo'))
+            ->toBe('Unknown route /api/users.json for App\\Foo')
+            ->and($paths->relative('Rule "regex:/^\\d+\\/\\d+$/" could not be read'))
+            ->toBe('Rule "regex:/^\\d+\\/\\d+$/" could not be read');
+    } finally {
+        putenv($restore === false ? 'HOME' : 'HOME='.$restore);
+    }
+});
+
+it('reduces a route mounted under this machine\'s own home, which is the over-scrub the roots buy', function (string $case, string $home, string $message, string $expected): void {
+    // The cost of the row above, pinned beside it rather than left for a reader to find. A prefix
+    // the process names for itself is proof, and proof does not ask what the text MEANS — so an
+    // application whose routes happen to spell this machine's home has them reduced. Both passes
+    // reach it: the weighing attributes the run, and the literal redaction has no methods to decline,
+    // which is why a route signature the matcher refuses to open behind `GET ` moves anyway.
+    //
+    // It is the over-scrub direction and it is taken knowingly, which the refusal above is no
+    // precedent against: that one would have rewritten text NO root accounts for, a guess with no
+    // evidence at all, while here the evidence is real and only the conclusion collides. The depth
+    // line is what would close it, and the trade is measured: at three segments the ordinary home is
+    // out — `/home/alice`, `/Users/alice` and `/var/www` are all two — and 71 of the sweep's 120
+    // rows leak again. A leak on every ordinary machine, to buy back a collision nobody has hit, is
+    // the trade backwards.
+    $restore = getenv('HOME');
+
+    try {
+        putenv('HOME='.$home);
+        $scrubbed = (new MessagePaths(new RootRelativeSourcePathResolver('/app/root')))->relative($message);
+    } finally {
+        putenv($restore === false ? 'HOME' : 'HOME='.$restore);
+    }
+
+    expect($scrubbed)->toBe($expected);
+})->with([
+    ['a route under the home, then a class', '/home/alice', 'Unknown route /home/alice/users for App\\Foo', 'Unknown route users for App\\Foo'],
+    ['a route under the home, alone', '/home/alice', 'Unknown route /home/alice/users', 'Unknown route users'],
+    // `/var/www` is `www-data`'s home on Debian, so a build running as the web server user has one
+    // ordinary deployment root standing where the depth line reads a machine word.
+    ['a route under the web user\'s home', '/var/www', 'Unknown route /var/www/api/forms', 'Unknown route api/forms'],
+    ['a signature the matcher declines and the redaction does not', '/var/www', 'Unknown route GET /var/www/users', 'Unknown route GET users'],
+    ['a template the brace would have refused', '/home/alice', 'Unknown route /home/alice/users/{user}', 'Unknown route users/{user}'],
+    // The controls, so the rows above are the home's doing and not a scrubber that eats routes. The
+    // second is the depth line still holding: a one-segment home is a word prose spells.
+    ['the same shape outside every root', '/home/alice', 'Unknown route /api/users for App\\Foo', 'Unknown route /api/users for App\\Foo'],
+    ['a route under a one-segment home', '/root', 'Unknown route /root/users for App\\Foo', 'Unknown route /root/users for App\\Foo'],
+]);

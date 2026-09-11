@@ -21,8 +21,10 @@ enum PathObjection
     case NestedScheme;
 
     /**
-     * The root the ladder recognised is one segment. `/app` is a container's checkout and equally a
-     * prefix an application mounts routes under, so it is no evidence the text is a machine word.
+     * No root that accounts for the text is more than one segment. `/app` is a container's checkout
+     * and equally a prefix an application mounts routes under, so it is no evidence the text is a
+     * machine word — and it is measured over every root that accounts for it, because the depth that
+     * matters is the depth of whichever one would be stripped.
      */
     case ShallowRoot;
 

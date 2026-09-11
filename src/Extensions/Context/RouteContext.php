@@ -6,6 +6,7 @@ namespace Docuccino\Core\Extensions\Context;
 
 use Docuccino\Core\Extensions\Contracts\OperationExtension;
 use Docuccino\Core\Extensions\Contracts\RouteBindingFieldSchemaResolver;
+use Docuccino\Core\Extensions\Contracts\RouteBindingKeyResolver;
 use Docuccino\Core\Extensions\Contracts\TypeSchemaConverter;
 use Docuccino\Core\Extensions\Contracts\ValidationRulesToSchema;
 use Docuccino\Core\Extensions\ResolvedExtensions;
@@ -60,6 +61,17 @@ final class RouteContext
      * @param  array<string, string>  $routeBindings  path parameter name → bound model FQCN
      * @param  array<string, string>  $routeBindingFields  path parameter name → the column it binds on,
      *                                                     for the subset that names one (`{post:slug}`)
+     * @param  array<string, string>  $scopedBindings  path parameter name → the parameter it is resolved
+     *                                                 WITHIN, for the subset the framework scopes to
+     *                                                 their parent. A scoped child only matches records
+     *                                                 belonging to that parent, which is a fact about
+     *                                                 what the server accepts and nothing else in the
+     *                                                 operation states
+     * @param  list<string>  $customBoundParameters  the subset the application resolves with a binder of
+     *                                               its own rather than by implicit binding. Whatever
+     *                                               that binder matches on is a closure body, so the
+     *                                               bound model's route key is no longer the answer and
+     *                                               a reader must not publish it as one
      * @param  ?string  $formRequestClass  the FormRequest class type-hinted on the action, if any
      * @param  ?string  $operationId  this operation's stable `x-docuccino.id`, already minted. The
      *                                pipeline stamps it onto the frozen node afterwards, but an
@@ -93,6 +105,8 @@ final class RouteContext
         public readonly bool $allowsTrashedBindings = false,
         public readonly ?string $formRequestClass = null,
         public readonly array $routeBindingFields = [],
+        public readonly array $scopedBindings = [],
+        public readonly array $customBoundParameters = [],
         public readonly ?string $operationId = null,
         public readonly bool $deprecated = false,
         public readonly ?string $deprecationReason = null,
@@ -176,6 +190,23 @@ final class RouteContext
             $schema = $resolver->keySchemaFor($modelFqcn);
             if ($schema !== null) {
                 return $schema;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The column a route-model-bound parameter is matched on — the bound model's route key — or null
+     * when nothing in the chain can name it statically ({@see RouteBindingKeyResolver}). A route that
+     * names its own column (`{post:slug}`) has already answered this and never asks.
+     */
+    public function routeBindingKeyName(string $modelFqcn): ?string
+    {
+        foreach ($this->extensions->routeBindingKeyResolvers as $resolver) {
+            $name = $resolver->keyNameFor($modelFqcn);
+            if ($name !== null) {
+                return $name;
             }
         }
 

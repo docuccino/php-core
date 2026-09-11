@@ -30,7 +30,9 @@ use Throwable;
  * identity + generator metadata, applies overlays and document transformers, then computes the content
  * hash. Two operations contesting one slot — duplicate identities, or a path and method a fragment
  * already holds — are error diagnostics, and the first claimant keeps the slot; nothing is ever
- * silently overwritten. A document transformer that throws is an error diagnostic too, never an
+ * silently overwritten. "First" is a content order and not an arrival one, which is what the second
+ * obligation of docs/design/uir-and-extensions.md §2 "A contested published slot" requires: the caller
+ * hands the fragments over sorted by method, URI and host. A document transformer that throws is an error diagnostic too, never an
  * exception out of the build ({@see transformerFailed()}).
  *
  * @internal
@@ -183,6 +185,12 @@ final class Assembler
         // can add a requirement, so anything earlier would hold the build to a catalogue it had not
         // finished writing.
         foreach (SecurityAudit::report($doc) as $diagnostic) {
+            $diagnostics[] = $diagnostic;
+        }
+
+        // Same vantage point, same reason: an overlay can write a header declaration as easily as a
+        // producer can, and only the finished document knows what the operation around it publishes.
+        foreach (IgnoredHeaderAudit::report($doc) as $diagnostic) {
             $diagnostics[] = $diagnostic;
         }
 

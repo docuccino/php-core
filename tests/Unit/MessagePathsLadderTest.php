@@ -29,9 +29,12 @@ it('states what every reason proves, and how far', function (): void {
         // first character — no route signature, template or JSON pointer opens that way.
         'LocalWrapper' => [PathClaim::RunIsAPath, true],
         'WindowsRoot' => [PathClaim::RunIsAPath, true],
-        // A root the ladder recognised says nothing about the run; it says the text in FRONT of it is
-        // a directory this machine was configured from, which is a smaller claim and a surer one.
+        // A root says nothing about the run; it says the text in FRONT of it is a directory this
+        // machine was configured from or named for itself, which is a smaller claim and a surer one.
+        // Both kinds are the same claim at the same strength: a home directory is no less this
+        // machine's than the base path is, and only one of them was ever weighed.
         'RecognisedRoot' => [PathClaim::PrefixIsAMachineWord, true],
+        'MachineRoot' => [PathClaim::PrefixIsAMachineWord, true],
         // Shape cannot tell `/api/users/{user}.json` from a file, so it may only speak unopposed.
         'FileShape' => [PathClaim::RunIsAPath, false],
     ];
@@ -112,6 +115,10 @@ it('rewrites exactly where a claim that stands covers the text it would remove',
             'Could not open file:///app/root/app/X.php', 'Could not open file://app/X.php'],
         ['a directory a recognised root accounts for', 'conclusive', 'none', '/app/root',
             'mkdir(/app/root/storage): Permission denied', 'mkdir(storage): Permission denied'],
+        // The same cell reached by the other root. A directory names no file, so shape says nothing
+        // and this is the only support there is — which is why it was published whole.
+        ['a directory a machine root accounts for', 'conclusive', 'none', '/app/root',
+            'scandir(/machine/home/Library/Caches) failed', 'scandir(Library/Caches) failed'],
 
         // support = conclusive against a suggestive objection: the four ways a brace or a backslash
         // is answered, which is the half that used to take a special case per way past.
@@ -123,6 +130,13 @@ it('rewrites exactly where a claim that stands covers the text it would remove',
             'Could not open /app/root/app/{Support,Http}/*.php', 'Could not open app/{Support,Http}/*.php'],
         ['a root in front of a class name later in the sentence', 'conclusive', 'suggestive', '/app/root',
             'Failed in /app/root/app/X.php on line 3 for App\\Foo', 'Failed in app/X.php on line 3 for App\\Foo'],
+        ['a machine root in front of a brace', 'conclusive', 'suggestive', '/app/root',
+            'Could not open /machine/home/secret/{a,b}/x.php', 'Could not open secret/{a,b}/x.php'],
+        // The application's own root, with a class name after it. The claim covers the path run and
+        // the path run is all a rewrite removes, so demanding it cover the sentence too published the
+        // root whole while the same message without the class reduced.
+        ['a root that IS the run, with a class after it', 'conclusive', 'suggestive', '/app/root',
+            'Analysed files in /app/root for App\\Http\\Kernel', 'Analysed files in  for App\\Http\\Kernel'],
 
         // support = suggestive, nothing objecting. The second row is the whole of what a shallow root
         // still costs nothing: it loses its own claim and the run carries on to shape.
@@ -164,14 +178,25 @@ it('rewrites exactly where a claim that stands covers the text it would remove',
     $predicted = [];
     $cells = [];
 
-    foreach ($rows as [$case, $support, $objection, $base, $message, $answer]) {
-        $out = (new MessagePaths(new RootRelativeSourcePathResolver($base)))->relative($message);
+    // The home is an INPUT, not the host's: a row asserting what `getenv('HOME')` happens to be
+    // asserts a different thing on every machine, and the shallow case (`/root`) would assert the
+    // opposite of the deep one. Every other row's paths sit outside it, so it changes nothing else.
+    $restore = getenv('HOME');
 
-        $published[$case] = $out;
-        $expected[$case] = $answer;
-        $rewrote[$case] = $out !== $message;
-        $predicted[$case] = $authorised($support, $objection);
-        $cells[$support.'/'.$objection] = true;
+    try {
+        putenv('HOME=/machine/home');
+
+        foreach ($rows as [$case, $support, $objection, $base, $message, $answer]) {
+            $out = (new MessagePaths(new RootRelativeSourcePathResolver($base)))->relative($message);
+
+            $published[$case] = $out;
+            $expected[$case] = $answer;
+            $rewrote[$case] = $out !== $message;
+            $predicted[$case] = $authorised($support, $objection);
+            $cells[$support.'/'.$objection] = true;
+        }
+    } finally {
+        putenv($restore === false ? 'HOME' : 'HOME='.$restore);
     }
 
     expect($published)->toBe($expected)
@@ -270,7 +295,7 @@ it('composes out of the two tables and nothing else', function (): void {
     $composition = [
         'rewrite' => ['admits', 'attributed', 'candidates', 'isAPath', 'pathRun', 'resolve', 'rtrim', 'scrub', 'strlen', 'substr'],
         'admits' => ['answered', 'objections'],
-        'answered' => ['characters', 'conclusivelyAPath', 'isConclusive', 'machineWord', 'strcspn', 'substr'],
+        'answered' => ['candidates', 'characters', 'conclusivelyAPath', 'isConclusive', 'machineWord', 'strcspn', 'substr'],
         'isAPath' => ['reasons'],
         'conclusivelyAPath' => ['array_filter', 'isConclusive', 'reasons'],
         'machineWord' => ['array_filter', 'isConclusive', 'objections', 'reasons'],

@@ -392,14 +392,13 @@ final readonly class DocumentConfig
     }
 
     /**
-     * Collapses every definition of one name into the single entry the `tags` array allows.
+     * Collapses every definition of one name into the single entry the `tags` array allows: the
+     * member-wise merge docs/design/uir-and-extensions.md §2 "A contested published slot" describes,
+     * because a tag entry is several independent claims about one tag rather than one statement.
      *
-     * Silence is not a competing claim, so a member only one definition states is carried; a member
-     * two of them state DIFFERENTLY is published by neither, because picking one would publish a
-     * summary or a parent the other definition contradicts and the document would be confidently
-     * wrong rather than merely thin. Reading the first stated value is safe for the same reason —
-     * it is only used once every stated value is known to be equal. Position takes the lowest
-     * weight stated, so the answer is a function of the definitions and not of their order.
+     * Reading the first stated value is safe because it is only reached once every stated value is
+     * known to be equal, and position takes the lowest weight stated, so the answer is a function of
+     * the definitions and not of their order.
      *
      * @param  non-empty-list<array<string, mixed>>  $definitions
      * @return array{entry: TagEntry, weight: int, dropped: list<string>}

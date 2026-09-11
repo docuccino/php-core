@@ -36,12 +36,28 @@ namespace Docuccino\Core\Provenance;
  * Read against the members: a wrapper, a drive and a UNC share prove the run is a path from its first
  * character — nothing a template is spelled with opens that way, since a route signature, a path
  * template and a JSON pointer all start at a `/` or a `#` — so they overrule a brace and the braces in
- * `glob://…/{Support,Http}/*.php` are the shell glob they look like. A root the ladder recognised
- * proves only that the text in FRONT of the objected-to character is a machine word, which is exactly
- * what a strip removes, so it overrules them too without ever admitting a template. Shape proves the
- * weaker claim suggestively, so `/elsewhere/x/Reader.php` reduces while `/api/users/{user}/avatar.png`
- * keeps every character — and a braced POSIX run no root accounted for is published whole, a leak
- * taken knowingly because the other direction is the one that must be impossible.
+ * `glob://…/{Support,Http}/*.php` are the shell glob they look like. A root proves only that the text
+ * in FRONT of the objected-to character is a machine word, which is exactly what a strip removes, so
+ * it overrules them too without ever admitting a template. Shape proves the weaker claim suggestively,
+ * so `/elsewhere/x/Reader.php` reduces while `/api/users/{user}/avatar.png` keeps every character —
+ * and a braced POSIX run no root accounted for is published whole, a leak taken knowingly because the
+ * other direction is the one that must be impossible.
+ *
+ * A root comes from either of two places and they prove the same claim, so both are reasons: the
+ * ladder was CONFIGURED with one ({@see PathReason::RecognisedRoot}), and the process can name others
+ * for ITSELF — the temp directory, the include path, the home directory the build ran out of
+ * ({@see PathReason::MachineRoot}, {@see machineRoots()}). Wiring only the first into the weighing is
+ * what left a directory under `$HOME` with nothing but shape to go on, and shape has nothing to say
+ * about a directory. It also left two readers of one fact disagreeing about what it reduces TO, since
+ * the literal pass strips the prefix while the ladder answers a bare name: the same directory came out
+ * `build/cache` where an objection had refused the run and `cache` where none had. Both roots now
+ * reduce by the same strip, so which reader gets there first no longer decides the bytes.
+ *
+ * That proof says where the text CAME FROM and not what it means, so it buys one over-scrub: an
+ * application whose routes spell this machine's home has them reduced, by both passes. It is the
+ * bought exception to the ranking above and it is taken knowingly, because the depth line is what
+ * would close it and cannot — an ordinary home is two segments (`/home/alice`, `/var/www`), so
+ * refusing one refuses every ordinary machine and every leak comes back.
  *
  * What a reason does NOT prove is a member of its own rather than silence: a wrapper's proof stops at
  * the first character of its tail, since the compression wrappers filter another STREAM and
@@ -56,14 +72,26 @@ namespace Docuccino\Core\Provenance;
  * produce no run at all, so they are not weighed; what is weighed is a run that was produced. And what
  * an objection refuses is the PATH RUN and not the sentence it sits in — a match crosses an interior
  * space, so one routinely spans a template AND the file named after it, and refusing all of it
- * published the file ({@see rewrite()}). How far a run reaches through a space is {@see pathRun()}.
+ * published the file ({@see rewrite()}). How far a run reaches through a space is {@see pathRun()},
+ * and that is the span an objection is ANSWERED over too: no rewrite here removes text past it, so
+ * asking for proof about the sentence carrying on afterwards asks for proof about text nothing would
+ * touch, and the application's own root was published whole whenever a class name followed it.
  *
  * Machine words that no path grammar reaches — the `include_path='…'` tail PHP appends to a failed
- * include, a temp directory — are redacted literally afterwards, by the prefixes this process can
- * name for itself.
+ * include, where the colons make every entry unreadable as a path — are redacted literally afterwards,
+ * by the same prefixes and at a segment boundary, so a root is never a prefix of the longer name
+ * beside it.
  */
 final readonly class MessagePaths
 {
+    /**
+     * The punctuation a path ends at in prose, as a character class body. Two readers spell it: the
+     * matcher, which stops a run here, and {@see redact()}, which will only remove a machine root
+     * standing where a run would have ended — `/opt/php` inside `/opt/phpstan/bin/x` is a longer name
+     * that merely starts the same way, and removing it published `stan/bin/x`, a directory nobody has.
+     */
+    private const DELIMITERS = '\\s\'"(),;:<>';
+
     /**
      * A path body: anything but the punctuation that delimits a path in prose. An interior space is
      * allowed because `$HOME` ordinarily contains one on macOS and Windows; which spaces a reduction may
@@ -77,7 +105,7 @@ final readonly class MessagePaths
      * `/home/alice/ab/Reader.php` reduced to its name. The lookahead admits a colon of its own, so a
      * `10:30:00` segment is crossed rather than stopping at the second one.
      */
-    private const BODY = '(?:[^\\s\'"(),;:<>]| (?=\\S)|:(?=[^\\s\'"(),;<>]*/))';
+    private const BODY = '(?:[^'.self::DELIMITERS.']| (?=\\S)|:(?=[^\\s\'"(),;<>]*/))';
 
     /**
      * Two segments appended to a path to ask the ladder something its answer alone cannot say: did it
@@ -235,10 +263,18 @@ final readonly class MessagePaths
 
     /**
      * Whether a reason covers the text a rewrite would remove despite this objection. Nothing answers
-     * a conclusive one. A suggestive one takes a conclusive reason: for the run entire, or — where the
-     * rewrite is the prefix strip a recognised root buys — for the text in front of the character the
+     * a conclusive one. A suggestive one takes a conclusive reason: for the path run entire, or —
+     * where the rewrite is the prefix strip a root buys — for the text in front of the character the
      * objection is spelled with, since that is all such a strip removes and it is a directory this
-     * machine was configured from whatever the rest of the run turns out to be.
+     * machine was configured from or named for itself whatever the rest turns out to be.
+     *
+     * Which text that is, is {@see candidates()}: a rewrite removes the FIRST of them a root accounts
+     * for, so any one of them being a machine word is a claim covering what would go. Asking only of
+     * the text cut at the objected-to character asked about the longest of them, and a root standing
+     * where the sentence carries on is not under itself — so `Analysed files in <root> for
+     * App\Http\Kernel` published the application's own root whole while `Analysed files in <root>`
+     * reduced. It is not the objection's scope that narrows: a run no root accounts for still keeps
+     * every character, which is what leaves `Unknown route /api/users.json for App\Foo` alone.
      *
      * A run has to answer every objection it trips, so carrying both a brace and a backslash takes a
      * root in front of both.
@@ -249,8 +285,17 @@ final readonly class MessagePaths
             return false;
         }
 
-        return $this->conclusivelyAPath($run)
-            || $this->machineWord(substr($run, 0, strcspn($run, $objection->characters())));
+        if ($this->conclusivelyAPath($run)) {
+            return true;
+        }
+
+        foreach (self::candidates(substr($run, 0, strcspn($run, $objection->characters()))) as $candidate) {
+            if ($this->machineWord($candidate)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -274,10 +319,10 @@ final readonly class MessagePaths
     }
 
     /**
-     * Whether {@see PathClaim::PrefixIsAMachineWord} stands for this text: the ladder recognised a
-     * root, and nothing conclusive denies what that proves. This is the one place the claim is
-     * decided, so the rewrite and the objections in front of it cannot come to disagree about which
-     * roots count.
+     * Whether {@see PathClaim::PrefixIsAMachineWord} stands for this text: a root accounted for it —
+     * the ladder's or one of this process's own — and nothing conclusive denies what that proves.
+     * This is the one place the claim is decided, so the rewrite and the objections in front of it
+     * cannot come to disagree about which roots count.
      *
      * What a shallow root loses is only this claim: the run carries on to shape, so a path that names
      * a file still relativises through the same ladder and `/app/src/Foo.php` is unchanged, while a
@@ -338,6 +383,7 @@ final readonly class MessagePaths
             PathReason::LocalWrapper => self::wrapper($run) !== null,
             PathReason::WindowsRoot => self::windowsRooted($run),
             PathReason::RecognisedRoot => $this->stripped($run) !== null,
+            PathReason::MachineRoot => $this->machineRootOf($run) !== null,
             PathReason::FileShape => self::namesAFile($run),
         };
     }
@@ -349,23 +395,62 @@ final readonly class MessagePaths
             // Shape must not get a second go at a wrapper whose tail is another URL: its last segment
             // names a file (`archive.gz`) exactly as a real path's does.
             PathObjection::NestedScheme => self::opening($run) !== null && self::wrapper($run) === null,
-            PathObjection::ShallowRoot => ! self::deepEnoughForAMachine($this->rootOf($run)),
+            // Every root that accounts for the text, not one of them: the depth that matters is the
+            // depth of whichever root would be stripped, so a deep prefix this process named for
+            // itself is a machine word however shallow the ladder's own root happens to be.
+            PathObjection::ShallowRoot => array_filter($this->rootsOf($run), self::deepEnoughForAMachine(...)) === [],
             PathObjection::Brace => str_contains($run, '{') || str_contains($run, '}'),
             PathObjection::Backslash => str_contains($run, '\\'),
         };
     }
 
     /**
-     * The root the ladder recognised in front of this path, or the empty string where it recognised
-     * none — a depth {@see PathObjection::ShallowRoot} trips on, harmlessly, since
-     * {@see PathReason::RecognisedRoot} does not stand there either.
+     * Every root that accounts for this path: the one the ladder recognised, and the deepest one this
+     * process can name for itself. Empty where neither did, which {@see PathObjection::ShallowRoot}
+     * trips on harmlessly, since no reason stands there either.
+     *
+     * @return list<string>
      */
-    private function rootOf(string $path): string
+    private function rootsOf(string $path): array
     {
+        $roots = [];
         $normalised = rtrim(str_replace('\\', '/', $path), '/');
         $under = $this->stripped($normalised);
 
-        return $under === null ? '' : rtrim(substr($normalised, 0, strlen($normalised) - strlen($under)), '/');
+        if ($under !== null) {
+            $roots[] = rtrim(substr($normalised, 0, strlen($normalised) - strlen($under)), '/');
+        }
+
+        $machine = $this->machineRootOf($path);
+
+        if ($machine !== null) {
+            $roots[] = $machine;
+        }
+
+        return $roots;
+    }
+
+    /**
+     * The deepest prefix this process can name for itself that this path sits under, or null where
+     * none does. {@see machineRoots()} is ordered longest first, so the first hit is the deepest.
+     */
+    private function machineRootOf(string $path): ?string
+    {
+        foreach ($this->machineRoots as $root) {
+            if ($path === $root || str_starts_with($path, $root.'/')) {
+                return $root;
+            }
+        }
+
+        return null;
+    }
+
+    /** The path under the machine root in front of it, or null where none accounts for it. */
+    private function underMachineRoot(string $path): ?string
+    {
+        $root = $this->machineRootOf($path);
+
+        return $root === null ? null : ltrim(substr($path, strlen($root)), '/');
     }
 
     /**
@@ -510,10 +595,15 @@ final readonly class MessagePaths
      * the probe segments IS the prefix strip. That is also the only way to relativise a run that IS the
      * root, where {@see SourcePathResolver::relative()} has nothing left to answer with but the name of
      * the directory the checkout happens to sit in — a different string on every machine.
+     *
+     * A prefix this process named for itself is the same kind of strip and comes second, so a path the
+     * ladder can place is placed against the project before anything else is tried. It is what
+     * {@see redact()} has always published for these roots (`/opt/php/build/cache` → `build/cache`),
+     * said once here so the two readers cannot answer differently for one path.
      */
     private function relativise(string $path): string
     {
-        return $this->stripped($path) ?? $this->paths->relative($path);
+        return $this->stripped($path) ?? $this->underMachineRoot($path) ?? $this->paths->relative($path);
     }
 
     /**
@@ -565,26 +655,40 @@ final readonly class MessagePaths
 
     /**
      * The machine words no path grammar reaches. PHP appends `include_path='.:/opt/…'` to every
-     * failed include, and that tail spells the machine's PHP prefix and patch version; a temp
-     * directory is the same kind of fact. Both are prefixes this process can name for itself, so they
-     * are redacted literally — no matching, and so nothing to mistake for an author's text.
+     * failed include, and the colons in that tail are what stop the matcher reading its entries as
+     * paths at all — so they are removed literally here, by the same prefixes and to the same answer
+     * {@see relativise()} gives, after the pass rather than instead of it.
+     *
+     * At a segment boundary, though: a root is a PREFIX of every longer name that starts the same
+     * way, and removing it unanchored published `stan/bin/x` for `/opt/phpstan/bin/x` and `x` for
+     * `/opt/phpx`. The boundary is the punctuation a path ends at in prose ({@see DELIMITERS}), which
+     * is the one the matcher reads, so a root ending at a separator loses the separator with it and a
+     * root standing bare in the tail loses nothing else.
      */
     private function redact(string $message): string
     {
         foreach ($this->machineRoots as $root) {
-            // Both forms: PHP's failed-include tail names every entry BARE as well as using it as a
-            // prefix. Which prefixes may go at all is decided in {@see machineRoots()}, by the same
-            // depth the ladder's roots answer to.
-            $message = str_replace([$root.'/', $root], '', $message);
+            $message = PublishableText::orRefused(preg_replace(
+                '%'.preg_quote($root, '%').'(?:/|(?![^'.self::DELIMITERS.']))%',
+                '',
+                $message,
+            ));
         }
 
         return $message;
     }
 
-    /** @return list<string> longest first, so a nested root cannot leave the outer one behind */
+    /**
+     * The prefixes this process can prove name the machine it is running on: the temp directory, the
+     * include path, and the home directory the build ran out of. The last is where the leaks were —
+     * a global package cache, an analyser's own state directory and a checkout outside the project
+     * all sit under `$HOME`, and none of them names a file, which is all shape has to go on.
+     *
+     * @return list<string> longest first, so a nested root cannot leave the outer one behind
+     */
     private static function machineRoots(): array
     {
-        $roots = [sys_get_temp_dir()];
+        $roots = [sys_get_temp_dir(), (string) getenv('HOME'), (string) getenv('USERPROFILE')];
 
         foreach (explode(PATH_SEPARATOR, (string) ini_get('include_path')) as $entry) {
             $roots[] = $entry;
@@ -595,8 +699,10 @@ final readonly class MessagePaths
         foreach ($roots as $root) {
             $root = rtrim(str_replace('\\', '/', trim($root)), '/');
 
-            // Redaction is a literal replace with nothing to tell a machine word from a sentence of
-            // ours, so only a prefix deep enough to be one gets in at all.
+            // A one-segment prefix is a word our own sentences spell, and nothing here can tell the
+            // two apart, so only a prefix deep enough to be a machine word gets in at all. A Windows
+            // temp directory or home (`C:/Users/bob`) has no leading slash and so never does: those
+            // runs are proof from their first character already ({@see PathReason::WindowsRoot}).
             if (str_starts_with($root, '/') && self::deepEnoughForAMachine($root)) {
                 $absolute[$root] = strlen($root);
             }

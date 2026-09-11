@@ -6,6 +6,7 @@ namespace Docuccino\Core\Emit\Postman;
 
 use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
+use Docuccino\Core\Document\IgnoredHeaders;
 use Docuccino\Core\Emit\SchemaExampleFactory;
 use Docuccino\Core\Emit\ServerVariables;
 use Docuccino\Core\Support\Arr;
@@ -316,7 +317,7 @@ final readonly class Url
         foreach (self::in($parameters, 'header') as $parameter) {
             $name = self::nameOf($parameter);
 
-            if (Headers::ignoredParameter($name)) {
+            if (IgnoredHeaders::parameter($name)) {
                 continue;
             }
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Docuccino\Core\Contract;
 
 use Docuccino\Core\Diff\Change;
+use Docuccino\Core\Document\IgnoredHeaders;
 use Docuccino\Core\Document\NodeIdentity;
 use Docuccino\Core\Document\PathItem;
 use Docuccino\Core\Document\UirDocument;
@@ -523,6 +524,15 @@ final class ContractIndex
             $in = $definition['in'] ?? null;
 
             if (! is_string($name) || ! is_string($in)) {
+                continue;
+            }
+
+            // A declaration OAS says is not one is not a contract either: checking it would fail a
+            // request over a header the spec tells every conforming reader to ignore, and pass one
+            // that satisfied a parameter no client was ever told to send. The same reading the
+            // emitters act on ({@see IgnoredHeaders}), so one build's artifacts and its checker agree
+            // about what the author declared. `document.ignored-header-declaration` is what says so.
+            if ($in === 'header' && IgnoredHeaders::parameter($name)) {
                 continue;
             }
 

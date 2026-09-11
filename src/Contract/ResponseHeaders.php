@@ -4,13 +4,15 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Contract;
 
+use Docuccino\Core\Document\IgnoredHeaders;
+
 /**
  * The `headers` map of one documented response, read as the {@see ContractParameter}s OAS says header
  * objects are — a parameter without `name` and `in` — so they go through the same coercion and the same
  * {@see SchemaCheck} a request header does.
  *
- * A `Content-Type` entry is dropped: OpenAPI says a response header of that name SHALL be ignored,
- * because `content` is what describes the media type.
+ * A `Content-Type` entry is dropped, and {@see IgnoredHeaders} is the one reading of which names OAS
+ * says are not declarations — the emitter that drops the same entry from a saved example reads it too.
  *
  * The map comes back sorted by name. Every index in this package sorts, for the same reason: an order
  * read off the document's key order would make the order of the violations a response produces a
@@ -39,7 +41,7 @@ final class ResponseHeaders
 
         $out = [];
         foreach ($names as $name) {
-            if (strcasecmp($name, 'Content-Type') === 0) {
+            if (IgnoredHeaders::responseHeader($name)) {
                 continue;
             }
 

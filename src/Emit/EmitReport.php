@@ -26,6 +26,24 @@ final readonly class EmitReport
     }
 
     /**
+     * Whether an emitter reported the artifact is not a valid document of the format it claims.
+     *
+     * An emitter raises an Error only for a defect of OURS, so this is not a question the reader gets
+     * a say over: every command that produces an artifact fails on it below the reach of `--fail-on`,
+     * and this is the one place that says what "fails on it" reads.
+     */
+    public function hasError(): bool
+    {
+        foreach ($this->diagnostics as $diagnostic) {
+            if ($diagnostic->severity === Severity::Error) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * @return list<Diagnostic>
      */
     public function warnings(): array
