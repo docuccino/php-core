@@ -492,6 +492,10 @@ final class ResponseDraft
         return $this->guard;
     }
 
+    /**
+     * @internal Not part of the frozen extension-author surface — an identity is a function of the
+     * assembled document and is stamped on the frozen node, so nothing an extension sees decides one.
+     */
     public function assignId(?string $id): self
     {
         $this->id = $id;

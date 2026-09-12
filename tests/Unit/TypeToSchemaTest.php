@@ -25,8 +25,10 @@ use Docuccino\Core\Inference\DType\UnionT;
 use Docuccino\Core\Inference\DType\UnknownT;
 use Docuccino\Core\Inference\PropertyMetadata;
 use Docuccino\Core\Tests\Fixtures\AttributedNode;
+use Docuccino\Core\Tests\Fixtures\EpochDate;
 use Docuccino\Core\Tests\Fixtures\FullyHiddenNode;
 use Docuccino\Core\Tests\Fixtures\HiddenPropertyNode;
+use Docuccino\Core\Tests\Fixtures\SerialisingDate;
 use Docuccino\Core\Tests\Support\StubTypeEngine;
 
 /**
@@ -233,6 +235,77 @@ it('falls back to the short name and the FQCN for a class carrying neither attri
 
     expect($result->schema)->toBe(['$ref' => '#/components/schemas/Node'])
         ->and($registry->schemaIds())->toBe(['Node' => 'App\\A\\Node']);
+});
+
+/**
+ * A date-time is not an object on the wire, and the class mapper cannot know that: it reflects whatever
+ * the class declares, which for a framework's date class is a hundred-odd calendar fields no response
+ * carries. What this mapper may SAY, though, is bounded by bytes it has read: `JsonSerializable` says a
+ * class states its own JSON form and never which one, so the rows below are the answers that remain —
+ * a form whose bytes are unread, the interface any form may stand behind, and PHP's own object bag.
+ */
+it('widens a date-time whose JSON form it has not read, however that form is declared', function (string $fqcn, string $sends): void {
+    // The pair that settles it: one declaration writing an RFC 3339 string, an identical one writing an
+    // integer, so neither gets a claim — and the rows are the BYTES each encodes to, not the declaration.
+    $result = (new SchemaConverter(DefaultTypeMappers::all(), new StubTypeEngine, new ComponentRegistry))
+        ->toSchema(new ClassT($fqcn));
+
+    $encoded = json_decode(json_encode(new $fqcn('2024-01-01T00:00:00+00:00'), JSON_THROW_ON_ERROR), true, 512, JSON_THROW_ON_ERROR);
+
+    expect($result->schema)->toBe([])
+        ->and($result->confidence)->toBeLessThan(0.5)
+        ->and(get_debug_type($encoded))->toBe($sends);
+})->with([
+    'an RFC 3339 string' => [SerialisingDate::class, 'string'],
+    'a unix integer' => [EpochDate::class, 'int'],
+]);
+
+it('widens the bare interface, whose value may be any of them', function (): void {
+    // PHP's own class, a Carbon, and the two fixtures above all satisfy `DateTimeInterface` and send an
+    // object, a string and an integer respectively. `type: object` was true for exactly one of them.
+    $registry = new ComponentRegistry;
+    $result = (new SchemaConverter(DefaultTypeMappers::all(), new StubTypeEngine, $registry))
+        ->toSchema(new ClassT(DateTimeInterface::class));
+
+    expect($result->schema)->toBe([])
+        ->and($registry->schemas())->toBe([]);
+});
+
+it('leaves a date-time that states no JSON form to the class mapper, which is what it sends', function (): void {
+    // The half of the domain nothing overrides: PHP writes its own date classes as their internal bag,
+    // so the bare object the class mapper degrades to is the true answer and a string would be a new
+    // false one.
+    $result = (new SchemaConverter(DefaultTypeMappers::all(), new StubTypeEngine, new ComponentRegistry))
+        ->toSchema(new ClassT(DateTimeImmutable::class));
+
+    expect($result->schema)->toBe(['type' => 'object']);
+
+    $written = json_decode(json_encode(new DateTimeImmutable('2024-01-01T00:00:00+00:00'), JSON_THROW_ON_ERROR), true, 512, JSON_THROW_ON_ERROR);
+    expect($written)->toBeArray()->toHaveKeys(['date', 'timezone_type', 'timezone']);
+});
+
+it('answers for a date-time wherever one appears, class members included', function (): void {
+    // The sweep the defect is: a date-time reaches the converter as a model column, a DTO property, an
+    // accessor's return type and a union arm, and one mapper answers for all of them — here widened, so
+    // no member is left to hoist into a calendar object. The Carbon half is in the adapter's suite.
+    $engine = new StubTypeEngine(classes: [
+        'App\Data\Audit' => new ClassMetadata('App\Data\Audit', [
+            new PropertyMetadata('at', new ClassT(SerialisingDate::class)),
+            new PropertyMetadata('until', UnionT::of([new ClassT(SerialisingDate::class), new NullT])),
+        ]),
+    ]);
+
+    $registry = new ComponentRegistry;
+    (new SchemaConverter(DefaultTypeMappers::all(), $engine, $registry))->toSchema(new ClassT('App\Data\Audit'));
+
+    // The nullable arm keeps its `anyOf`, which is what makes the widening visible: an unconstrained
+    // branch beside a typed one is what `lint.vacuous-union` reports, so the author is told where to pin
+    // a shape rather than left reading a silently emptied schema.
+    expect($registry->schemas())->toHaveCount(1)
+        ->and($registry->schemas()['Audit']['properties'])->toBe([
+            'at' => [],
+            'until' => ['anyOf' => [[], ['type' => 'null']]],
+        ]);
 });
 
 it('degrades an unexpandable class to a bare object at low confidence', function (): void {

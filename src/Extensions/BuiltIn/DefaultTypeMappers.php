@@ -7,9 +7,10 @@ namespace Docuccino\Core\Extensions\BuiltIn;
 use Docuccino\Core\Extensions\Contracts\TypeToSchema;
 
 /**
- * The default, kind-disjoint {@see TypeToSchema} chain covering the whole closed DType set. The
- * terminal {@see UnknownTypeToSchema} is registered last so a specific mapper always wins first;
- * user mappers slot ahead of these via `#[ExtensionOrder(before: …)]`.
+ * The default {@see TypeToSchema} chain covering the whole closed DType set, one mapper per kind bar
+ * the date-time one, which claims the slice of `ClassT` that is not an object on the wire and so is
+ * listed ahead of the class mapper. The terminal {@see UnknownTypeToSchema} is registered last so a
+ * specific mapper always wins first; user mappers slot ahead of these via `#[ExtensionOrder(before: …)]`.
  */
 final class DefaultTypeMappers
 {
@@ -28,6 +29,7 @@ final class DefaultTypeMappers
             new UnionTypeToSchema,
             new IntersectionTypeToSchema,
             new NullTypeToSchema,
+            new DateTimeTypeToSchema,
             new ClassTypeToSchema,
             new UnknownTypeToSchema,
         ];

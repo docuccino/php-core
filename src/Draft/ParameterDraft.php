@@ -115,6 +115,10 @@ final class ParameterDraft
         return $this->guard;
     }
 
+    /**
+     * @internal Not part of the frozen extension-author surface — an identity is a function of the
+     * assembled document and is stamped on the frozen node, so nothing an extension sees decides one.
+     */
     public function assignId(?string $id): self
     {
         $this->id = $id;
@@ -160,12 +164,29 @@ final class ParameterDraft
         // the explicit unconstrained {} — dropping the member would make the document invalid, not vague.
         // Only a parameter stating its shape elsewhere ($ref/content) legitimately carries no schema.
         $schema = $this->schema->freeze();
+
+        // A deepObject container whose schema requires a member — at any depth — is itself required:
+        // the member has no parameter of its own under that representation, so an optional container
+        // would tell a consumer that a request omitting a value the server demands is valid. The
+        // derivation carries the authority of whoever stated the requirement rather than outranking
+        // everyone, so a `required: false` stated strictly above it still stands.
+        $requirement = $this->schema->memberRequirement();
+        $stated = $this->guard->contributions()['required']['by'] ?? null;
+        $derived = [];
+
+        if ($requirement !== null && ($resolved['style'] ?? null) === 'deepObject'
+            && ! ($stated !== null && $stated->outranks($requirement))) {
+            $required = true;
+            // Provenance names whoever required the member, not the producer just replaced.
+            $derived['required'] = $requirement;
+        }
+
         $statesShapeElsewhere = isset($resolved['content']) || isset($resolved['$ref']);
         $schemaOrNull = $schema->toArray() === [] && $statesShapeElsewhere ? null : $schema;
 
         $docuccino = new NodeExtension(
             id: $this->id,
-            provenance: $this->guard->provenance(),
+            provenance: $this->guard->provenance($derived, array_keys($derived)),
             rest: $this->facts === [] ? [] : ['facts' => $this->facts],
         );
 

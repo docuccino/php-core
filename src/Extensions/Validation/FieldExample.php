@@ -212,8 +212,8 @@ final class FieldExample
      * A configured sample is checked HERE rather than left to the gate in {@see attach()}, because the
      * gate can only drop — and dropping would leave the setting looking inert on a field where the
      * built-in sample would have published fine. So a rejected sample is named, and the built-in one is
-     * published in its place; where the format has no built-in sample there is nothing to fall back to,
-     * and the honest answer is no example.
+     * used in its place; where the format has no built-in sample there is nothing to fall back to, and
+     * the honest answer is no example.
      *
      * @param  array<string, mixed>  $keywords
      * @param  list<Diagnostic>  $diagnostics
@@ -242,8 +242,8 @@ final class FieldExample
                 $path === '' ? 'the field' : sprintf('field "%s"', $path),
                 $rejection,
                 $default === null
-                    ? 'The format has no built-in sample to fall back on, so the field publishes none.'
-                    : sprintf('The built-in sample (%s) is published instead.', json_encode($default)),
+                    ? 'The format has no built-in sample to fall back on, so this field takes no example from the setting.'
+                    : sprintf('The built-in sample (%s) is used in its place.', json_encode($default)),
             ),
             help: sprintf(
                 'Set representation.examples.formats.%s to a value every field carrying that format accepts, or drop the key.',

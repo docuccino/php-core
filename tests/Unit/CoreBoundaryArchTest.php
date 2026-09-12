@@ -13,6 +13,12 @@ declare(strict_types=1);
  * the build.
  */
 use Docuccino\Core\Contract\ContractIndex;
+use Docuccino\Core\Draft\DeprecationNote;
+use Docuccino\Core\Draft\DescriptionAppender;
+use Docuccino\Core\Draft\OperationDraft;
+use Docuccino\Core\Draft\ParameterDraft;
+use Docuccino\Core\Draft\ResponseDraft;
+use Docuccino\Core\Draft\SchemaDraft;
 use Docuccino\Core\Extensions\Validation\ValidationField;
 use Docuccino\Core\Tests\Fixtures\Boundary\DocblockLeakProbe;
 use Docuccino\Core\TypeGrammar\ImportContext;
@@ -188,8 +194,8 @@ function coreInternalLeaks(array $classes): array
 
 /**
  * The frozen public surface: the extension-author contracts plus the two context objects an extension is
- * passed, the DType hierarchy those contracts take and hand back, and the contract-testing surface an
- * adapter's assertions are built on.
+ * passed, the DType hierarchy those contracts take and hand back, the DRAFTS an extension writes
+ * through, and the contract-testing surface an adapter's assertions are built on.
  *
  * @return list<class-string>
  */
@@ -204,7 +210,11 @@ function corePublicSurface(): array
     // caller reads off a result, the coverage and example reports. And everything under Inference/ on
     // the same terms — the DType hierarchy is what a TypeToSchema mapper is handed and matches on, and
     // ArgumentSlots is where a reader finds a call's arguments, so both freeze at v1 as the contracts do.
-    foreach (['Contract', 'Inference'] as $root) {
+    // Draft/ joins them for the same reason: `handle()` takes an OperationDraft, so the drafts are the
+    // objects an extension spends its whole life in, and a member of one handing back an internal type
+    // is a dependency an import scan cannot see. Their `@internal` members — the ones that freeze a node
+    // or move it about — are skipped by the sweep below, exactly as a marked member anywhere else is.
+    foreach (['Contract', 'Inference', 'Draft'] as $root) {
         foreach ((array) glob(__DIR__.'/../../src/'.$root.'/{,*/}*.php', GLOB_BRACE) as $file) {
             $directory = basename(dirname((string) $file));
             $class = 'Docuccino\Core\\'.$root.'\\'
@@ -231,6 +241,9 @@ it('never hands a public API consumer a type marked @internal', function (): voi
         'Docuccino\Core\Contract\Coverage\CoverageReport',
         'Docuccino\Core\Inference\ArgumentSlots',
         'Docuccino\Core\Inference\DType\DType',
+        // One per root, so a glob that stopped matching one of the three is a failure rather than a
+        // surface that quietly shrank to the other two.
+        'Docuccino\Core\Draft\SchemaDraft',
     );
 
     // One expectation per name, because `not->toContain(a, b)` passes the moment ONE of them is
@@ -244,6 +257,8 @@ it('never hands a public API consumer a type marked @internal', function (): voi
         'Docuccino\Core\Contract\ParameterSchema',
         'Docuccino\Core\Contract\ParameterSchemaKind',
         'Docuccino\Core\Inference\LocalWrites',
+        // The keyword model the drafts reason WITH rather than hand out.
+        'Docuccino\Core\Draft\SchemaKeywords',
     ] as $marked) {
         expect($surface)->not->toContain($marked);
     }
@@ -399,6 +414,130 @@ it('freezes the rule-transformer field façade at the methods it means to promis
         'sibling',
         'types',
     ]);
+});
+
+/**
+ * The same freeze over the drafts an extension WRITES THROUGH. Every extension is handed an
+ * `OperationDraft` and reaches the rest off it, so each public method here is a v1 promise the moment it
+ * ships, and one made by accident is paid for by an extension author rather than by us: the split
+ * between what an extension may do and what the pipeline does for itself is carried by nothing but the
+ * `@internal` markers on `freeze()`, `guard()`, `absorb()` and `isSupersededBy()`, and a marker dropped
+ * by accident is a promise made by accident.
+ *
+ * The lists are the DECISION and reflection is the source of truth, so a row is defended rather than
+ * transcribed: a method with no caller outside `Draft/` is `@internal` until something needs it, which
+ * is why the identity setters are not here. `__construct` is left out for the same reason the façade
+ * freeze above leaves it out — constructing a draft is core's job. Every class under `Draft/` that is
+ * not itself `@internal` owes a row, so a new draft cannot join the surface without one.
+ */
+it('freezes the drafts an extension writes through at the methods they mean to promise', function (): void {
+    $promised = [
+        DeprecationNote::class => ['marks', 'paragraph'],
+        DescriptionAppender::class => ['append', 'joined'],
+        OperationDraft::class => [
+            'declareRequestBodyDescription',
+            'declareRequestBodyExamples',
+            'hasParameter',
+            'hasResponse',
+            'parameter',
+            'parameterKeys',
+            'producerFor',
+            'producersFor',
+            'removeParameter',
+            'removeResponse',
+            'resolvedField',
+            'response',
+            'responseStatuses',
+            'set',
+            'setDeprecated',
+            'setDescription',
+            'setOperationId',
+            'setSecurity',
+            'setSummary',
+            'setTags',
+            'supersedeStatusRange',
+        ],
+        ParameterDraft::class => [
+            'declareExamples',
+            'key',
+            'keyFor',
+            'producerFor',
+            'resolvedField',
+            'schema',
+            'set',
+            'setDeprecated',
+            'setDescription',
+            'setDocuccinoFact',
+            'setRequired',
+        ],
+        ResponseDraft::class => [
+            'claimComponentName',
+            'componentClaim',
+            // Read by exception-to-response mappers outside core, which pair them with the writes below.
+            'componentClaimIsStatusDefault',
+            'componentClaimNamesResponse',
+            'content',
+            'declareExamples',
+            'examplePlaceholders',
+            'hasContent',
+            'illustrateExamples',
+            'isBodyless',
+            'primaryMediaType',
+            'producerFor',
+            'recordStatusPlacement',
+            'resolvedField',
+            'set',
+            'setDescription',
+            'setExample',
+            'setRef',
+            'statusIsUnplaced',
+            'supersedeMediaRange',
+        ],
+        SchemaDraft::class => [
+            'assignMock',
+            'declareShape',
+            'hasProperty',
+            'producerFor',
+            'property',
+            // The read a producer whose diagnostic is about the OUTCOME needs, and one a third party
+            // reporting on its own facts has no other way to make.
+            'saysNothingAboutTheInstance',
+            'resolvedField',
+            'set',
+        ],
+    ];
+
+    foreach ($promised as $class => $methods) {
+        $public = [];
+        foreach ((new ReflectionClass($class))->getMethods(ReflectionMethod::IS_PUBLIC) as $method) {
+            if ($method->getName() !== '__construct' && ! str_contains((string) $method->getDocComment(), '@internal')) {
+                $public[] = $method->getName();
+            }
+        }
+
+        sort($public);
+        $expected = $methods;
+        sort($expected);
+
+        expect($public)->toBe($expected, $class.' promises exactly what its row says');
+    }
+
+    // The denominator: every draft class that is not itself `@internal`, read off disk rather than
+    // assumed, so a new one has to be decided about rather than shipping unlisted.
+    $classes = [];
+    foreach ((array) glob(__DIR__.'/../../src/Draft/*.php') as $file) {
+        $class = 'Docuccino\\Core\\Draft\\'.basename((string) $file, '.php');
+
+        if (! str_contains((string) (new ReflectionClass($class))->getDocComment(), '@internal')) {
+            $classes[] = $class;
+        }
+    }
+
+    sort($classes);
+    $listed = array_keys($promised);
+    sort($listed);
+
+    expect($classes)->toBe($listed);
 });
 
 /**

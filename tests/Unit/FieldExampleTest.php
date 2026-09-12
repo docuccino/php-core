@@ -379,14 +379,14 @@ it('falls back to the built-in sample and says so when a configured one fails th
         ->and($conversion->diagnostics[0]->severity)->toBe(Severity::Warning)
         ->and($conversion->diagnostics[0]->code)->toBe('config.format-sample-rejected')
         ->and($conversion->diagnostics[0]->message)->toBe(
-            'The example configured for format "email" ("jane.doe+billing@example.com") does not satisfy the rules on field "f": maxLength. The built-in sample ("user@example.com") is published instead.',
+            'The example configured for format "email" ("jane.doe+billing@example.com") does not satisfy the rules on field "f": maxLength. The built-in sample ("user@example.com") is used in its place.',
         )
         ->and($conversion->diagnostics[0]->help)->toBe(
             'Set representation.examples.formats.email to a value every field carrying that format accepts, or drop the key.',
         );
 });
 
-it('publishes no example where the rejected format had no built-in sample to fall back on', function (): void {
+it('illustrates the field with nothing where the rejected format had no built-in sample to fall back on', function (): void {
     $policy = RepresentationPolicy::fromConfig(['examples' => ['formats' => ['iban' => 'GB33BUKB20201555555555']]]);
     // A `pattern` is what pins this field, so no length bound earns a filler prefix either: nothing is
     // published, which is the honest answer when both the configured sample and the fallback are gone.
@@ -395,7 +395,7 @@ it('publishes no example where the rejected format had no built-in sample to fal
     expect($conversion->schema['properties']['f'] ?? [])->not->toHaveKey('example')
         ->and($conversion->diagnostics)->toHaveCount(1)
         ->and($conversion->diagnostics[0]->message)->toBe(
-            'The example configured for format "iban" ("GB33BUKB20201555555555") does not satisfy the rules on field "f": pattern. The format has no built-in sample to fall back on, so the field publishes none.',
+            'The example configured for format "iban" ("GB33BUKB20201555555555") does not satisfy the rules on field "f": pattern. The format has no built-in sample to fall back on, so this field takes no example from the setting.',
         );
 });
 

@@ -73,3 +73,80 @@ it('says whether one path names another or something inside it', function (strin
     // field called `a.b` — so the second is not inside the first, however the characters line up.
     'a trailing backslash is part of a name, not the start of an escape' => ['a\.b', 'a\\', false],
 ]);
+
+/*
+ * The bracketed spelling, written and read back. `toQueryName()` mints the names every producer of a
+ * deepObject member publishes and `fromQueryName()` is what a declaration is matched against, so a
+ * name the write produces and the read does not recognise is a member an author cannot address — and a
+ * name the read accepts that the write never produces is a declaration landing on a field nobody
+ * asked about. Every segment shape with a character the two grammars argue over is a row.
+ */
+it('reads back exactly the bracketed name it wrote', function (array $segments, string $name): void {
+    expect(FieldPath::toQueryName($segments))->toBe($name)
+        ->and(FieldPath::fromQueryName($name))->toBe($segments);
+})->with([
+    'a top-level name is its own spelling' => [['filter'], 'filter'],
+    'one member rides as brackets' => [['filter', 'status'], 'filter[status]'],
+    'every depth rides as its own brackets' => [['filter', 'window', 'from'], 'filter[window][from]'],
+    // The wire has no escape, and reads an inner `[` as part of the member's name:
+    // `?filter[a[b]=x` sets the `a[b` key of `filter`. So this is one member, not two.
+    'an opening bracket inside a member is the member’s own' => [['filter', 'a[b'], 'filter[a[b]'],
+    // The path grammar would fold these; the wire spelling has no separator to confuse them with.
+    'a dot inside a member needs no escaping here' => [['filter', 'a.b'], 'filter[a.b]'],
+    'a backslash inside a member is a character' => [['filter', 'a\b'], 'filter[a\b]'],
+    'a member ending in a backslash' => [['filter', 'a\\'], 'filter[a\\]'],
+    'a wildcard is a member name like any other' => [['items', '*', 'id'], 'items[*][id]'],
+]);
+
+/*
+ * The one asymmetry, stated rather than left to be discovered: the wire spelling carries no escape, so
+ * a member whose name holds a `]` closes its own group early and there is no name that means it. The
+ * write still produces something — the member is listed for a reader who wants to see it — and the
+ * read refuses it, which is the honest end: a declaration naming it reaches nothing and is reported,
+ * instead of removing whichever member the string happened to be re-parsed into.
+ */
+it('writes a member holding a closing bracket and refuses to read it back', function (): void {
+    $name = FieldPath::toQueryName(['filter', 'a]b']);
+
+    expect($name)->toBe('filter[a]b]')
+        ->and(FieldPath::fromQueryName($name))->toBeNull();
+});
+
+it('refuses a bracketed name the write does not produce', function (string $name): void {
+    expect(FieldPath::fromQueryName($name))->toBeNull()
+        ->and(FieldPath::queryNameAsPath($name))->toBeNull();
+})->with([
+    // Unbalanced: on the wire `?filter[opaque=x` sets a top-level `filter_opaque`, so this names no
+    // member of `filter` at all — reading it as one removes a field the author never mentioned.
+    'an unterminated member' => ['filter[opaque'],
+    'an unterminated member below one that closed' => ['filter[window][from'],
+    'a closing bracket with nothing open' => ['filter]status]'],
+    // Text after the last `]` is not a segment and has no spelling of its own.
+    'text after the last bracket' => ['filter[a]b]'],
+    // An empty member name is an array append on the wire, not a named member.
+    'an empty member' => ['filter[]'],
+    'an empty container name' => ['[status]'],
+    'nothing at all' => [''],
+]);
+
+/*
+ * The same reading spelled in the path grammar, which is what a declaration is compared with a
+ * validation rule key through. It is narrower than the bracketed reading on purpose: a member ending
+ * in a backslash has no spelling here, because the path reader would take that backslash as escaping
+ * the separator after it and answer about a different field.
+ */
+it('spells a bracketed name as the path the rule keys are keyed by', function (string $name, ?string $path): void {
+    expect(FieldPath::queryNameAsPath($name))->toBe($path);
+})->with([
+    'a top-level name' => ['filter', 'filter'],
+    'one member' => ['filter[status]', 'filter.status'],
+    'every depth' => ['filter[window][from]', 'filter.window.from'],
+    // The dot is the member's own, so it comes back escaped — `filter.a\.b` is the field `a.b` inside
+    // `filter`, which is a different rule key from `filter.a.b`.
+    'a dot inside a member is escaped' => ['filter[a.b]', 'filter.a\.b'],
+    'a bracket inside a member survives' => ['filter[a[b]', 'filter.a[b'],
+    'a backslash inside a member survives' => ['filter[a\b]', 'filter.a\b'],
+    'a trailing backslash on the LAST member is safe' => ['filter[a\\]', 'filter.a\\'],
+    // `filter.a\.b` would read back as the single field `a.b` inside `filter`, not as `b` inside `a\`.
+    'a member ending in a backslash before another has no spelling' => ['filter[a\][b]', null],
+]);

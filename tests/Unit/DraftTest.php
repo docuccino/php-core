@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Docuccino\Core\Draft\OperationDraft;
 use Docuccino\Core\Draft\ResponseDraft;
 use Docuccino\Core\Draft\SchemaDraft;
+use Docuccino\Core\Draft\SchemaKeywords;
 use Docuccino\Core\Extensions\Validation\ResponseDraftApplier;
 use Docuccino\Core\Patch\Contribution;
 use Docuccino\Core\Patch\PatchResult;
@@ -638,4 +639,55 @@ it('leaves a request body it cannot make sense of as it found it', function (): 
     $draft->declareRequestBodyDescription('Send every field.');
 
     expect($draft->freeze()->rest['requestBody'])->toBe('nonsense');
+});
+
+/**
+ * The schema-level reading of {@see SchemaKeywords::saysNothingAboutTheInstance()}: what a producer asks
+ * when its claim is about the OUTCOME rather than about its own write, since a layer behind it may have
+ * typed the same node. The annotation half reads the model's own set, so a keyword joining it is covered
+ * without this list being edited.
+ */
+it('reads a draft carrying nothing but annotations as saying nothing about the instance', function (): void {
+    expect((new SchemaDraft)->saysNothingAboutTheInstance())->toBeTrue();
+
+    $speaking = [];
+    foreach (SchemaKeywords::annotations() as $keyword) {
+        $draft = new SchemaDraft;
+        $draft->set($keyword, 'anything', Contribution::integration('test'));
+
+        if (! $draft->saysNothingAboutTheInstance()) {
+            $speaking[] = $keyword;
+        }
+    }
+
+    // Anti-vacuity: a set that stopped listing anything would pass the loop above saying nothing.
+    expect($speaking)->toBe([])
+        ->and(SchemaKeywords::annotations())->not->toBeEmpty();
+});
+
+it('reads anything that shapes or constrains the value as saying something', function (string $keyword, mixed $value): void {
+    $draft = new SchemaDraft;
+    $draft->set($keyword, $value, Contribution::integration('test'));
+
+    expect($draft->saysNothingAboutTheInstance())->toBeFalse();
+})->with([
+    'a type' => ['type', 'string'],
+    'a $ref, whose component carries the shape' => ['$ref', '#/components/schemas/Thing'],
+    'a value domain' => ['enum', ['a', 'b']],
+    'a refinement of a type nobody stated' => ['format', 'uuid'],
+    // A keyword the model cannot classify is not read as silence — the same conservatism that keeps a
+    // declared shape from retracting what it cannot read.
+    'a vendor extension' => ['x-vendor-hint', 'anything'],
+]);
+
+it('reads a nested property as saying something, and a retracted keyword as saying nothing', function (): void {
+    $withProperty = new SchemaDraft;
+    $withProperty->property('id');
+
+    $retracted = new SchemaDraft;
+    $retracted->set('type', 'string', Contribution::inference());
+    $retracted->set('type', Remove::value(), Contribution::overlay());
+
+    expect($withProperty->saysNothingAboutTheInstance())->toBeFalse()
+        ->and($retracted->saysNothingAboutTheInstance())->toBeTrue();
 });
