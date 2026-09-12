@@ -7,6 +7,14 @@ User-facing changes to `docuccino/core` — features, fixes, performance work an
 taken from the commit messages scoped `core`. Entries begin after v0.1.2; older history is in
 the [repository](https://github.com/docuccino/docuccino) git log.
 
+## v0.18.1
+
+### Bug fixes
+
+- reach every required member of a deepObject container ([#492](https://github.com/docuccino/docuccino/pull/492))
+- claim a date-time format only where the bytes were read ([#491](https://github.com/docuccino/docuccino/pull/491))
+- publish a date-time as the string it sends, not the object it is ([#485](https://github.com/docuccino/docuccino/pull/485))
+
 ## v0.17.0
 
 ### Breaking changes
