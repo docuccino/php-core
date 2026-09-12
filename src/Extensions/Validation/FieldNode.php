@@ -64,6 +64,20 @@ final class FieldNode
 
     public ?FieldNode $items = null;
 
+    /**
+     * A `$ref` to a shared component this field publishes INSTEAD of restating the component's own
+     * shape — set when a rule recovered the very class a component was minted from.
+     *
+     * Kept beside {@see $keywords} rather than in them because the two answer different questions: the
+     * keywords still carry the `type` the rule settled, so the type-aware constraint rules that run
+     * after it read the same answer they always did, while {@see build()} publishes the reference and
+     * leaves that type to the component. Publishing both would be a contradiction the moment the field
+     * is nullable — `type: string` beside an `anyOf` branch of `type: null` admits no value at all.
+     *
+     * @var array<string, string>|null
+     */
+    public ?array $reference = null;
+
     /** The object property child of the given name, created on first access (order-preserving). */
     public function child(string $name): self
     {
@@ -101,7 +115,13 @@ final class FieldNode
      */
     public function build(RepresentationPolicy $policy): array
     {
-        $schema = $this->keywords;
+        $schema = $this->reference === null
+            ? $this->keywords
+            // The component states the value's type and its value set; restating either here would say
+            // one fact in two places, and they can only ever drift apart. Every other keyword a rule
+            // settled — an example, a description, a bound — is a fact ABOUT this field's use of it and
+            // rides alongside, which is what a `$ref` with siblings is for.
+            : [...$this->reference, ...array_diff_key($this->keywords, ['type' => true, 'enum' => true])];
 
         if ($this->properties !== []) {
             $schema['type'] ??= 'object';
@@ -143,6 +163,16 @@ final class FieldNode
      */
     private static function applyNullable(array $schema, RepresentationPolicy $policy): array
     {
+        // A `$ref` cannot carry `null` — a type array beside it constrains the reference rather than
+        // widening it — so it composes under BOTH nullable policies, which is the same shape the type
+        // chain publishes for a nullable enum property.
+        if (isset($schema['$ref'])) {
+            $reference = ['$ref' => $schema['$ref']];
+            unset($schema['$ref']);
+
+            return ['anyOf' => [$reference, ['type' => 'null']]] + $schema;
+        }
+
         $types = self::typeWords($schema['type'] ?? null);
 
         if ($types === []) {

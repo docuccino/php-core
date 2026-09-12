@@ -390,6 +390,10 @@ it('freezes the rule-transformer field façade at the methods it means to promis
         'proposeExample',
         'remove',
         'set',
+        // The counterpart of the converter's own `reference()`, which is already public: without it a
+        // third-party transformer can mint a component and then have no way to publish a field AS one,
+        // which is a capability we would be keeping for ourselves.
+        'setReference',
         'setType',
         'setTypes',
         'sibling',

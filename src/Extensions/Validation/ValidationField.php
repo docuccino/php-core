@@ -62,6 +62,19 @@ final readonly class ValidationField
         return FieldNode::typeWords($this->node->keywords['type'] ?? null);
     }
 
+    /**
+     * Publish a `$ref` to a shared component for this field, instead of a restatement of what that
+     * component already says. The reference is what a reader and a code generator both want: one named
+     * type, used in the request body and the response that shares it, rather than two anonymous copies
+     * of one value set.
+     *
+     * @param  array<string, string>  $reference  a single-member `$ref` array, as the converter mints it
+     */
+    public function setReference(array $reference): void
+    {
+        $this->node->reference = $reference;
+    }
+
     public function set(string $keyword, mixed $value): void
     {
         $this->node->keywords[$keyword] = $value;

@@ -9,13 +9,12 @@ use Docuccino\Core\Extensions\Contracts\TypeToSchema;
 use Docuccino\Core\Extensions\Ordering\ExtensionOrder;
 use Docuccino\Core\Extensions\Ordering\Priorities;
 use Docuccino\Core\Extensions\Schema\ComponentRegistry;
+use Docuccino\Core\Extensions\Schema\EnumComponent;
 use Docuccino\Core\Extensions\Schema\EnumDecoration;
 use Docuccino\Core\Extensions\Schema\EnumReflection;
-use Docuccino\Core\Extensions\Schema\SchemaIdentity;
 use Docuccino\Core\Extensions\Schema\SchemaResult;
 use Docuccino\Core\Inference\DType\DType;
 use Docuccino\Core\Inference\DType\EnumT;
-use Docuccino\Core\Support\Fqcn;
 
 /**
  * A reflection-rich enum → schema mapper that supersedes the case-names-only {@see EnumTypeToSchema}
@@ -25,7 +24,7 @@ use Docuccino\Core\Support\Fqcn;
  * the plainer mapper. All framework-neutral, hence a core built-in.
  *
  * Under `enums.components` (default on) a reflectable enum hoists to a named component via
- * {@see SchemaIdentity} + the {@see ComponentRegistry}, deduped by FQCN identity — so one enum is one
+ * {@see EnumComponent} + the {@see ComponentRegistry}, deduped by FQCN identity — so one enum is one
  * described schema shared by every property and query-parameter item using it. Making a `$ref`
  * nullable is {@see UnionTypeToSchema}'s job: a `$ref` can't carry `type: [x, null]`, so it becomes
  * `anyOf: [{$ref}, {type: null}]` under both nullable policies.
@@ -63,15 +62,15 @@ final class EnumSchema implements TypeToSchema
 
         $allInt = $values === array_filter($values, 'is_int');
 
-        $schema = [
-            'type' => $allInt ? 'integer' : 'string',
-            'enum' => $allInt ? $values : array_map(strval(...), $values),
-        ];
-
         // Case names ride as codegen name hints alongside — never replacing — the value-bearing
-        // `enum` member; descriptions in the shapes tools consume. One rulebook: EnumDecoration.
-        $schema = EnumDecoration::apply(
-            $schema,
+        // `enum` member; descriptions in the shapes tools consume. One rulebook: EnumDecoration, via
+        // {@see EnumComponent} wherever the class is reflectable, so the body a validation rule
+        // publishes for one enum and the body this publishes are the same body.
+        $schema = EnumComponent::body($type->fqcn, $context) ?? EnumDecoration::apply(
+            [
+                'type' => $allInt ? 'integer' : 'string',
+                'enum' => $allInt ? $values : array_map(strval(...), $values),
+            ],
             $context->representation()->enumNaming,
             $type->cases,
             EnumReflection::descriptions($type->fqcn),
@@ -79,11 +78,8 @@ final class EnumSchema implements TypeToSchema
 
         // Only a reflectable enum hoists — an un-autoloadable one has no honest name or identity to
         // pin, so it stays inline, as does everything when the policy is off.
-        if ($context->representation()->enumComponents && enum_exists($type->fqcn)) {
-            $name = SchemaIdentity::name($type->fqcn) ?? Fqcn::short($type->fqcn);
-            $id = SchemaIdentity::publishedId($type->fqcn);
-
-            return new SchemaResult($context->reference($name, $schema, $id), 0.95);
+        if (EnumComponent::hoists($type->fqcn, $context)) {
+            return new SchemaResult(EnumComponent::reference($type->fqcn, $schema, $context), 0.95);
         }
 
         return new SchemaResult($schema, 0.95);
