@@ -474,6 +474,7 @@ it('freezes the drafts an extension writes through at the methods they mean to p
             'claimComponentName',
             'componentClaim',
             // Read by exception-to-response mappers outside core, which pair them with the writes below.
+            'componentClaimDescription',
             'componentClaimIsStatusDefault',
             'componentClaimNamesResponse',
             'content',

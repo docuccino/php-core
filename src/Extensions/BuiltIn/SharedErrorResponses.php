@@ -46,7 +46,9 @@ use Docuccino\Core\Support\Json;
  * @phpstan-type Prose array<string, string>
  * @phpstan-type ProseVotes array<string, array{prose: Prose, count: int}>
  * @phpstan-type Filled array<string, array<string, list<string>>>
- * @phpstan-type Occurrence array{scope: string, group: string, base: string, body: array<array-key, mixed>, illustrations: Illustrations, filled: Filled, claimed: Claimed, prose: ProseVotes, count: int, rejected: array<string, array{string, string|null}>}
+ * @phpstan-type Site array{list<array-key>, array<array-key, mixed>, string|null, string|null}
+ * @phpstan-type Sites list<Site>
+ * @phpstan-type Occurrence array{scope: string, group: string, base: string, body: array<array-key, mixed>, illustrations: Illustrations, filled: Filled, claimed: Claimed, prose: ProseVotes, described: array<string, string>, count: int, rejected: array<string, array{string, string|null}>}
  */
 final class SharedErrorResponses implements DocumentTransformer
 {
@@ -150,8 +152,11 @@ final class SharedErrorResponses implements DocumentTransformer
 
         $identity = new IdentityGenerator;
         [$names, $schemas, $contests] = self::mint($shapes, $existing, static fn (array $occurrence): array => [
+            // Minted from the body alone, so the id follows the dedupe key: a sentence added beside the
+            // shape describes the same type, and a component a diff reads as REPLACED rather than changed
+            // is a breaking change nobody made.
             self::PROVENANCE => ['id' => $identity->publishedSchemaId($occurrence['scope'], Arr::stringKeyed($occurrence['body']))],
-        ] + $occurrence['body']);
+        ] + self::describedBody($occurrence));
 
         $aliases = [];
         foreach ($names as $key => $name) {
@@ -161,9 +166,83 @@ final class SharedErrorResponses implements DocumentTransformer
         return [
             self::rewrite($paths, $names, self::schemaSites(...), self::stated(...), self::SCHEMAS),
             $schemas,
-            self::collisions($contests, $names, 'schemas'),
+            [...self::collisions($contests, $names, 'schemas'), ...self::disputedDescriptions($shapes, $names)],
             $aliases,
         ];
+    }
+
+    /**
+     * The shape a bucket publishes, carrying what its claimants say the error IS.
+     *
+     * Every occurrence in a bucket asked for one name, so they are all speaking about one type — but they
+     * may be different causes that spelled that name, and a component deduped by BODY and named for a
+     * CAUSE owes its sentence to the same cause its name came from. Where the causes state one sentence
+     * there is nothing to settle. Where they state two, awarding either would put one cause's words on a
+     * type the other also named, so NEITHER is published and {@see disputedDescriptions()} says so: a
+     * Schema Object's `description` is optional, which is the whole reason this can refuse where
+     * {@see spoken()} — over a REQUIRED member — has to pick. An absent sentence is vague and true; the
+     * wrong one is a claim about an error a client will catch.
+     *
+     * A shape that already describes itself keeps its own: whatever built it knew something the claim
+     * did not, the same rule a class's own schema description follows.
+     *
+     * @param  Occurrence  $occurrence
+     * @return array<array-key, mixed>
+     */
+    private static function describedBody(array $occurrence): array
+    {
+        $described = $occurrence['described'];
+        ksort($described);
+
+        if (count($described) !== 1 || isset($occurrence['body']['description'])) {
+            return $occurrence['body'];
+        }
+
+        return ['description' => reset($described)] + $occurrence['body'];
+    }
+
+    /**
+     * One warning per shared shape whose claimants describe it two different ways. The reader is the only
+     * one who can tell whether these are two errors that want a name each or one error described twice,
+     * and until they do the component publishes no description at all — so saying nothing would leave an
+     * author who wrote a sentence looking for it in the document.
+     *
+     * Reported in published-name order, and quoting the sentences rather than naming the classes: the
+     * hoist runs over the finished document, where the words are the only handle on the declarations
+     * behind them.
+     *
+     * @param  array<string, Occurrence>  $bodies
+     * @param  array<string, string>  $names  body → the name it was published under
+     * @return list<Diagnostic>
+     */
+    private static function disputedDescriptions(array $bodies, array $names): array
+    {
+        $disputed = [];
+        foreach ($bodies as $key => $body) {
+            if (count($body['described']) > 1 && isset($names[$key])) {
+                $sentences = $body['described'];
+                ksort($sentences);
+                $disputed[$names[$key]] = array_values($sentences);
+            }
+        }
+
+        ksort($disputed);
+
+        $out = [];
+        foreach ($disputed as $name => $sentences) {
+            $out[] = new Diagnostic(
+                severity: Severity::Warning,
+                code: 'components.description-conflict',
+                message: sprintf(
+                    'Operations answering with the same error body describe the shared "%s" schema in components.schemas more than one way (%s), and a schema states one description, so it was published without one.',
+                    $name,
+                    implode(' and ', array_map(static fn (string $sentence): string => sprintf('"%s"', $sentence), $sentences)),
+                ),
+                help: 'One error type has one description. Make the descriptions of the errors sharing this name agree, or give each error a component name of its own — #[ErrorComponent] on the exception class, and the #[Description] beside it.',
+            );
+        }
+
+        return $out;
     }
 
     /**
@@ -174,7 +253,7 @@ final class SharedErrorResponses implements DocumentTransformer
      * @param  array<array-key, mixed>  $paths
      * @param  array<string, Occurrence>  $bodies
      * @param  array<string, mixed>  $existing
-     * @param  callable(array<array-key, mixed>): list<array{list<array-key>, array<array-key, mixed>, string|null}>  $sites
+     * @param  callable(array<array-key, mixed>): Sites  $sites
      * @return array{array<array-key, mixed>, array<string, mixed>|null, list<Diagnostic>}
      */
     private static function shareResponses(array $paths, array $bodies, array $existing, callable $sites): array
@@ -290,7 +369,7 @@ final class SharedErrorResponses implements DocumentTransformer
      * error when it may be the alternative representation beside it.
      *
      * @param  array<array-key, mixed>  $response
-     * @return list<array{list<array-key>, array<array-key, mixed>, string|null}>
+     * @return Sites
      */
     private static function schemaSites(array $response): array
     {
@@ -298,12 +377,13 @@ final class SharedErrorResponses implements DocumentTransformer
         $content = $response['content'];
 
         $claim = count($content) === 1 ? self::claimed($response) : null;
+        $described = $claim === null ? null : self::describes($response);
 
         $out = [];
         foreach ($content as $mediaType => $media) {
             $schema = is_array($media) ? ($media['schema'] ?? null) : null;
             if (is_array($schema) && self::isHoistable($schema)) {
-                $out[] = [['content', $mediaType, 'schema'], $schema, $claim];
+                $out[] = [['content', $mediaType, 'schema'], $schema, $claim, $described];
             }
         }
 
@@ -318,10 +398,15 @@ final class SharedErrorResponses implements DocumentTransformer
      * that it names the whole response ({@see namesResponse()}). Design §"Shared error components" has all
      * three arguments and the application that measured them.
      *
+     * A claim's SENTENCE stays behind: a Response Object's `description` is required and already settled
+     * over every arm's wording ({@see spoken()}), and a shape's is optional and settled over the claim
+     * ({@see describedBody()}). Publishing the claim's sentence here would put one of the two rules'
+     * answers where the other's belongs.
+     *
      * @param  array<array-key, mixed>  $response
      * @param  array<string, string>  $minted  the schema names this run published, which are not the
      *                                         document's own and so name nothing for it
-     * @return list<array{list<array-key>, array<array-key, mixed>, string|null}>
+     * @return Sites
      */
     private static function responseSites(array $response, array $minted = []): array
     {
@@ -329,12 +414,12 @@ final class SharedErrorResponses implements DocumentTransformer
         $content = $response['content'];
 
         if (count($content) === 1) {
-            return [[[], $response, self::claimed($response)]];
+            return [[[], $response, self::claimed($response), null]];
         }
 
         $whole = self::namesResponse($response) ? self::claimed($response) : null;
 
-        return [[[], $response, $whole ?? self::carries($content, $minted)]];
+        return [[[], $response, $whole ?? self::carries($content, $minted), null]];
     }
 
     /**
@@ -788,7 +873,7 @@ final class SharedErrorResponses implements DocumentTransformer
      * arms — a third arm restating what a second contested changes nothing.
      *
      * @param  array<array-key, mixed>  $paths
-     * @param  callable(array<array-key, mixed>): list<array{list<array-key>, array<array-key, mixed>, string|null}>  $sites
+     * @param  callable(array<array-key, mixed>): Sites  $sites
      * @param  callable(array<array-key, mixed>): array{array<array-key, mixed>, Illustrations, Authored, Prose}  $split
      * @param  array<string, string>  $aliases  the shapes pass one published, resolved away before grouping
      * @return array<string, Occurrence>
@@ -804,7 +889,7 @@ final class SharedErrorResponses implements DocumentTransformer
 
             $rejected = self::rejected($response);
 
-            foreach ($sites($response) as [, $body, $name]) {
+            foreach ($sites($response) as [, $body, $name, $described]) {
                 $scope = self::scope((string) $status, $name);
                 [$stripped, $illustrations, $authored, $prose] = $split(self::stripProvenance($body));
                 $key = self::key($scope, $stripped);
@@ -818,6 +903,7 @@ final class SharedErrorResponses implements DocumentTransformer
                     'filled' => [],
                     'claimed' => [],
                     'prose' => [],
+                    'described' => [],
                     'count' => 0,
                     'rejected' => [],
                 ];
@@ -828,6 +914,13 @@ final class SharedErrorResponses implements DocumentTransformer
                     $vote = Json::stable($prose);
                     $out[$key]['prose'][$vote] ??= ['prose' => $prose, 'count' => 0];
                     $out[$key]['prose'][$vote]['count']++;
+                }
+
+                // The DISTINCT sentences the claimants state, keyed by themselves — a set rather than a
+                // tally, because the rule below is agreement and not a plurality. An arm stating nothing
+                // is not dissent; it contributes nothing and takes what the rest agreed on.
+                if ($described !== null) {
+                    $out[$key]['described'][$described] = $described;
                 }
 
                 $filled = self::filled($body);
@@ -1048,7 +1141,7 @@ final class SharedErrorResponses implements DocumentTransformer
      *
      * @param  array<array-key, mixed>  $paths
      * @param  array<string, string>  $names
-     * @param  callable(array<array-key, mixed>): list<array{list<array-key>, array<array-key, mixed>, string|null}>  $sites
+     * @param  callable(array<array-key, mixed>): Sites  $sites
      * @param  callable(array<array-key, mixed>): array{array<array-key, mixed>, Illustrations, Authored, Prose}  $split
      * @param  array<string, Prose>  $spoken  body → the prose its component publishes
      * @return array<array-key, mixed>
@@ -1227,6 +1320,27 @@ final class SharedErrorResponses implements DocumentTransformer
         $name = is_array($facts) ? ($facts[ResponseDraft::COMPONENT] ?? null) : null;
 
         return is_string($name) && $name !== '' ? $name : null;
+    }
+
+    /**
+     * What the producer that named this response said the error IS ({@see ResponseDraft::COMPONENT_DESCRIPTION}),
+     * or null where it said nothing. Anything that isn't the shape the fact is written in is read as no
+     * fact at all, exactly as a declared name is — an overlay or a hand-written document can put anything
+     * anywhere.
+     *
+     * Asked only where the claim itself reaches the node ({@see schemaSites()}): the sentence is prose
+     * about the named error, so a node the name does not describe is not one the sentence describes
+     * either.
+     *
+     * @param  array<array-key, mixed>  $response
+     */
+    private static function describes(array $response): ?string
+    {
+        $extension = $response[self::PROVENANCE] ?? null;
+        $facts = is_array($extension) ? ($extension['facts'] ?? null) : null;
+        $text = is_array($facts) ? ($facts[ResponseDraft::COMPONENT_DESCRIPTION] ?? null) : null;
+
+        return is_string($text) && $text !== '' ? $text : null;
     }
 
     /**

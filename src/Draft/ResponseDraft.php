@@ -43,6 +43,17 @@ final class ResponseDraft
     public const COMPONENT_NAMES_RESPONSE = 'componentNamesResponse';
 
     /**
+     * Frozen beside {@see COMPONENT} when the claimer also said what the error it named IS — the sentence
+     * the shared component publishes as its schema `description`. Public for the same reason: the
+     * shared-error hoist reads it back off the finished document.
+     *
+     * It travels with the NAME and never apart from it. A description is prose about one kind of error,
+     * and the only thing that says which kind a body is, is the claim naming it — so a sentence settled
+     * anywhere else could end up describing a cause that did not name the component.
+     */
+    public const COMPONENT_DESCRIPTION = 'componentDescription';
+
+    /**
      * Frozen under `x-docuccino.facts` as `media type → the members of that media type's `example` that
      * came from a declared TYPE and nothing else` ({@see setExample()}). Public for the same reason as
      * the two above: the shared-error hoist reads it back off the finished document.
@@ -128,6 +139,9 @@ final class ResponseDraft
     /** The other half of that write ({@see COMPONENT_NAMES_RESPONSE}), turning over with it. */
     private bool $componentNamesResponse = false;
 
+    /** The sentence that write carried ({@see COMPONENT_DESCRIPTION}), turning over with it. */
+    private ?string $componentDescription = null;
+
     public function __construct(
         public readonly string $status,
     ) {
@@ -168,8 +182,13 @@ final class ResponseDraft
      * the name describes every representation the status answers with, which is what lets the hoist take
      * it to a response stating several ({@see COMPONENT_NAMES_RESPONSE}, and the design doc's
      * "Shared error components" for why a producer can never say it).
+     *
+     * `$description` is what the named error IS, in a sentence an API consumer reads ({@see
+     * COMPONENT_DESCRIPTION}). It belongs to the claim rather than to the body, so it turns over with the
+     * name: a producer whose claim is shadowed describes nothing, and no sentence outlives the name it
+     * was written about.
      */
-    public function claimComponentName(?string $name, Contribution $by, bool $isStatusDefault = false, bool $namesResponse = false): PatchResult
+    public function claimComponentName(?string $name, Contribution $by, bool $isStatusDefault = false, bool $namesResponse = false, ?string $description = null): PatchResult
     {
         $result = $this->guard->apply(
             self::COMPONENT,
@@ -180,6 +199,7 @@ final class ResponseDraft
         if ($result === PatchResult::Accepted) {
             $this->componentIsStatusDefault = $isStatusDefault;
             $this->componentNamesResponse = $namesResponse;
+            $this->componentDescription = $description;
         }
 
         return $result;
@@ -201,6 +221,12 @@ final class ResponseDraft
     public function componentClaimNamesResponse(): bool
     {
         return $this->componentNamesResponse;
+    }
+
+    /** What the standing claim says the error it names IS, or null when it said nothing. */
+    public function componentClaimDescription(): ?string
+    {
+        return $this->componentDescription;
     }
 
     /**
@@ -258,7 +284,7 @@ final class ResponseDraft
     {
         foreach ($other->guard->contributions() as $field => $write) {
             if ($field === self::COMPONENT) {
-                $this->claimComponentName(Hydrate::stringOrNull($write['value']), $write['by'], $other->componentIsStatusDefault, $other->componentNamesResponse);
+                $this->claimComponentName(Hydrate::stringOrNull($write['value']), $write['by'], $other->componentIsStatusDefault, $other->componentNamesResponse, $other->componentDescription);
 
                 continue;
             }
@@ -585,7 +611,8 @@ final class ResponseDraft
         ksort($placeholders);
 
         $facts = $component === null ? [] : [self::COMPONENT => $component]
-            + ($this->componentNamesResponse ? [self::COMPONENT_NAMES_RESPONSE => true] : []);
+            + ($this->componentNamesResponse ? [self::COMPONENT_NAMES_RESPONSE => true] : [])
+            + ($this->componentDescription === null ? [] : [self::COMPONENT_DESCRIPTION => $this->componentDescription]);
 
         if ($placeholders !== []) {
             $facts += [self::EXAMPLE_PLACEHOLDERS => $placeholders];

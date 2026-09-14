@@ -691,3 +691,70 @@ it('reads a nested property as saying something, and a retracted keyword as sayi
     expect($withProperty->saysNothingAboutTheInstance())->toBeFalse()
         ->and($retracted->saysNothingAboutTheInstance())->toBeTrue();
 });
+
+it('freezes what a producer said its named error IS beside the name', function (): void {
+    $draft = new ResponseDraft('404');
+
+    $draft->setDescription('Not Found', Contribution::integration('framework-errors'));
+    $draft->claimComponentName('NotFound', Contribution::integration('framework-errors'), description: 'Nothing is stored under that identifier.');
+
+    $frozen = $draft->freeze();
+
+    expect($draft->componentClaimDescription())->toBe('Nothing is stored under that identifier.')
+        ->and($frozen->toArray()['x-docuccino']['facts'])->toBe([
+            'component' => 'NotFound',
+            'componentDescription' => 'Nothing is stored under that identifier.',
+        ])
+        // Still not a response member: the Response Object's own `description` is a different fact, and
+        // the two must not leak into one another.
+        ->and($frozen->description)->toBe('Not Found');
+});
+
+it('turns the sentence over with the name it was written about', function (): void {
+    // The sentence belongs to the CLAIM, so a producer whose name is shadowed describes nothing: keeping
+    // it would publish one producer's prose about its own error on the error another producer named.
+    $shadowed = new ResponseDraft('404');
+    $shadowed->claimComponentName('NotFound', Contribution::integration('framework-errors'), description: 'The winning claim says this.');
+
+    expect($shadowed->claimComponentName('Fallback', Contribution::forProducer('fallback'), description: 'The shadowed claim says this.'))
+        ->toBe(PatchResult::Shadowed)
+        ->and($shadowed->componentClaim())->toBe('NotFound')
+        ->and($shadowed->componentClaimDescription())->toBe('The winning claim says this.');
+
+    // …and the other direction: the winner's sentence replaces the loser's, rather than the first
+    // sentence written outliving the name it described.
+    $replaced = new ResponseDraft('404');
+    $replaced->claimComponentName('Fallback', Contribution::forProducer('fallback'), description: 'The replaced claim says this.');
+    $replaced->claimComponentName('NotFound', Contribution::integration('framework-errors'), description: 'The winning claim says this.');
+
+    expect($replaced->componentClaimDescription())->toBe('The winning claim says this.');
+});
+
+it('states no sentence where a name was refused, so nothing describes a component that was not named', function (): void {
+    $draft = new ResponseDraft('404');
+
+    expect($draft->claimComponentName('Not Found!', Contribution::integration('acme'), description: 'A sentence about a name no key can carry.'))
+        ->toBe(PatchResult::NoOp)
+        ->and($draft->componentClaimDescription())->toBeNull()
+        ->and($draft->freeze()->docuccino)->toBeNull();
+});
+
+it('carries a declared sentence across the merge into the operation it applies to', function (): void {
+    // The hop that carried the name has to carry the sentence, or a mapper that described its error
+    // would be heard only up to the applier.
+    $operation = new OperationDraft;
+
+    $mapped = new ResponseDraft('404');
+    $mapped->setDescription('Not Found', Contribution::integration('framework-errors'));
+    $mapped->claimComponentName('NotFound', Contribution::integration('framework-errors'), description: 'Nothing is stored under that identifier.');
+    $mapped->content('application/json')->set('type', 'object', Contribution::integration('framework-errors'));
+
+    (new ResponseDraftApplier)->apply($operation, $mapped, 'integration:framework-errors');
+
+    $frozen = $operation->freeze()->responses['404'] ?? null;
+
+    expect($frozen?->toArray()['x-docuccino']['facts'])->toBe([
+        'component' => 'NotFound',
+        'componentDescription' => 'Nothing is stored under that identifier.',
+    ]);
+});

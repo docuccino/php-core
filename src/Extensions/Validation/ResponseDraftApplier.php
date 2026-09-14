@@ -44,12 +44,14 @@ final class ResponseDraftApplier
         // The name the producer declared for this body, carried across the merge under the producer's own
         // contribution — the target response is where the hoist will read it. Whether it is the status
         // default travels with it, or the merge would turn a derived name into a chosen one, and so does
-        // whether it speaks for the whole response.
+        // whether it speaks for the whole response — and what the producer said the named error IS, which
+        // belongs to the claim and would otherwise be left behind by the hop that carried the name.
         $response->claimComponentName(
             $draft->componentClaim(),
             $contribution,
             $draft->componentClaimIsStatusDefault(),
             $draft->componentClaimNamesResponse(),
+            $draft->componentClaimDescription(),
         );
 
         if ($frozen->description !== null) {

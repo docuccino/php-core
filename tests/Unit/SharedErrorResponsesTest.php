@@ -2258,3 +2258,151 @@ it('walks past a fill record that is not the shape the fact is written in', func
 
     expect(exampleValuesAt($doc, '/a', '403'))->toHaveCount(2);
 });
+
+/*
+ * What a claim SAYS the error is. The name is what a generated client calls the type; the sentence
+ * frozen beside it ({@see ResponseDraft::COMPONENT_DESCRIPTION}) is what that type means, and OpenAPI
+ * holds `description` on any Schema Object. Both travel on the finished document because the hoist runs
+ * over it, so a warm fragment-cache hit publishes exactly what a cold build does.
+ */
+
+/** A response whose producer named the error AND said what it is. */
+function describedBody(string $name, ?string $says, array $body): array
+{
+    $claimed = claimedBody($name, $body);
+    if ($says !== null) {
+        $claimed['x-docuccino']['facts']['componentDescription'] = $says;
+    }
+
+    return $claimed;
+}
+
+it('publishes what the claimant said the error is, on the shape its name names', function (): void {
+    $doc = errorDoc([
+        '/a' => ['404' => describedBody('NotFound', 'Nothing is stored under that identifier.', messageBody())],
+        '/b' => ['404' => describedBody('NotFound', 'Nothing is stored under that identifier.', messageBody())],
+    ]);
+
+    expect($doc['components']['schemas']['NotFound']['description'])
+        ->toBe('Nothing is stored under that identifier.')
+        // On the SHAPE. A Response Object's own wording is settled over the arms and is not this.
+        ->and($doc['components']['responses']['NotFound']['description'])->toBe('Not Found');
+});
+
+it('keeps the shared component id off a description, so adding one is not a replaced type', function (): void {
+    // The identity has to follow the DEDUPE KEY, and prose is outside it. Mint the id from the described
+    // body instead and a diff reads a sentence somebody added as one component removed and another added
+    // — a breaking change to every client, reported for a change that broke nothing.
+    $bare = errorDoc([
+        '/a' => ['404' => claimedBody('NotFound', messageBody())],
+        '/b' => ['404' => claimedBody('NotFound', messageBody())],
+    ]);
+    $described = errorDoc([
+        '/a' => ['404' => describedBody('NotFound', 'Nothing is stored under that identifier.', messageBody())],
+        '/b' => ['404' => describedBody('NotFound', 'Nothing is stored under that identifier.', messageBody())],
+    ]);
+
+    expect($described['components']['schemas']['NotFound']['x-docuccino']['id'])
+        ->toBe($bare['components']['schemas']['NotFound']['x-docuccino']['id'])
+        ->and($described['components']['schemas']['NotFound']['x-docuccino']['id'])->not->toBeEmpty();
+});
+
+it('takes the sentence the claimants agree on, and none where they do not', function (string $case, array $says, ?string $published, int $warnings): void {
+    // A function of the SET: every claimant of one name is describing one type, so one sentence among
+    // them is the answer and two is none. Not a plurality, which is what a required Response Object
+    // `description` forces one bucket over — a schema's is optional, so the honest degradation is open
+    // here and taken.
+    $responses = [];
+    foreach ($says as $index => $sentence) {
+        $responses['/r'.$index] = ['404' => describedBody('NotFound', $sentence, messageBody())];
+    }
+
+    $doc = errorDoc($responses);
+    $report = errorDocReport(['paths' => array_map(static fn (array $r): array => ['get' => ['responses' => $r]], $responses)]);
+
+    expect($doc['components']['schemas']['NotFound']['description'] ?? null)->toBe($published)
+        ->and(array_values(array_filter(
+            array_map(static fn ($d): string => $d->code, $report),
+            static fn (string $code): bool => $code === 'components.description-conflict',
+        )))->toHaveCount($warnings)
+        // The name never moves over prose: nothing climbed the ladder, so no client's type was renamed.
+        ->and($doc['components']['schemas'])->toHaveKey('NotFound');
+})->with([
+    ['all say one thing', ['One sentence.', 'One sentence.'], 'One sentence.', 0],
+    ['one says nothing', ['One sentence.', null], 'One sentence.', 0],
+    ['none says anything', [null, null], null, 0],
+    ['two disagree', ['One sentence.', 'Another sentence.'], null, 1],
+    ['two disagree and a third abstains', ['One sentence.', 'Another sentence.', null], null, 1],
+]);
+
+it('names the component and quotes both sentences when it refuses them', function (): void {
+    $report = errorDocReport(['paths' => [
+        '/a' => ['get' => ['responses' => ['404' => describedBody('NotFound', 'First sentence.', messageBody())]]],
+        '/b' => ['get' => ['responses' => ['404' => describedBody('NotFound', 'Second sentence.', messageBody())]]],
+    ]]);
+
+    $conflict = array_values(array_filter($report, static fn ($d): bool => $d->code === 'components.description-conflict'));
+
+    expect($conflict)->toHaveCount(1)
+        ->and($conflict[0]->message)->toContain('"NotFound"')
+        ->and($conflict[0]->message)->toContain('First sentence.')
+        ->and($conflict[0]->message)->toContain('Second sentence.')
+        ->and($conflict[0]->help)->toContain('name of its own');
+});
+
+it('leaves a shape that already describes itself alone', function (): void {
+    // Whatever built the body knew something the claim did not — the rule `ClassAnnotations::describe()`
+    // states for a class's own schema, and the same answer here.
+    $body = messageBody();
+    $body['content']['application/json']['schema']['description'] = 'The shape says this about itself.';
+
+    $doc = errorDoc([
+        '/a' => ['404' => describedBody('NotFound', 'The claim says this.', $body)],
+        '/b' => ['404' => describedBody('NotFound', 'The claim says this.', $body)],
+    ]);
+
+    expect($doc['components']['schemas']['NotFound']['description'])->toBe('The shape says this about itself.');
+});
+
+it('carries no sentence to a shape the claim does not name', function (): void {
+    // A response offering two representations says nothing about which of them the name belongs to, so
+    // the claim does not reach either shape — and the sentence is prose about the NAMED error, so it
+    // stops exactly where the name does.
+    $body = [
+        'description' => 'Unprocessable Content',
+        'content' => [
+            'application/problem+json' => ['schema' => ['type' => 'object', 'properties' => ['detail' => ['type' => 'string']]]],
+            'application/json' => ['schema' => ['type' => 'object', 'properties' => ['errors' => ['type' => 'object']]]],
+        ],
+    ];
+
+    $doc = errorDoc([
+        '/a' => ['422' => describedBody('ValidationError', 'The body did not validate.', $body)],
+        '/b' => ['422' => describedBody('ValidationError', 'The body did not validate.', $body)],
+    ]);
+
+    foreach ($doc['components']['schemas'] as $schema) {
+        expect($schema)->not->toHaveKey('description');
+    }
+
+    // Nowhere in the published components — the fact itself stays on each operation's own response,
+    // where `x-docuccino` is stripped by every OAS emitter.
+    expect($doc['components']['schemas'])->not->toBeEmpty()
+        ->and(json_encode($doc['components']))->not->toContain('The body did not validate.');
+});
+
+it('reads a sentence that is not a non-empty string as no sentence at all', function (mixed $fact): void {
+    // An overlay or a hand-written document can put anything anywhere, and this walks past what it
+    // cannot read rather than publishing it — the same rule the declared NAME is read under.
+    $body = claimedBody('NotFound', messageBody());
+    $body['x-docuccino']['facts']['componentDescription'] = $fact;
+
+    $doc = errorDoc(['/a' => ['404' => $body], '/b' => ['404' => $body]]);
+
+    expect($doc['components']['schemas']['NotFound'])->not->toHaveKey('description');
+})->with([
+    'an empty string' => [''],
+    'a number' => [12],
+    'a list' => [['one', 'two']],
+    'null' => [null],
+]);

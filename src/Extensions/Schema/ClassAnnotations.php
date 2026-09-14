@@ -57,19 +57,42 @@ final class ClassAnnotations
             return [$schema, []];
         }
 
-        $site = ClassNames::publishable($fqcn);
-
         $diagnostics = [];
-        $text = null;
-        foreach (ClassDeclarations::of($fqcn, Description::class) as $description) {
-            $candidate = DescribedText::of($description, $site, "a schema's description", $diagnostics);
-            $text ??= $candidate;
-        }
+        $text = self::stated($fqcn, $diagnostics);
 
         if ($text !== null) {
             $schema['description'] = $text;
         }
 
         return [$schema, $diagnostics];
+    }
+
+    /**
+     * The sentence a class states about itself, or null where it states none — the prose {@see describe()}
+     * writes onto that class's schema.
+     *
+     * Shared rather than inlined, because a class's own sentence is published in more than one place: a
+     * schema minted for the class, and the shared error component an exception class names with
+     * `#[ErrorComponent]`. One reader means both refuse a `file:`, a `request:` and a both-and-neither
+     * declaration on identical terms and under identical codes, instead of a second rule growing beside
+     * this one and drifting from it.
+     *
+     * Nothing here trusts application input with a constructor it can break: {@see ClassDeclarations}
+     * swallows a declaration PHP cannot build, so a `#[Description(5)]` is no declaration rather than a
+     * `TypeError` printing the machine's absolute paths into the document.
+     *
+     * @param  list<Diagnostic>  $diagnostics
+     */
+    public static function stated(string $fqcn, array &$diagnostics): ?string
+    {
+        $site = ClassNames::publishable($fqcn);
+
+        $text = null;
+        foreach (ClassDeclarations::of($fqcn, Description::class) as $description) {
+            $candidate = DescribedText::of($description, $site, "a schema's description", $diagnostics);
+            $text ??= $candidate;
+        }
+
+        return $text;
     }
 }
