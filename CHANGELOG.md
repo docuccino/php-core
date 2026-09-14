@@ -7,6 +7,12 @@ User-facing changes to `docuccino/core` — features, fixes, performance work an
 taken from the commit messages scoped `core`. Entries begin after v0.1.2; older history is in
 the [repository](https://github.com/docuccino/docuccino) git log.
 
+## v0.19.0
+
+### Bug fixes
+
+- publish the description an enum states about itself ([#499](https://github.com/docuccino/docuccino/pull/499))
+
 ## v0.18.1
 
 ### Bug fixes
