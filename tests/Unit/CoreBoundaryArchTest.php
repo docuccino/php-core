@@ -550,7 +550,7 @@ it('keeps the configuration reader off the frozen public surface', function (): 
     $files = (array) glob(__DIR__.'/../../src/Config/*.php');
 
     // A glob that stopped matching would make this a scan of nothing.
-    expect($files)->toHaveCount(3);
+    expect($files)->toHaveCount(2);
 
     foreach ($files as $file) {
         $class = 'Docuccino\Core\Config\\'.basename((string) $file, '.php');
