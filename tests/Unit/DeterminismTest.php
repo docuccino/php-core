@@ -84,6 +84,32 @@ it('keeps contentHash stable when only x-docuccino.diagnostics changes', functio
     expect($this->hasher->hash($a))->toBe($this->hasher->hash($b));
 });
 
+/*
+ * The spec version is a fact about the TOOL, so it belongs with `generator` rather than with the
+ * document's content. Stated as its own test rather than folded into the generator one, because the
+ * two are separated by a whole document in the hasher and a reader has to be able to break one.
+ */
+it('keeps contentHash stable when only the UIR spec version changes', function (): void {
+    $a = workedExample();
+    $b = workedExample();
+    $b['$schema'] = 'https://spec.docuccino.app/uir/9.9/schema.json';
+    $b['uir'] = '9.9.0';
+
+    expect($this->hasher->hash($a))->toBe($this->hasher->hash($b));
+});
+
+it('changes contentHash when a spec version brings CONTENT with it', function (): void {
+    // The other half, and the reason the rule is about the version string rather than about the spec:
+    // what a minor ADDS is content, and a workflow list appearing is a real difference to publish.
+    $a = workedExample();
+    $b = workedExample();
+    $b['x-docuccino']['workflows'] = [
+        ['id' => 'checkout', 'steps' => [['id' => 'reserve', 'operation' => 'op:v1:aaaaaaaaaaaaaaaa']]],
+    ];
+
+    expect($this->hasher->hash($a))->not->toBe($this->hasher->hash($b));
+});
+
 it('changes contentHash when a documented field changes', function (): void {
     $a = workedExample();
     $b = workedExample();

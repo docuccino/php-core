@@ -18,6 +18,11 @@ namespace Docuccino\Core\Emit;
  * - `provenance`: retained for symmetry with UIR emission; OAS emitters ignore it (they never
  *   emit provenance).
  * - `yaml`: emit YAML instead of JSON.
+ * - `sourceUrl`: what an artifact that POINTS AT the OpenAPI document calls it — today the Arazzo
+ *   workflow document, whose `sourceDescriptions` must name the description its steps' operations live
+ *   in. A relative reference by default, because the two artifacts are exported side by side; the
+ *   adapter passes the document's own configured OpenAPI target where it has one, so the pointer names
+ *   the file that will actually be there rather than the file we guessed.
  * - `formatSamples`: the document's `representation.examples.formats` map, for the emitters that
  *   FABRICATE a value the document does not state — today the Postman collection's request bodies,
  *   saved response examples and URL variables. It rides here rather than on the document because a
@@ -35,26 +40,27 @@ final readonly class EmitOptions
         public ProvenanceLevel $provenance = ProvenanceLevel::None,
         public bool $yaml = false,
         public array $formatSamples = [],
+        public string $sourceUrl = 'openapi.json',
     ) {}
 
     public function withKeepIds(bool $keepIds = true): self
     {
-        return new self($keepIds, $this->mockFakerKey, $this->provenance, $this->yaml, $this->formatSamples);
+        return new self($keepIds, $this->mockFakerKey, $this->provenance, $this->yaml, $this->formatSamples, $this->sourceUrl);
     }
 
     public function withMockFakerKey(?string $key): self
     {
-        return new self($this->keepIds, $key, $this->provenance, $this->yaml, $this->formatSamples);
+        return new self($this->keepIds, $key, $this->provenance, $this->yaml, $this->formatSamples, $this->sourceUrl);
     }
 
     public function withProvenance(ProvenanceLevel $provenance): self
     {
-        return new self($this->keepIds, $this->mockFakerKey, $provenance, $this->yaml, $this->formatSamples);
+        return new self($this->keepIds, $this->mockFakerKey, $provenance, $this->yaml, $this->formatSamples, $this->sourceUrl);
     }
 
     public function withYaml(bool $yaml = true): self
     {
-        return new self($this->keepIds, $this->mockFakerKey, $this->provenance, $yaml, $this->formatSamples);
+        return new self($this->keepIds, $this->mockFakerKey, $this->provenance, $yaml, $this->formatSamples, $this->sourceUrl);
     }
 
     /**
@@ -62,6 +68,11 @@ final readonly class EmitOptions
      */
     public function withFormatSamples(array $samples): self
     {
-        return new self($this->keepIds, $this->mockFakerKey, $this->provenance, $this->yaml, $samples);
+        return new self($this->keepIds, $this->mockFakerKey, $this->provenance, $this->yaml, $samples, $this->sourceUrl);
+    }
+
+    public function withSourceUrl(string $url): self
+    {
+        return new self($this->keepIds, $this->mockFakerKey, $this->provenance, $this->yaml, $this->formatSamples, $url);
     }
 }

@@ -183,7 +183,7 @@
     "document": {
       "id": "doc:default",
       "configHash": "cfg-abc",
-      "contentHash": "0c20465437f26cfc77667b04c27fcb7b23caab39f234d84a9fabe67594d4284d"
+      "contentHash": "8ae1a8897d11e03848922edfd5c56e346c19e1c7905584f9988f42bb57b9d2ae"
     },
     "generator": {
       "name": "docuccino/laravel",

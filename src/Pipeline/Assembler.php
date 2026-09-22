@@ -22,6 +22,7 @@ use Docuccino\Core\Provenance\ClassNames;
 use Docuccino\Core\Provenance\MessagePaths;
 use Docuccino\Core\Provenance\RootRelativeSourcePathResolver;
 use Docuccino\Core\Provenance\SourcePathResolver;
+use Docuccino\Core\Spec\UirSpec;
 use Throwable;
 
 /**
@@ -39,10 +40,6 @@ use Throwable;
  */
 final class Assembler
 {
-    private const SCHEMA_URL = 'https://spec.docuccino.app/uir/1.0/schema.json';
-
-    private const UIR_VERSION = '1.0.0';
-
     private const OPENAPI_VERSION = '3.2.0';
 
     private const DIALECT = 'https://spec.openapis.org/oas/3.2/dialect/base';
@@ -86,8 +83,8 @@ final class Assembler
         $componentSchemas = $this->buildComponents($components);
 
         $doc = [
-            '$schema' => self::SCHEMA_URL,
-            'uir' => self::UIR_VERSION,
+            '$schema' => UirSpec::schemaUrl(),
+            'uir' => UirSpec::VERSION,
             'openapi' => self::OPENAPI_VERSION,
             'jsonSchemaDialect' => self::DIALECT,
             'info' => $document->info,
@@ -154,7 +151,7 @@ final class Assembler
 
         $doc['x-docuccino'] = [
             'document' => ['id' => $documentId, 'configHash' => $document->hash()],
-            'generator' => ['name' => $this->generatorName, 'version' => $generatorVersion, 'specVersion' => self::UIR_VERSION],
+            'generator' => ['name' => $this->generatorName, 'version' => $generatorVersion, 'specVersion' => UirSpec::VERSION],
         ];
 
         foreach ($components->diagnostics() as $diagnostic) {

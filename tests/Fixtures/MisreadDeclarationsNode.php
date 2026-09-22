@@ -38,6 +38,7 @@ use Docuccino\Attributes\Versioning\RenamedParameter;
 use Docuccino\Attributes\Versioning\RenamedRequestField;
 use Docuccino\Attributes\Versioning\RenamedResponseField;
 use Docuccino\Attributes\Webhook;
+use Docuccino\Attributes\WorkflowStep;
 
 /**
  * Every class-target attribute a TYPE is NOT read for, on one class — the whole
@@ -82,6 +83,7 @@ use Docuccino\Attributes\Webhook;
 #[Summary]
 #[Unauthenticated]
 #[Webhook]
+#[WorkflowStep]
 final class MisreadDeclarationsNode
 {
     public string $name = '';

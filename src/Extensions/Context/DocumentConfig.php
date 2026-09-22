@@ -108,6 +108,8 @@ final readonly class DocumentConfig
         public array $security = [],
         public array $tags = [],
         public array $representation = [],
+        /** @var array<string, mixed> `workflows.<id>` — the prose and inputs a declared workflow is enriched with. */
+        public array $workflows = [],
         public array $viewer = [],
         public string $versioning = self::VERSIONING_DEFAULT,
         public ?TagMapper $tagMapper = null,

@@ -1,0 +1,111 @@
+{
+  "$schema": "https://spec.docuccino.app/uir/1.1/schema.json",
+  "uir": "1.1.0",
+  "openapi": "3.2.0",
+  "info": {
+    "title": "Baskets API",
+    "version": "2026-09-01"
+  },
+  "paths": {
+    "/api/baskets/{basket}/reserve": {
+      "post": {
+        "x-docuccino": {
+          "id": "op:v1:aaaaaabasketshld"
+        },
+        "operationId": "reserveBasket",
+        "summary": "Hold a basket's contents.",
+        "responses": {
+          "201": {
+            "x-docuccino": {
+              "id": "res:v1:aaaaaabaskethelo"
+            },
+            "description": "Created"
+          },
+          "404": {
+            "x-docuccino": {
+              "id": "res:v1:aaaaaabasketgone"
+            },
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/api/payments": {
+      "post": {
+        "x-docuccino": {
+          "id": "op:v1:aaaaaaapaymentnw"
+        },
+        "operationId": "createPayment",
+        "summary": "Take payment for a held basket.",
+        "responses": {
+          "200": {
+            "x-docuccino": {
+              "id": "res:v1:aaaaapaymenttakn"
+            },
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/receipts": {
+      "get": {
+        "x-docuccino": {
+          "id": "op:v1:aaaaaareceiptlst"
+        },
+        "summary": "An operation with no operationId, which Arazzo cannot address.",
+        "responses": {
+          "200": {
+            "x-docuccino": {
+              "id": "res:v1:aaaaareceiptsgot"
+            },
+            "description": "OK"
+          },
+          "206": {
+            "x-docuccino": {
+              "id": "res:v1:aaaareceiptspart"
+            },
+            "description": "Partial"
+          }
+        }
+      }
+    }
+  },
+  "x-docuccino": {
+    "document": {
+      "id": "doc:default"
+    },
+    "workflows": [
+      {
+        "id": "checkout",
+        "summary": "Take payment for a basket",
+        "inputs": {
+          "type": "object",
+          "properties": {
+            "basketId": { "type": "string" }
+          }
+        },
+        "steps": [
+          {
+            "id": "reserve",
+            "operation": "op:v1:aaaaaabasketshld",
+            "description": "Hold the basket so nothing else can take it.",
+            "parameters": [
+              { "name": "basket", "in": "path", "value": "$inputs.basketId" }
+            ],
+            "outputs": { "holdId": "$response.body#/id" }
+          },
+          {
+            "id": "pay",
+            "operation": "op:v1:aaaaaaapaymentnw",
+            "body": {
+              "contentType": "application/json",
+              "payload": { "hold": "$steps.reserve.outputs.holdId" }
+            },
+            "outputs": { "receiptId": "$response.body#/receipt" }
+          }
+        ],
+        "outputs": { "receipt": "$steps.pay.outputs.receiptId" }
+      }
+    ]
+  }
+}

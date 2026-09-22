@@ -43,6 +43,7 @@ function configHashBag(): array
         'integrations' => ['sanctum' => ['enabled' => true]],
         'api_version' => ['header' => 'X-Api-Version', 'changes' => ['app/Api/Versions']],
         'export' => ['path' => 'docs/openapi.json'],
+        'workflows' => ['checkout' => ['summary' => 'Take payment for a basket']],
         'viewer' => configHashViewerBag(),
     ];
 }

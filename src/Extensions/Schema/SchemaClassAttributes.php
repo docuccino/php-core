@@ -43,6 +43,7 @@ use Docuccino\Attributes\Versioning\RenamedParameter;
 use Docuccino\Attributes\Versioning\RenamedRequestField;
 use Docuccino\Attributes\Versioning\RenamedResponseField;
 use Docuccino\Attributes\Webhook;
+use Docuccino\Attributes\WorkflowStep;
 use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
 use Docuccino\Core\Provenance\ClassNames;
@@ -150,6 +151,7 @@ final class SchemaClassAttributes
         Security::class => 'on the action',
         Summary::class => 'on the action',
         Unauthenticated::class => 'on the action',
+        WorkflowStep::class => 'on the action',
         Webhook::class => 'on the webhook class it names',
     ];
 

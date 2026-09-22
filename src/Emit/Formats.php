@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Docuccino\Core\Emit;
 
 use Docuccino\Core\Document\UirDocument;
+use Docuccino\Core\Emit\Arazzo\ArazzoEmitter;
 use Docuccino\Core\Emit\Postman\CollectionEmitter;
 use InvalidArgumentException;
 
@@ -48,13 +49,16 @@ final class Formats
         'openapi-3.0' => [OpenApi30DownlevelEmitter::class, true, true, true],
         'uir' => [UirEmitter::class, false, true, false],
         'postman' => [CollectionEmitter::class, false, false, false],
+        'arazzo' => [ArazzoEmitter::class, true, false, false],
     ];
 
     /**
      * Formats a committed artifact can be read back as the contract itself, best first. UIR leads
      * because provenance only survives there — an OpenAPI artifact still describes the contract, it
      * just cannot say who wrote a schema — so this is an order of its own rather than the table's.
-     * Postman is absent: a collection is a client, not a contract.
+     * Postman is absent: a collection is a client, not a contract. Arazzo is absent for a different
+     * reason — it describes sequences OVER the contract and carries no operation's shape at all, so a
+     * reader handed one has nothing to check a response against.
      *
      * @var list<string>
      */

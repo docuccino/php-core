@@ -14,23 +14,56 @@ it('resolves the default schema path package-relative, inside php/core/resources
     $corePackage = dirname(__DIR__, 2); // php/core
 
     expect(Validator::defaultSchemaPath())
-        ->toBe($corePackage.'/resources/spec/uir/1.0/schema.json')
+        ->toBe($corePackage.'/resources/spec/uir/'.defaultSchemaVersion().'/schema.json')
         ->and(is_file(Validator::defaultSchemaPath()))->toBeTrue();
 
     $decoded = json_decode((string) file_get_contents(Validator::defaultSchemaPath()), true, flags: JSON_THROW_ON_ERROR);
     expect($decoded)->toBeArray()->toHaveKey('$id');
 });
 
-it('ships a byte-identical copy of the canonical authoring schema (drift guard)', function (): void {
-    $canonical = dirname(__DIR__, 4).'/spec/uir/1.0/schema.json'; // monorepo root — authoring copy
-    $shipped = dirname(__DIR__, 2).'/resources/spec/uir/1.0/schema.json';
+/**
+ * Every UIR version the repository publishes, read off the authoring directory rather than listed.
+ * A published `$id` is served forever, so the guard below has to cover the versions that are no
+ * longer newest — listing them by hand is how the second one goes unguarded the day a third ships.
+ *
+ * @return list<string>
+ */
+function publishedSchemaVersions(): array
+{
+    $root = dirname(__DIR__, 4).'/spec/uir';
 
-    expect(is_file($canonical))->toBeTrue('canonical schema missing under spec/uir/1.0')
+    $versions = array_values(array_filter(
+        scandir($root) ?: [],
+        static fn (string $entry): bool => $entry !== '.' && $entry !== '..' && is_dir($root.'/'.$entry),
+    ));
+    sort($versions);
+
+    return $versions;
+}
+
+/** The version a fresh build validates against: the newest the repository publishes. */
+function defaultSchemaVersion(): string
+{
+    $versions = publishedSchemaVersions();
+
+    return $versions[count($versions) - 1];
+}
+
+it('publishes at least the versions the schema history has reached', function (): void {
+    // A scan that stopped seeing the directory would pass every drift check below on an empty set.
+    expect(publishedSchemaVersions())->toContain('1.0')->toContain('1.1');
+});
+
+it('ships a byte-identical copy of every canonical authoring schema (drift guard)', function (string $version): void {
+    $canonical = dirname(__DIR__, 4).'/spec/uir/'.$version.'/schema.json'; // monorepo root — authoring copy
+    $shipped = dirname(__DIR__, 2).'/resources/spec/uir/'.$version.'/schema.json';
+
+    expect(is_file($canonical))->toBeTrue('canonical schema missing under spec/uir/'.$version)
         ->and(is_file($shipped))->toBeTrue('shipped schema missing under php/core/resources — run composer sync-schema');
 
     // Byte equality: `composer sync-schema` copies one to the other, this proves they never drifted.
     expect(hash_file('sha256', $shipped))->toBe(hash_file('sha256', $canonical));
-});
+})->with(publishedSchemaVersions());
 
 it('resolves the schema from a simulated vendor/docuccino/core install layout', function (): void {
     $tmp = sys_get_temp_dir().'/docuccino-install-shape-'.uniqid();
@@ -38,9 +71,14 @@ it('resolves the schema from a simulated vendor/docuccino/core install layout', 
 
     // Recreate the exact shipped layout the package split produces (src/ + resources/, no monorepo root).
     @mkdir($pkgRoot.'/src/SpecValidation', 0755, true);
-    @mkdir($pkgRoot.'/resources/spec/uir/1.0', 0755, true);
+    @mkdir($pkgRoot.'/resources/spec/uir/'.defaultSchemaVersion(), 0755, true);
     copy(dirname(__DIR__, 2).'/src/SpecValidation/Validator.php', $pkgRoot.'/src/SpecValidation/Validator.php');
-    copy(Validator::defaultSchemaPath(), $pkgRoot.'/resources/spec/uir/1.0/schema.json');
+
+    // The version it resolves the path from ships beside it, so the probe below needs it too — a
+    // package-relative path is only package-relative if everything it reads is in the package.
+    @mkdir($pkgRoot.'/src/Spec', 0755, true);
+    copy(dirname(__DIR__, 2).'/src/Spec/UirSpec.php', $pkgRoot.'/src/Spec/UirSpec.php');
+    copy(Validator::defaultSchemaPath(), $pkgRoot.'/resources/spec/uir/'.defaultSchemaVersion().'/schema.json');
 
     // Load the RELOCATED class body in a subprocess (avoids redeclaring the already-autoloaded class)
     // and assert its self-relative resolution lands inside the temp vendor dir — proving the path is
@@ -48,6 +86,7 @@ it('resolves the schema from a simulated vendor/docuccino/core install layout', 
     $script = $tmp.'/probe.php';
     file_put_contents($script, <<<PHP
         <?php
+        require '{$pkgRoot}/src/Spec/UirSpec.php';
         require '{$pkgRoot}/src/SpecValidation/Validator.php';
         \$path = \\Docuccino\\Core\\SpecValidation\\Validator::defaultSchemaPath();
         echo \$path.PHP_EOL;
@@ -58,15 +97,15 @@ it('resolves the schema from a simulated vendor/docuccino/core install layout', 
     [$resolvedPath, $existence] = array_map('trim', explode("\n", trim($output)));
 
     // realpath() the package root: __DIR__ is symlink-resolved by PHP (macOS /var → /private/var).
-    expect($resolvedPath)->toBe(realpath($pkgRoot).'/resources/spec/uir/1.0/schema.json')
+    expect($resolvedPath)->toBe(realpath($pkgRoot).'/resources/spec/uir/'.defaultSchemaVersion().'/schema.json')
         ->and($existence)->toBe('EXISTS');
 
     // cleanup
-    array_map('unlink', (array) glob($pkgRoot.'/resources/spec/uir/1.0/*'));
+    array_map('unlink', (array) glob($pkgRoot.'/resources/spec/uir/'.defaultSchemaVersion().'/*'));
     array_map('unlink', (array) glob($pkgRoot.'/src/SpecValidation/*'));
     unlink($script);
     foreach ([
-        $pkgRoot.'/resources/spec/uir/1.0', $pkgRoot.'/resources/spec/uir', $pkgRoot.'/resources/spec',
+        $pkgRoot.'/resources/spec/uir/'.defaultSchemaVersion(), $pkgRoot.'/resources/spec/uir', $pkgRoot.'/resources/spec',
         $pkgRoot.'/resources', $pkgRoot.'/src/SpecValidation', $pkgRoot.'/src', $pkgRoot,
         $tmp.'/vendor/docuccino', $tmp.'/vendor', $tmp,
     ] as $dir) {

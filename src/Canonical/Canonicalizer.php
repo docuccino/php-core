@@ -643,7 +643,52 @@ final class Canonicalizer
                 'pages' => fn (mixed $p): mixed => $this->mapList($p, $this->canonicalizePage(...)),
                 'nav' => fn (mixed $n): mixed => $this->mapList($n, $this->canonicalizeNavNode(...)),
             ])),
+            'workflows' => fn (mixed $v): mixed => $this->mapList($v, $this->canonicalizeWorkflow(...)),
             'diagnostics' => fn (mixed $v): mixed => $this->mapList($v, $this->canonicalizeDiagnostic(...)),
+        ]));
+    }
+
+    /**
+     * One declared workflow. `inputs` goes through the schema path rather than the generic one: it IS a
+     * Schema Object, and a schema ordered by two rules in one document is a schema whose bytes depend on
+     * where a reader found it.
+     *
+     * @return array<string, mixed>|stdClass
+     */
+    private function canonicalizeWorkflow(mixed $node): array|stdClass
+    {
+        return $this->object($node, fn (array $workflow) => $this->build($workflow, [
+            'id' => $this->keep(...),
+            'summary' => $this->keep(...),
+            'description' => $this->keep(...),
+            'inputs' => fn (mixed $v): mixed => $this->subschema(SchemaKeywords::POSITION_SCHEMA, $v),
+            'steps' => fn (mixed $v): mixed => $this->mapList($v, $this->canonicalizeWorkflowStep(...)),
+            'outputs' => fn (mixed $v): mixed => $this->sortedMap($v, $this->keep(...)),
+        ]));
+    }
+
+    /**
+     * One step. `parameters` keeps the order it was written in — a request line's members are a
+     * sequence the author settled, not a set to sort — and a payload is data, so it is generic.
+     *
+     * @return array<string, mixed>|stdClass
+     */
+    private function canonicalizeWorkflowStep(mixed $node): array|stdClass
+    {
+        return $this->object($node, fn (array $step) => $this->build($step, [
+            'id' => $this->keep(...),
+            'operation' => $this->keep(...),
+            'description' => $this->keep(...),
+            'parameters' => fn (mixed $v): mixed => $this->mapList($v, fn (mixed $parameter): mixed => $this->object($parameter, fn (array $p) => $this->build($p, [
+                'name' => $this->keep(...),
+                'in' => $this->keep(...),
+                'value' => $this->canonicalizeGeneric(...),
+            ]))),
+            'body' => fn (mixed $v): mixed => $this->object($v, fn (array $body) => $this->build($body, [
+                'contentType' => $this->keep(...),
+                'payload' => $this->canonicalizeGeneric(...),
+            ])),
+            'outputs' => fn (mixed $v): mixed => $this->sortedMap($v, $this->keep(...)),
         ]));
     }
 
