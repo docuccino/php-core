@@ -31,6 +31,7 @@ use Docuccino\Attributes\Security;
 use Docuccino\Attributes\Summary;
 use Docuccino\Attributes\Unauthenticated;
 use Docuccino\Attributes\Versioning\AddedEnumValue;
+use Docuccino\Attributes\Versioning\AddedOperation;
 use Docuccino\Attributes\Versioning\ApiVersionChange;
 use Docuccino\Attributes\Versioning\AppliesTo;
 use Docuccino\Attributes\Versioning\MadeRequestFieldOptional;
@@ -119,6 +120,7 @@ final class SchemaClassAttributes
     public const array ELSEWHERE = [
         Abilities::class => 'on the action',
         AddedEnumValue::class => 'on a version-change class, beside its #[ApiVersionChange]',
+        AddedOperation::class => 'on a version-change class, beside its #[ApiVersionChange]',
         ApiVersionChange::class => 'on a version-change class',
         AppliesTo::class => 'on a version-change class, to narrow it to some operations',
         CookieParameter::class => 'on the action',

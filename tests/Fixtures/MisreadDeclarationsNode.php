@@ -26,6 +26,7 @@ use Docuccino\Attributes\Security;
 use Docuccino\Attributes\Summary;
 use Docuccino\Attributes\Unauthenticated;
 use Docuccino\Attributes\Versioning\AddedEnumValue;
+use Docuccino\Attributes\Versioning\AddedOperation;
 use Docuccino\Attributes\Versioning\ApiVersionChange;
 use Docuccino\Attributes\Versioning\AppliesTo;
 use Docuccino\Attributes\Versioning\MadeRequestFieldOptional;
@@ -49,6 +50,7 @@ use Docuccino\Attributes\Webhook;
 #[Description(text: 'A node whose author put an operation\'s declarations on the type.')]
 #[Abilities]
 #[AddedEnumValue]
+#[AddedOperation]
 #[ApiVersionChange]
 #[AppliesTo]
 #[CookieParameter]

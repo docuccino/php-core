@@ -303,6 +303,43 @@ final class DocumentGraph
     }
 
     /**
+     * The document with one key path REMOVED, and nothing else touched. The mirror of {@see with()},
+     * and deliberately not more than that: whether a parent left empty by the removal should go too is
+     * a question about what that parent MEANS — an empty path item is not the same fact as an empty
+     * `required` — so it belongs to the caller that knows, rather than to a graph operation that would
+     * have to guess it the same way everywhere.
+     *
+     * A path that does not lead anywhere removes nothing, which is what makes calling it twice safe.
+     *
+     * @param  array<string, mixed>  $node
+     * @param  list<string>  $keys
+     * @return array<string, mixed>
+     */
+    public static function without(array $node, array $keys): array
+    {
+        $key = array_shift($keys);
+        if ($key === null || ! array_key_exists($key, $node)) {
+            return $node;
+        }
+
+        if ($keys === []) {
+            unset($node[$key]);
+
+            return $node;
+        }
+
+        $child = $node[$key];
+        if (! is_array($child)) {
+            return $node;
+        }
+
+        /** @var array<string, mixed> $child */
+        $node[$key] = self::without($child, $keys);
+
+        return $node;
+    }
+
+    /**
      * Every component a node points at, at any depth, as canonical pointers.
      *
      * @param  array<array-key, mixed>  $node
