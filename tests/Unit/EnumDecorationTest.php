@@ -158,3 +158,24 @@ it('drops name hints that do not line up with the published values', function ()
 
     expect($schema)->toBe(['type' => 'string', 'enum' => ['name', '-total']]);
 });
+
+/*
+ * Reading a decorated set BACK — what a caller re-decorating a schema it did not build has to ask, so
+ * that the set it publishes carries the same name-hint spelling. Every keyword the table emits, and the
+ * unknown one, over a real decoration rather than a hand-written schema: the round trip is the claim.
+ */
+it('reads back the naming keyword a schema was decorated with', function (string $naming, string $expected): void {
+    expect(EnumDecoration::namingOf(decorateEnum(['draft', 'live'], $naming, ['Draft', 'Live'])))->toBe($expected);
+})->with([
+    'both spellings' => ['names', 'names'],
+    'the varnames spelling alone' => ['x-enum-varnames', 'x-enum-varnames'],
+    'the enumNames spelling alone' => ['x-enumNames', 'x-enumNames'],
+    'no names at all' => ['none', 'none'],
+    'a keyword the table does not know' => ['x-made-up', 'none'],
+]);
+
+it('reads no naming off a set whose names were dropped for not lining up', function (): void {
+    // The one way a schema decorated WITH a keyword still carries no key: the names were short, so the
+    // honest answer is what the document says rather than what the producer asked for.
+    expect(EnumDecoration::namingOf(decorateEnum(['draft', 'live'], 'names', ['Draft'])))->toBe('none');
+});

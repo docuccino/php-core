@@ -110,6 +110,33 @@ final class EnumDecoration
     }
 
     /**
+     * The naming keyword a schema was DECORATED with, read back off the keys it carries. The reverse of
+     * {@see namingKeys()} and stated beside it, because a reader with its own copy of the key list
+     * answers `none` for a document decorated under a spelling the list has since grown.
+     *
+     * For a caller that has to re-decorate a set it did not build — a version change moving a value in
+     * or out of one — so the derived document carries the same name-hint spelling the built one did,
+     * rather than whichever the config happens to say when the derivation runs.
+     *
+     * @param  array<array-key, mixed>  $schema
+     */
+    public static function namingOf(array $schema): string
+    {
+        // The key universe comes from `namingKeys()` rather than from a second list here: one of the two
+        // spellings added or dropped there has to move this answer with it, and a copy would not.
+        $every = self::namingKeys('names');
+        $present = array_values(array_filter($every, static fn (string $key): bool => isset($schema[$key])));
+
+        // A single-key keyword IS the key it emits, which is what makes the one-hit case an answer
+        // rather than a lookup.
+        return match (true) {
+            $present === $every => 'names',
+            count($present) === 1 => $present[0],
+            default => 'none',
+        };
+    }
+
+    /**
      * The extension keys a naming keyword emits: `names` (the default) carries both spellings so
      * OpenAPI Generator, NSwag and the TS toolchain are all served; the single-key keywords remain
      * for authors pinning one tool's shape; `none` emits nothing.

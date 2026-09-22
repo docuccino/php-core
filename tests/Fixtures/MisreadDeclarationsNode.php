@@ -25,11 +25,13 @@ use Docuccino\Attributes\RuleSchema;
 use Docuccino\Attributes\Security;
 use Docuccino\Attributes\Summary;
 use Docuccino\Attributes\Unauthenticated;
+use Docuccino\Attributes\Versioning\AddedEnumValue;
 use Docuccino\Attributes\Versioning\ApiVersionChange;
 use Docuccino\Attributes\Versioning\AppliesTo;
 use Docuccino\Attributes\Versioning\MadeRequestFieldOptional;
 use Docuccino\Attributes\Versioning\MadeResponseFieldOptional;
 use Docuccino\Attributes\Versioning\MadeResponseFieldRequired;
+use Docuccino\Attributes\Versioning\RemovedEnumValue;
 use Docuccino\Attributes\Versioning\RemovedResponseField;
 use Docuccino\Attributes\Versioning\RenamedParameter;
 use Docuccino\Attributes\Versioning\RenamedRequestField;
@@ -46,6 +48,7 @@ use Docuccino\Attributes\Webhook;
  */
 #[Description(text: 'A node whose author put an operation\'s declarations on the type.')]
 #[Abilities]
+#[AddedEnumValue]
 #[ApiVersionChange]
 #[AppliesTo]
 #[CookieParameter]
@@ -65,6 +68,7 @@ use Docuccino\Attributes\Webhook;
 #[PathParameter]
 #[QueryParameter]
 #[QueryParameter]
+#[RemovedEnumValue]
 #[RemovedResponseField]
 #[RenamedParameter]
 #[RenamedRequestField]
