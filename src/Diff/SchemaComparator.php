@@ -24,9 +24,13 @@ use Docuccino\Core\Support\Hydrate;
  * A schema is the one Reference Object position that may reach ITSELF, so resolution is bounded rather
  * than trusted: the pair of pointers being resolved is held open for the length of the descent beneath
  * it ({@see compareSubschema()}), and a pair already open compares as written, so the walk terminates on
- * the product of the two schema buckets with no schema ever flattened into itself. That bound is over
- * the DESCENT, not over a chain: {@see ComponentRefs::resolveSchema()} takes one hop and does not follow
- * a pointer whose target is itself a pointer.
+ * the product of the two schema buckets with no schema ever flattened into itself.
+ *
+ * That ONE bound covers a CHAIN as well as a descent, which is why {@see ComponentRefs::resolveSchema()}
+ * takes a single hop and hands back whatever it lands on, pointer and all, rather than looping: a target
+ * that is itself a pointer arrives back here as an ordinary schema position and is resolved again. So a
+ * component naming itself, or two naming each other, meets an open pair and compares as written — a
+ * degraded answer, and a true one, since a name resolving only to itself describes no value.
  *
  * Every DIRECTION this class computes — a type, an enum, a constraint, a bound, a branch, a tag, a
  * null — is turned into a verdict by one rule, stated in full at {@see verdict()} and nowhere else,

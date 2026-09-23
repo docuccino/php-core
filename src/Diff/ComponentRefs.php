@@ -82,8 +82,11 @@ final readonly class ComponentRefs
     }
 
     /**
-     * One hop, so a component that is itself a `$ref` stays marked unresolved rather than silently
-     * flattening to nothing.
+     * One hop. A target that is itself a Reference Object keeps its pointer on the node handed back, but
+     * nothing downstream reads that as a decline — unlike {@see resolveInto()}, which reports one — so the
+     * node is compared carrying the target's empty `content` and `headers` and the chain reads at the
+     * position as the body being removed. {@see resolveParameter()} answers a chain the same way, and
+     * takes `name` and `in` from a target that states neither besides.
      */
     public function resolveResponse(ResponseObject $response): ResponseObject
     {
@@ -221,15 +224,21 @@ final readonly class ComponentRefs
      * pointer alone. The annotations that are followed override the target's, which is the merge every
      * resolver here performs.
      *
-     * One hop, like every resolver above, and unlike them a CHAIN IS NOT FOLLOWED: where the target is
-     * itself a bare pointer, `$schema + $target` keeps the left operand's `$ref` and the `unset` below
-     * strips it, so the hop hands back `[]` and the caller has nothing to re-enter on. Against an inline
-     * schema that position therefore still reads as every keyword removed — the sliver of the
-     * inline-versus-pointer defect this resolver does not close, and the same answer an undeclared name
-     * gets, for the same reason. Nothing Docuccino publishes spells a component as a bare pointer to
-     * another component, so the population is a hand-written `old` side. Following the chain would need
-     * no new bound — the caller's open-pair set already terminates one, cycle included — so what stands
-     * between here and resolving it is this merge and the rows that pin the limit, nothing deeper.
+     * ONE HOP PER CALL, like every resolver above — and unlike them a chain is followed, by RE-ENTRY
+     * rather than by a loop here. The referring node's pointer is dropped BEFORE the merge, so where the
+     * target is itself a pointer that `$ref` survives, the caller gets a schema position to resolve again,
+     * and the next hop is read exactly as this one was. The order of those two lines is the whole of it:
+     * merging first keeps the LEFT operand's `$ref` and the strip then takes the target's with it, which
+     * hands back a body stating nothing and reads, against an inline schema, as every keyword removed.
+     *
+     * Re-entry is what keeps the walk on ONE bound. {@see SchemaComparator} holds every pointer pair open
+     * for the descent beneath it, so a chain that closes on itself — a component naming itself, or two
+     * naming each other — meets a pair already open and compares as written, and a chain that does not
+     * terminates on the product of the two schema buckets. A loop here would need a visited set of its
+     * own, and a second bound answering the same question is the thing that drifts.
+     *
+     * A hop stops on its own where the next target is not bare: that call declines, and the position
+     * compares as the intersection it spells rather than flattening to the half this merge could state.
      *
      * @param  array<string, mixed>  $schema
      * @return array<string, mixed>|bool|null
@@ -249,10 +258,9 @@ final readonly class ComponentRefs
             return $target;
         }
 
-        $merged = $schema + $target;
-        unset($merged['$ref']);
+        unset($schema['$ref']);
 
-        return $merged;
+        return $schema + $target;
     }
 
     /**
