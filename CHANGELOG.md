@@ -7,6 +7,12 @@ User-facing changes to `docuccino/core` — features, fixes, performance work an
 taken from the commit messages scoped `core`. Entries begin after v0.1.2; older history is in
 the [repository](https://github.com/docuccino/docuccino) git log.
 
+## v0.20.2
+
+### Bug fixes
+
+- read a JSON object's members as unordered when diffing values ([#529](https://github.com/docuccino/docuccino/pull/529))
+
 ## v0.20.0
 
 ### Breaking changes
