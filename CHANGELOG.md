@@ -7,6 +7,26 @@ User-facing changes to `docuccino/core` — features, fixes, performance work an
 taken from the commit messages scoped `core`. Entries begin after v0.1.2; older history is in
 the [repository](https://github.com/docuccino/docuccino) git log.
 
+## v0.20.0
+
+### Breaking changes
+
+- rename the "uir" emit format to "full" ([#519](https://github.com/docuccino/docuccino/pull/519))
+  - the emit format id `uir` is now `full`, in the CLI and in `export.targets`. There is no alias: `uir` is refused, with an error naming the replacement.
+- carry the spec version and schema URL in the extension ([#518](https://github.com/docuccino/docuccino/pull/518))
+  - `$schema` and `uir` no longer sit at the document root. Read the spec version from `x-docuccino.generator.specVersion` and the schema URL from `x-docuccino.generator.schema`. The UIR spec moves to 2.0 — removing two required root members is a shape change against a published 1.0 — and 2.0 publishes two files, a self-contained document schema and a standalone extension schema. No committed artifact's `contentHash` changes, and diff history is preserved.
+- carry declared workflows in the document, as UIR 1.1 ([#511](https://github.com/docuccino/docuccino/pull/511))
+  - emitted UIR documents declare `uir: 1.1.0` and the 1.1 `$schema` URL, and every `contentHash` changes once as the spec version leaves the hash.
+
+### Features
+
+- publish declared workflows as an Arazzo description ([#512](https://github.com/docuccino/docuccino/pull/512))
+
+### Bug fixes
+
+- follow a schema $ref chain to the shape at the end of it ([#523](https://github.com/docuccino/docuccino/pull/523))
+- read a schema $ref as the schema it names, not as the string it is ([#522](https://github.com/docuccino/docuccino/pull/522))
+
 ## v0.19.0
 
 ### Bug fixes
