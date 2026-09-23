@@ -49,7 +49,8 @@ final class SchemaReading
         '$anchor' => ReadingKind::Identity,
         '$schema' => ReadingKind::Dialect,
         // Each already a member of the diff's own vocabulary, and each named where it is read:
-        // `compareRef()`, `compareType()`, `compareRequired()`.
+        // `compareRef()` — beside `resolvePointers()`, which reads the same keyword as the schema it
+        // names rather than as the string it is — `compareType()`, `compareRequired()`.
         '$ref' => ReadingKind::Elsewhere,
         'type' => ReadingKind::Elsewhere,
         'required' => ReadingKind::Elsewhere,

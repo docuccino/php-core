@@ -10,10 +10,23 @@ use Docuccino\Core\Support\Arr;
 use Docuccino\Core\Support\Hydrate;
 
 /**
- * Field-level schema comparison with breaking-change classification. `$ref`s compare opaquely, by
- * target string — the referenced component's own changes are reported once, where that component
- * is diffed by identity — so nothing double-counts and no ref resolution or cycle handling is
- * needed.
+ * Field-level schema comparison with breaking-change classification. What a schema position describes is
+ * the schema it RESOLVES to, so two positions spelling one pointer compare opaquely, by target string —
+ * the referenced component's own changes are reported once, where that component is diffed by identity,
+ * and nothing double-counts — while two positions pointing DIFFERENTLY are read through
+ * {@see ComponentRefs::resolveSchema()} and compared as the shapes they name. Where a shape lives is not
+ * a contract: the same changeset already carries `schema.added`/`schema.removed` for the component whose
+ * arrival or departure is the whole of what moved, so an inline shape hoisted behind a pointer reports
+ * nothing at the position, while a pointer repointed at another component keeps `schema.ref-changed` —
+ * the name becomes a type in a generated client — and is compared body to body besides, because a
+ * repointing that also narrows is a narrowing.
+ *
+ * A schema is the one Reference Object position that may reach ITSELF, so resolution is bounded rather
+ * than trusted: the pair of pointers being resolved is held open for the length of the descent beneath
+ * it ({@see compareSubschema()}), and a pair already open compares as written, so the walk terminates on
+ * the product of the two schema buckets with no schema ever flattened into itself. That bound is over
+ * the DESCENT, not over a chain: {@see ComponentRefs::resolveSchema()} takes one hop and does not follow
+ * a pointer whose target is itself a pointer.
  *
  * Every DIRECTION this class computes — a type, an enum, a constraint, a bound, a branch, a tag, a
  * null — is turned into a verdict by one rule, stated in full at {@see verdict()} and nowhere else,
@@ -76,14 +89,39 @@ use Docuccino\Core\Support\Hydrate;
 final class SchemaComparator
 {
     /**
+     * The pointer pairs open on the current descent path, keyed by the two `$ref`s being resolved. Held
+     * on the instance because {@see compare()} makes a fresh one per walk and the descent beneath it is
+     * depth-first and synchronous, so the set holds exactly the ancestors of wherever the walk has
+     * reached.
+     *
+     * @var array<string, true>
+     */
+    private array $open = [];
+
+    /**
+     * The two documents' component buckets, or null for a caller comparing two loose schemas — which is
+     * every caller that has no document to resolve against, and for which a pointer is the whole of what
+     * it says.
+     */
+    public function __construct(
+        private readonly ?ComponentRefs $oldRefs = null,
+        private readonly ?ComponentRefs $newRefs = null,
+    ) {}
+
+    /**
      * Two Schema Objects at one position. `mixed`, because a Schema Object may be a BOOLEAN at every
      * position OpenAPI puts one — a media type's `schema` as much as an `items` inside it.
      *
+     * A caller with both documents in hand passes their resolvers, and gets a walk of its own so the
+     * open-pair set of one position never reaches the next.
+     *
      * @return list<Change>
      */
-    public function compare(mixed $old, mixed $new, string $path, string $id, bool $request): array
+    public function compare(mixed $old, mixed $new, string $path, string $id, bool $request, ?ComponentRefs $oldRefs = null, ?ComponentRefs $newRefs = null): array
     {
-        return $this->compareSubschema($old, $new, $path, $id, $request);
+        $walk = $oldRefs === null || $newRefs === null ? $this : new self($oldRefs, $newRefs);
+
+        return $walk->compareSubschema($old, $new, $path, $id, $request);
     }
 
     /**
@@ -126,6 +164,19 @@ final class SchemaComparator
      */
     private function compareSubschema(mixed $old, mixed $new, string $path, string $id, bool $request): array
     {
+        $resolved = $this->resolvePointers($old, $new, $path, $id);
+
+        if ($resolved !== null) {
+            [$oldBody, $newBody, $pair, $changes] = $resolved;
+            $this->open[$pair] = true;
+
+            try {
+                return [...$changes, ...$this->compareSubschema($oldBody, $newBody, $path, $id, $request)];
+            } finally {
+                unset($this->open[$pair]);
+            }
+        }
+
         $wasNothing = $old === false;
         $isNothing = $new === false;
 
@@ -143,6 +194,59 @@ final class SchemaComparator
     }
 
     /**
+     * The two schemas to compare at this position when the sides point DIFFERENTLY, or null to compare
+     * them as written. Null is the answer for a caller holding no documents, for two positions spelling
+     * one pointer — which is where the component's own row reports its edits, once — for a pointer pair
+     * already open further up this descent, and for a pointer neither side will follow.
+     *
+     * The pointer MOVE travels with the resolution rather than being left to {@see compareRef()}, which
+     * never sees the bodies handed back: a pointer that still names a component after the move is a
+     * published name, and a name is a type in a generated client. Inline becoming a pointer, or the
+     * reverse, states no name at the position and reports nothing here — `schema.added` and
+     * `schema.removed` in the same changeset are that component arriving or going.
+     *
+     * @return array{0: mixed, 1: mixed, 2: string, 3: list<Change>}|null
+     */
+    private function resolvePointers(mixed $old, mixed $new, string $path, string $id): ?array
+    {
+        if ($this->oldRefs === null || $this->newRefs === null) {
+            return null;
+        }
+
+        $oldRef = is_array($old) ? Hydrate::stringOrNull($old['$ref'] ?? null) : null;
+        $newRef = is_array($new) ? Hydrate::stringOrNull($new['$ref'] ?? null) : null;
+
+        if ($oldRef === $newRef) {
+            return null;
+        }
+
+        // A pointer is never empty, so the empty string cannot collide with one: the pair is exactly
+        // "what these two sides point at", with absence spelled apart from every name.
+        $pair = ($oldRef ?? '')."\0".($newRef ?? '');
+
+        if (isset($this->open[$pair])) {
+            return null;
+        }
+
+        $oldBody = is_array($old) && $oldRef !== null ? $this->oldRefs->resolveSchema(Arr::stringKeyed($old)) : null;
+        $newBody = is_array($new) && $newRef !== null ? $this->newRefs->resolveSchema(Arr::stringKeyed($new)) : null;
+
+        if ($oldBody === null && $newBody === null) {
+            return null;
+        }
+
+        $moved = $oldRef !== null && $newRef !== null
+            ? [$this->change(ChangeKind::Changed, $id, $path.'.$ref', false, 'schema.ref-changed', '$ref', $oldRef, $newRef)]
+            : [];
+
+        return [$oldBody ?? $old, $newBody ?? $new, $pair, $moved];
+    }
+
+    /**
+     * The pointer move at a position {@see resolvePointers()} declined to read through — a pair already
+     * open, or one neither side will follow. Where it did read through, the move travels with the
+     * resolution and the bodies handed back carry no `$ref`, so this reports nothing twice.
+     *
      * @param  array<string, mixed>  $old
      * @param  array<string, mixed>  $new
      * @param  list<Change>  $changes

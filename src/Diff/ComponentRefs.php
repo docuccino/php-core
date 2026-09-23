@@ -9,13 +9,14 @@ use Docuccino\Core\Document\Parameter;
 use Docuccino\Core\Document\PathItem;
 use Docuccino\Core\Document\ResponseObject;
 use Docuccino\Core\Document\UirDocument;
+use Docuccino\Core\Draft\SchemaKeywords;
 use Docuccino\Core\Support\Hydrate;
 
 /**
  * A document's reusable `components` buckets, used to read a `$ref`ing node back as the thing it points
  * at. The differ's one resolver: every position OAS lets a Reference Object stand in — a path item, a
- * request body, a response, a parameter, a security scheme — is read through here before anything is
- * compared.
+ * request body, a response, a parameter, a security scheme, a schema — is read through here before
+ * anything is compared.
  *
  * Resolving both sides is what keeps hoisting invisible to the diff: an inline body or parameter that
  * becomes a `$ref` (or moves between component names) compares thing-to-thing and reports nothing, while
@@ -28,6 +29,10 @@ use Docuccino\Core\Support\Hydrate;
  * that had not moved. All four resolvers merge that one way — the component's members, with a `summary` or
  * a `description` from the referring node written over them. The identity is the exception, and not a
  * member of the contract: it names the USE rather than the thing the diff pairs on.
+ *
+ * A SCHEMA is the one bucket read on demand rather than up front, and {@see resolveSchema()} says why:
+ * two positions spelling one pointer are left opaque, so the component's own edits are reported once,
+ * where that component is diffed by identity.
  *
  * For a parameter it is also what makes the comparison possible at all: a Reference Object states neither
  * `name` nor `in`, which is how a parameter is told from its neighbours, so unresolved they are
@@ -51,6 +56,7 @@ final readonly class ComponentRefs
      * @param  array<string, PathItem>  $pathItems
      * @param  array<string, array<string, mixed>>  $requestBodies
      * @param  array<string, array<string, mixed>>  $securitySchemes
+     * @param  array<string, array<string, mixed>|bool>  $schemas
      */
     private function __construct(
         private array $responses,
@@ -58,6 +64,7 @@ final readonly class ComponentRefs
         private array $pathItems,
         private array $requestBodies,
         private array $securitySchemes,
+        private array $schemas,
     ) {}
 
     public static function of(UirDocument $document): self
@@ -70,6 +77,7 @@ final readonly class ComponentRefs
             Hydrate::mapOf($rest['pathItems'] ?? null, PathItem::fromArray(...)),
             Hydrate::mapOfArrays($rest['requestBodies'] ?? null),
             Hydrate::mapOfArrays($rest['securitySchemes'] ?? null),
+            $document->components?->schemaValues() ?? [],
         );
     }
 
@@ -198,6 +206,72 @@ final readonly class ComponentRefs
         [$resolved] = self::resolveInto($scheme, 'securitySchemes', $this->securitySchemes);
 
         return $resolved;
+    }
+
+    /**
+     * The `components.schemas` entry a schema position points at, or null where this resolver will not
+     * answer for it. A schema is the one Reference Object position OAS lets recurse, so what is resolved
+     * here is narrower than the four buckets above, in two ways that each pay for themselves.
+     *
+     * Only a BARE pointer is followed — `$ref` plus, at most, the annotation keywords
+     * ({@see SchemaKeywords::isAnnotationOnly()}) and the identity the diff pairs nodes by. Under
+     * 2020-12 every keyword beside a `$ref` still applies, so the schema at such a position is the
+     * INTERSECTION of the two and neither side of a merge states it; declining is the degraded-but-true
+     * answer, and it costs nothing a Docuccino document publishes, which spells a hoisted shape as the
+     * pointer alone. The annotations that are followed override the target's, which is the merge every
+     * resolver here performs.
+     *
+     * One hop, like every resolver above, and unlike them a CHAIN IS NOT FOLLOWED: where the target is
+     * itself a bare pointer, `$schema + $target` keeps the left operand's `$ref` and the `unset` below
+     * strips it, so the hop hands back `[]` and the caller has nothing to re-enter on. Against an inline
+     * schema that position therefore still reads as every keyword removed — the sliver of the
+     * inline-versus-pointer defect this resolver does not close, and the same answer an undeclared name
+     * gets, for the same reason. Nothing Docuccino publishes spells a component as a bare pointer to
+     * another component, so the population is a hand-written `old` side. Following the chain would need
+     * no new bound — the caller's open-pair set already terminates one, cycle included — so what stands
+     * between here and resolving it is this merge and the rows that pin the limit, nothing deeper.
+     *
+     * @param  array<string, mixed>  $schema
+     * @return array<string, mixed>|bool|null
+     */
+    public function resolveSchema(array $schema): array|bool|null
+    {
+        $ref = $schema['$ref'] ?? null;
+        $name = is_string($ref) ? self::componentName($ref, 'schemas') : null;
+
+        if ($name === null || ! array_key_exists($name, $this->schemas) || ! self::isBarePointer($schema)) {
+            return null;
+        }
+
+        $target = $this->schemas[$name];
+
+        if (is_bool($target)) {
+            return $target;
+        }
+
+        $merged = $schema + $target;
+        unset($merged['$ref']);
+
+        return $merged;
+    }
+
+    /**
+     * Whether a pointer is the WHOLE schema at its position — nothing beside it constrains the value, so
+     * the component it names is what that position describes.
+     *
+     * @param  array<string, mixed>  $schema
+     */
+    private static function isBarePointer(array $schema): bool
+    {
+        foreach (array_keys($schema) as $keyword) {
+            if ($keyword === '$ref' || $keyword === 'x-docuccino' || SchemaKeywords::isAnnotationOnly($keyword)) {
+                continue;
+            }
+
+            return false;
+        }
+
+        return true;
     }
 
     /**

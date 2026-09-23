@@ -22,9 +22,11 @@ use Docuccino\Core\Support\Json;
  * security schemes and content pages, delegating field-level schema comparison to
  * {@see SchemaComparator}, and flags each {@see Change} breaking or not.
  *
- * Responses and parameters are read through {@see ComponentRefs} on both sides, so where one lives —
- * inline or hoisted into `components` — is not itself a change, while a shared one's content is compared
- * under every operation that `$ref`s it. An operation's parameters are its own plus the ones its path item
+ * Responses, parameters, request bodies, path items and SCHEMAS are read through {@see ComponentRefs} on
+ * both sides, so where one lives — inline or hoisted into `components` — is not itself a change, while a
+ * shared one's content is compared under every operation that `$ref`s it. A schema is the one of those
+ * that may reach itself, so the resolution beneath it is bounded rather than exhaustive and
+ * {@see SchemaComparator} owns how. An operation's parameters are its own plus the ones its path item
  * declares for every operation under it, minus any the operation restates for the same `in` + `name`.
  *
  * Breaking: a removed operation/parameter/response/status, a parameter becoming required, an
@@ -69,7 +71,7 @@ final class DocumentDiffer
         $unreferenced = [];
 
         $this->diffOperations($old, $new, $oldRefs, $newRefs, $changes, $pairing);
-        $this->diffComponentSchemas($old, $new, $changes, $unreferenced, $pairing);
+        $this->diffComponentSchemas($old, $new, $oldRefs, $newRefs, $changes, $unreferenced, $pairing);
         $this->diffSecuritySchemes($old, $new, $oldRefs, $newRefs, $changes, $unreferenced);
         $this->diffPages($old, $new, $changes);
 
@@ -268,7 +270,7 @@ final class DocumentDiffer
                 $code = $breaking ? 'parameter.added-required' : 'parameter.added';
                 $changes[] = new Change(ChangeKind::Added, ChangeTarget::Parameter, self::nodeId(self::parameterId($param), $opId, $key), $path.' parameters '.self::paramLabel($param), $breaking, $code);
             } else {
-                $this->diffParameterPair($opId, $path, $key, $oldParams[$key], $newParams[$key], $changes);
+                $this->diffParameterPair($opId, $path, $key, $oldParams[$key], $newParams[$key], $oldRefs, $newRefs, $changes);
             }
         }
     }
@@ -276,7 +278,7 @@ final class DocumentDiffer
     /**
      * @param  list<Change>  $changes
      */
-    private function diffParameterPair(string $opId, string $path, string $key, Parameter $old, Parameter $new, array &$changes): void
+    private function diffParameterPair(string $opId, string $path, string $key, Parameter $old, Parameter $new, ComponentRefs $oldRefs, ComponentRefs $newRefs, array &$changes): void
     {
         $id = self::nodeId(self::parameterId($new), $opId, $key);
         $paramPath = $path.' parameters '.self::paramLabel($new);
@@ -295,7 +297,7 @@ final class DocumentDiffer
         $oldSchema = is_bool($old->schema) ? $old->schema : $old->schema?->toArray() ?? [];
         $newSchema = is_bool($new->schema) ? $new->schema : $new->schema?->toArray() ?? [];
 
-        foreach ($this->schemas->compare($oldSchema, $newSchema, $paramPath.' schema', $id, request: true) as $change) {
+        foreach ($this->schemas->compare($oldSchema, $newSchema, $paramPath.' schema', $id, request: true, oldRefs: $oldRefs, newRefs: $newRefs) as $change) {
             $changes[] = $change;
         }
     }
@@ -319,7 +321,7 @@ final class DocumentDiffer
                 $response = $newResponses[$status];
                 $changes[] = new Change(ChangeKind::Added, ChangeTarget::Response, self::nodeId(self::responseId($response), $opId, $status), $path.' responses '.$status, false, 'response.added');
             } else {
-                $this->diffResponsePair($opId, $path, $status, $oldResponses[$status], $newResponses[$status], $changes);
+                $this->diffResponsePair($opId, $path, $status, $oldResponses[$status], $newResponses[$status], $oldRefs, $newRefs, $changes);
             }
         }
     }
@@ -327,7 +329,7 @@ final class DocumentDiffer
     /**
      * @param  list<Change>  $changes
      */
-    private function diffResponsePair(string $opId, string $path, string $status, ResponseObject $old, ResponseObject $new, array &$changes): void
+    private function diffResponsePair(string $opId, string $path, string $status, ResponseObject $old, ResponseObject $new, ComponentRefs $oldRefs, ComponentRefs $newRefs, array &$changes): void
     {
         $id = self::nodeId(self::responseId($new), $opId, $status);
         $responsePath = $path.' responses '.$status;
@@ -348,7 +350,7 @@ final class DocumentDiffer
             } elseif (! $inOld) {
                 $changes[] = new Change(ChangeKind::Added, ChangeTarget::Response, $id, $mediaPath, false, 'response.content-added');
             } else {
-                foreach ($this->schemas->compare($oldContent[$media], $newContent[$media], $mediaPath.' schema', $id, request: false) as $change) {
+                foreach ($this->schemas->compare($oldContent[$media], $newContent[$media], $mediaPath.' schema', $id, request: false, oldRefs: $oldRefs, newRefs: $newRefs) as $change) {
                     $changes[] = $change;
                 }
             }
@@ -379,7 +381,7 @@ final class DocumentDiffer
                 continue;
             }
 
-            foreach ($this->schemas->compare($oldContent[$media], $newContent[$media], $path.' requestBody '.$media.' schema', $opId, request: true) as $change) {
+            foreach ($this->schemas->compare($oldContent[$media], $newContent[$media], $path.' requestBody '.$media.' schema', $opId, request: true, oldRefs: $oldRefs, newRefs: $newRefs) as $change) {
                 $changes[] = $change;
             }
         }
@@ -409,7 +411,7 @@ final class DocumentDiffer
      * @param  list<Change>  $changes
      * @param  array<string, true>  $unreferenced
      */
-    private function diffComponentSchemas(UirDocument $old, UirDocument $new, array &$changes, array &$unreferenced, Pairing $pairing): void
+    private function diffComponentSchemas(UirDocument $old, UirDocument $new, ComponentRefs $oldRefs, ComponentRefs $newRefs, array &$changes, array &$unreferenced, Pairing $pairing): void
     {
         [$oldSchemas, $newSchemas] = IdentityKeys::pairLeftoversByStructure(
             $this->componentSchemaEntries($old, $pairing),
@@ -440,7 +442,7 @@ final class DocumentDiffer
                 $unreachable = ! $oldReach->reaches($oldSchemas[$key]['name']) && ! $newReach->reaches($entry['name']);
                 $requestOnly = $oldDirection->requestOnly($oldSchemas[$key]['name']) && $newDirection->requestOnly($entry['name']);
 
-                foreach ($this->schemas->compare($oldSchemas[$key]['schema'], $entry['schema'], 'components.schemas.'.$entry['name'], $key, request: $requestOnly) as $change) {
+                foreach ($this->schemas->compare($oldSchemas[$key]['schema'], $entry['schema'], 'components.schemas.'.$entry['name'], $key, request: $requestOnly, oldRefs: $oldRefs, newRefs: $newRefs) as $change) {
                     if ($unreachable && $change->breaking) {
                         $unreferenced['components.schemas.'.$entry['name']] = true;
                         $change = new Change($change->kind, $change->target, $change->id, $change->path, false, $change->code, $change->fields);
