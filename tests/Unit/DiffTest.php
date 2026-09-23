@@ -3825,6 +3825,38 @@ it('tells two values JSON cannot encode apart, so a removed enum value is still 
 ]);
 
 /**
+ * A JSON object is an unordered set of members (RFC 8259 §4), so two that differ only in member order
+ * are one value. An exported artifact has had its schema values' keys sorted and a fresh build keeps
+ * them as written, so a comparison that read member order reported an export diffed against its own
+ * build as changed — breaking, where the value was a `const` or an enum member. The second half is the
+ * control: the same reordering with one member's value moved is still that keyword's change.
+ */
+it('reads a value whose members only changed order as unchanged, at every value keyword', function (string $keyword, mixed $written, mixed $sorted, mixed $edited, string $code, bool $breaking): void {
+    expect(diffOfSchemaKeyword($keyword, $sorted, $written)->isEmpty())->toBeTrue();
+
+    $changeset = diffOfSchemaKeyword($keyword, $sorted, $edited);
+
+    expect(diffCodes($changeset))->toBe([$code])
+        ->and($changeset->isBreaking())->toBe($breaking);
+})->with([
+    'example' => ['example', ['min' => 0, 'max' => 100], ['max' => 100, 'min' => 0], ['min' => 0, 'max' => 99], 'schema.annotation-changed', false],
+    'example, nested' => ['example', ['range' => ['min' => 0, 'max' => 100]], ['range' => ['max' => 100, 'min' => 0]], ['range' => ['min' => 1, 'max' => 100]], 'schema.annotation-changed', false],
+    'example, object in a list' => ['example', [['min' => 0, 'max' => 100]], [['max' => 100, 'min' => 0]], [['min' => 0, 'max' => 99]], 'schema.annotation-changed', false],
+    'example, stdClass' => ['example', (object) ['min' => 0, 'max' => 100], (object) ['max' => 100, 'min' => 0], (object) ['min' => 0, 'max' => 99], 'schema.annotation-changed', false],
+    'examples' => ['examples', [['min' => 0, 'max' => 100]], [['max' => 100, 'min' => 0]], [['min' => 0, 'max' => 99]], 'schema.annotation-changed', false],
+    'const' => ['const', ['min' => 0, 'max' => 100], ['max' => 100, 'min' => 0], ['min' => 0, 'max' => 99], 'schema.refinement-changed', true],
+    'enum member' => ['enum', [['min' => 0, 'max' => 100]], [['max' => 100, 'min' => 0]], [['min' => 0, 'max' => 99]], 'schema.enum-value-removed', true],
+]);
+
+it('still reads order where JSON has it, and an object as no list', function (): void {
+    // A list is ordered, `{}` is not `[]`, and an object whose keys are "0" and "1" is not the
+    // two-element list those keys would spell once sorted.
+    expect(diffCodes(diffOfSchemaKeyword('example', [1, 2], [2, 1])))->toBe(['schema.annotation-changed'])
+        ->and(diffCodes(diffOfSchemaKeyword('example', new stdClass, [])))->toBe(['schema.annotation-changed'])
+        ->and(diffCodes(diffOfSchemaKeyword('example', [1 => 'b', 0 => 'a'], ['a', 'b'])))->toBe(['schema.annotation-changed']);
+});
+
+/**
  * The one load-bearing compatibility property of a breaking release, executed rather than promised:
  * an artifact committed before UIR 2.0 still pairs against one built after it, and the `contentHash`
  * a consumer has in their repository does not move.
