@@ -610,7 +610,6 @@ it('names a union branch through the path a diff actually runs', function (): vo
     // The end-to-end claim: this is the edit `--enforce` used to pass as safe. A response that could
     // return a Widget stops being able to, and the gate now says so, at the path a reviewer can find.
     $document = static fn (array $branches): UirDocument => UirDocument::fromArray([
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'info' => ['title' => 'API', 'version' => '1.0.0'],
         'paths' => ['/things' => ['get' => [

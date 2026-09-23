@@ -7,9 +7,10 @@ namespace Docuccino\Core\Document;
 use Docuccino\Core\Support\Hydrate;
 
 /**
- * The immutable in-memory model of a UIR document. Modelled members are typed; anything
- * not modelled (including arbitrary `x-*` members) is preserved verbatim in `rest`, so
- * `fromArray()` → `toArray()` is a faithful round trip.
+ * The immutable in-memory model of a UIR document — an OpenAPI 3.2 document carrying the Docuccino
+ * extension. Modelled members are typed; anything not modelled (including arbitrary `x-*` members, and
+ * the root `$schema`/`uir` an artifact written before UIR 2.0 carries) is preserved verbatim in
+ * `rest`, so `fromArray()` → `toArray()` is a faithful round trip.
  *
  * Its audience is the WHOLE-DOCUMENT stage: the framework adapter, which builds one and hands it to
  * the emitters, the differ and the schema validator. It stays public because that hand-off crosses
@@ -30,9 +31,7 @@ final readonly class UirDocument
      * @param  array<string, mixed>  $rest
      */
     public function __construct(
-        public string $uir,
         public string $openapi,
-        public ?string $schema = null,
         public ?string $jsonSchemaDialect = null,
         public ?array $info = null,
         public ?array $servers = null,
@@ -50,8 +49,6 @@ final readonly class UirDocument
      */
     public static function fromArray(array $data): self
     {
-        $schema = $data['$schema'] ?? null;
-        $uir = $data['uir'] ?? '';
         $openapi = $data['openapi'] ?? '';
         $jsonSchemaDialect = $data['jsonSchemaDialect'] ?? null;
 
@@ -72,15 +69,13 @@ final readonly class UirDocument
         $docuccino = Hydrate::objectOrNull($data['x-docuccino'] ?? null, DocumentExtension::fromArray(...));
 
         unset(
-            $data['$schema'], $data['uir'], $data['openapi'], $data['jsonSchemaDialect'],
+            $data['openapi'], $data['jsonSchemaDialect'],
             $data['info'], $data['servers'], $data['security'], $data['tags'],
             $data['paths'], $data['webhooks'], $data['components'], $data['x-docuccino'],
         );
 
         return new self(
-            uir: is_string($uir) ? $uir : '',
             openapi: is_string($openapi) ? $openapi : '',
-            schema: is_string($schema) ? $schema : null,
             jsonSchemaDialect: is_string($jsonSchemaDialect) ? $jsonSchemaDialect : null,
             info: $info,
             servers: $servers,
@@ -107,14 +102,7 @@ final readonly class UirDocument
      */
     public function toArray(): array
     {
-        $out = [];
-
-        if ($this->schema !== null) {
-            $out['$schema'] = $this->schema;
-        }
-
-        $out['uir'] = $this->uir;
-        $out['openapi'] = $this->openapi;
+        $out = ['openapi' => $this->openapi];
 
         if ($this->jsonSchemaDialect !== null) {
             $out['jsonSchemaDialect'] = $this->jsonSchemaDialect;
@@ -164,9 +152,7 @@ final readonly class UirDocument
     public function withDocumentExtension(DocumentExtension $docuccino): self
     {
         return new self(
-            uir: $this->uir,
             openapi: $this->openapi,
-            schema: $this->schema,
             jsonSchemaDialect: $this->jsonSchemaDialect,
             info: $this->info,
             servers: $this->servers,

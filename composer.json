@@ -1,12 +1,12 @@
 {
     "name": "docuccino/core",
-    "description": "The framework-agnostic engine behind Docuccino: document model, canonicalizer, identities, OpenAPI 3.2/3.1 emitters and semantic diff.",
+    "description": "OpenAPI 3.2, 3.1 and 3.0 emitters, semantic API diffing and breaking-change detection: the framework-agnostic engine behind Docuccino.",
     "type": "library",
     "keywords": [
         "openapi",
         "openapi-generator",
         "api-documentation",
-        "uir",
+        "openapi-3.2",
         "swagger",
         "json-schema",
         "openapi-diff",

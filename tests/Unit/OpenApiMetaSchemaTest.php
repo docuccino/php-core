@@ -108,13 +108,13 @@ it('emits YAML and JSON that agree on the order they write members in', function
 })->with(metaSchemaSubjects());
 
 it('vendors a meta-schema for every OpenAPI format the emitters offer', function (): void {
-    $emitted = array_values(array_filter(
-        Formats::ids(),
-        static fn (string $id): bool => str_starts_with($id, 'openapi-'),
-    ));
+    // The formats that publish PLAIN OpenAPI, read off the column and never off the ids: `full`
+    // emits an OpenAPI description too, and is held to the UIR schema before emission instead.
+    $emitted = Formats::plainOpenApi();
 
     expect(array_keys(OpenApiMetaSchema::SCHEMAS))->toEqualCanonicalizing($emitted)
-        ->and($emitted)->toHaveCount(3);
+        ->and($emitted)->toHaveCount(3)
+        ->and(Formats::publishesPlainOpenApi('full'))->toBeFalse();
 });
 
 it('pins each vendored meta-schema to the dated URI it was fetched from', function (): void {

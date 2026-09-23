@@ -28,7 +28,6 @@ describe('a name spelled like a fixed field', function (): void {
         [$schema, $expected] = $convertible();
 
         $result = (new OpenApi30DownlevelEmitter)->emit(UirDocument::fromArray([
-            'uir' => '1.0.0',
             'openapi' => '3.2.0',
             'info' => ['title' => 'API', 'version' => '1.0.0'],
             ...$place($schema),
@@ -115,7 +114,6 @@ describe('a name spelled like a fixed field', function (): void {
         $value = ['type' => ['string', 'null'], 'const' => 'x', 'get' => ['responses' => []], 'schema' => ['type' => ['integer', 'null']]];
 
         $result = (new OpenApi30DownlevelEmitter)->emitWithReport(UirDocument::fromArray([
-            'uir' => '1.0.0',
             'openapi' => '3.2.0',
             'info' => ['title' => 'API', 'version' => '1.0.0'],
             'paths' => ['/a' => ['get' => ['responses' => ['200' => [
@@ -146,7 +144,6 @@ describe('a name spelled like a fixed field', function (): void {
 
     it('reads a $ref in an examples map as a reference, and one in an example value as data', function (): void {
         $result = (new OpenApi30DownlevelEmitter)->emitWithReport(UirDocument::fromArray([
-            'uir' => '1.0.0',
             'openapi' => '3.2.0',
             'info' => ['title' => 'API', 'version' => '1.0.0'],
             'paths' => ['/a' => ['get' => ['responses' => ['200' => [
@@ -198,7 +195,6 @@ describe('a name spelled like a fixed field', function (): void {
         ];
 
         $result = (new OpenApi30DownlevelEmitter)->emitWithReport(UirDocument::fromArray([
-            'uir' => '1.0.0',
             'openapi' => '3.2.0',
             'info' => ['title' => 'API', 'version' => '1.0.0'],
             'paths' => ['/a' => ['get' => ['responses' => ['200' => [
@@ -220,7 +216,6 @@ describe('a name spelled like a fixed field', function (): void {
 
     it('still reads a Link map member as a reference, and the Link\'s own fields as fields', function (): void {
         $result = (new OpenApi30DownlevelEmitter)->emitWithReport(UirDocument::fromArray([
-            'uir' => '1.0.0',
             'openapi' => '3.2.0',
             'info' => ['title' => 'API', 'version' => '1.0.0'],
             'paths' => ['/a' => ['get' => ['responses' => ['200' => [
@@ -247,7 +242,6 @@ describe('a name spelled like a fixed field', function (): void {
 
     it('keeps a security requirement named like a component out of the scheme drop', function (): void {
         $result = (new OpenApi30DownlevelEmitter)->emitWithReport(UirDocument::fromArray([
-            'uir' => '1.0.0',
             'openapi' => '3.2.0',
             'info' => ['title' => 'API', 'version' => '1.0.0'],
             'security' => [['cert' => [], 'apiKey' => []]],
@@ -280,7 +274,6 @@ describe('a name spelled like a fixed field', function (): void {
         $requirement = ['schema' => ['read'], 'paths' => [], 'callbacks' => ['write'], 'example' => [], 'links' => []];
 
         $result = (new OpenApi30DownlevelEmitter)->emitWithReport(UirDocument::fromArray([
-            'uir' => '1.0.0',
             'openapi' => '3.2.0',
             'info' => ['title' => 'API', 'version' => '1.0.0'],
             'security' => [$requirement],

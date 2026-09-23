@@ -245,8 +245,8 @@ final readonly class CoverageReport
         if ($unidentified > 0) {
             $lines[] = '';
             $lines[] = sprintf(
-                '%d of those carry no x-docuccino id, so nothing can record them as exercised. Export the artifact '.
-                'as UIR rather than as OpenAPI with identities dropped%s.',
+                '%d of those carry no x-docuccino id, so nothing can record them as exercised. Export the full '.
+                'artifact rather than an OpenAPI one with identities dropped%s.',
                 $unidentified,
                 $exportCommand === null ? '' : ' ('.$exportCommand.')',
             );

@@ -1401,7 +1401,7 @@ it('names a multi-representation body the same however the document spells it', 
     // Insertion order inside the merged `content` is whichever arm the walk met first and is sorted away
     // on emit, so it is the EMITTED bytes the two documents owe each other.
     $emit = static fn (array $doc): string => (new OpenApi32Emitter)->emit(UirDocument::fromArray(
-        ['uir' => '1.0', 'openapi' => '3.2.0', 'info' => ['title' => 'T', 'version' => '1'], 'x-docuccino' => ['id' => 'doc:default']] + $doc,
+        ['openapi' => '3.2.0', 'info' => ['title' => 'T', 'version' => '1'], 'x-docuccino' => ['id' => 'doc:default']] + $doc,
     ));
 
     expect(array_keys($one['components']['responses']))->toBe(['AuthenticationChallenge_ProblemDetailsData'])

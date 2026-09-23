@@ -14,7 +14,6 @@ use Docuccino\Core\SpecValidation\Validator;
 function overlayBaseDocument(): array
 {
     return [
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'info' => ['title' => 'Forms API', 'version' => '1.0.0'],
         'paths' => [

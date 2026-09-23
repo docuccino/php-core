@@ -256,15 +256,15 @@ it('says so when an artifact carries no identities to track coverage by', functi
     // and a framework's vocabulary in a framework-agnostic package would lie to any other adapter.
     expect($rendered)->toContain('GET /a  200  (no id)')
         ->toContain('1 of those carry no x-docuccino id')
-        ->toContain('Export the artifact as UIR')
+        ->toContain('Export the full artifact')
         ->not->toContain('artisan');
 });
 
 it('names the export command when the caller supplies one', function (): void {
     $index = ContractIndex::fromArray(['paths' => ['/a' => ['get' => []]]]);
 
-    expect(CoverageReport::of($index, [])->render(100.0, 'php artisan docuccino:export --format=uir'))
-        ->toContain('as OpenAPI with identities dropped (php artisan docuccino:export --format=uir).');
+    expect(CoverageReport::of($index, [])->render(100.0, 'php artisan docuccino:export --format=full'))
+        ->toContain('rather than an OpenAPI one with identities dropped (php artisan docuccino:export --format=full).');
 });
 
 it('leaves the identity note off a report whose gaps all have ids', function (): void {

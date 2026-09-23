@@ -13,7 +13,57 @@ use Docuccino\Core\SpecValidation\Validator;
  * rejected a document the emitters produce. These read the two sources of truth rather than a third
  * hand-written copy — the OAS 3.2 meta-schema for WHICH members an object has, the canonicaliser
  * for WHERE each one sits.
+ *
+ * The schema is TWO files from 2.0 on — the document schema and the extension schema it embeds — so
+ * `$defs` are resolved across both. A guard reading one file would go silent over every object the
+ * other holds, which is most of the extension.
  */
+
+/**
+ * Both halves of the published schema, merged for `$defs` lookup: the document schema's own members at
+ * the root, and every `$defs` either file declares.
+ *
+ * The document schema carries the extension EMBEDDED, as a resource with its own `$id`, so that copy
+ * is dropped from the merge and the standalone file read instead — otherwise the extension's root
+ * object would be checked twice under two names, and the guards below count what they checked. The
+ * test is which entries declare an `$id`, not which one is called `extension`: an embedded resource is
+ * what an `$id` inside a schema MEANS, and a name is a convention the sync tool could change.
+ *
+ * @return array<string, mixed>
+ */
+function publishedSchemaFamily(): array
+{
+    $read = static function (string $path): array {
+        $decoded = json_decode((string) file_get_contents($path), true, flags: JSON_THROW_ON_ERROR);
+
+        /** @var array<string, mixed> $decoded */
+        return $decoded;
+    };
+
+    $document = $read(Validator::defaultSchemaPath());
+    $extension = $read(Validator::defaultExtensionSchemaPath());
+
+    $defs = [];
+    foreach ([$document['$defs'] ?? [], $extension['$defs'] ?? []] as $half) {
+        foreach (is_array($half) ? $half : [] as $name => $def) {
+            if (is_array($def) && isset($def['$id'])) {
+                continue;
+            }
+
+            $defs[(string) $name] = $def;
+        }
+    }
+
+    // The extension's ROOT is the document-level `x-docuccino` object, which has no `$defs` name of its
+    // own — give it one so the order guards below see it like any other object.
+    $extensionRoot = $extension;
+    unset($extensionRoot['$defs']);
+    $defs['documentExtension'] = $extensionRoot;
+
+    $document['$defs'] = $defs;
+
+    return $document;
+}
 
 /**
  * A JSON file as an array.
@@ -72,7 +122,7 @@ $publishedOrder = static function (array $node): array {
 };
 
 it('spells every member OpenAPI 3.2 defines on each object it models', function () use ($readJson, $objectNode, $memberNames): void {
-    $uir = $readJson(Validator::defaultSchemaPath());
+    $uir = publishedSchemaFamily();
     $oas = $readJson(OpenApiMetaSchema::path('openapi-3.2'));
 
     // Each object the UIR schema models, under the name OAS 3.2 gives the same object.
@@ -116,8 +166,8 @@ it('spells every member OpenAPI 3.2 defines on each object it models', function 
         ->and($short)->toBe([]);
 });
 
-it('publishes a member order naming exactly the members it defines', function () use ($readJson, $memberNames, $publishedOrder): void {
-    $uir = $readJson(Validator::defaultSchemaPath());
+it('publishes a member order naming exactly the members it defines', function () use ($memberNames, $publishedOrder): void {
+    $uir = publishedSchemaFamily();
     $defs = $uir['$defs'] ?? [];
 
     // The Schema Object is the one exception and stays one: `additionalProperties: true` lets every
@@ -157,7 +207,7 @@ it('publishes a member order naming exactly the members it defines', function ()
         ->and($disagreed)->toBe([]);
 });
 
-it('publishes the member order the canonicaliser actually produces', function () use ($readJson, $objectNode, $publishedOrder): void {
+it('publishes the member order the canonicaliser actually produces', function () use ($objectNode, $publishedOrder): void {
     $extension = ['id' => 'op:v1:0123456789abcdef'];
 
     $response = [
@@ -262,8 +312,6 @@ it('publishes the member order the canonicaliser actually produces', function ()
         'info' => ['x-docuccino' => $extension, 'version' => '1.0.0', 'license' => ['name' => 'MIT'], 'contact' => ['name' => 'c'], 'termsOfService' => 't', 'description' => 'd', 'summary' => 's', 'title' => 'T'],
         'jsonSchemaDialect' => 'https://spec.openapis.org/oas/3.2/dialect/base',
         'openapi' => '3.2.0',
-        'uir' => '1.0.0',
-        '$schema' => 'https://spec.docuccino.app/uir/1.0/schema.json',
     ];
 
     // Where each object type sits in the probe. Objects, not maps: a Media Type or a Header has no
@@ -281,7 +329,7 @@ it('publishes the member order the canonicaliser actually produces', function ()
         'schema' => ['components', 'schemas', 'S'],
     ];
 
-    $uir = $readJson(Validator::defaultSchemaPath());
+    $uir = publishedSchemaFamily();
     $canonical = json_decode((string) json_encode((new Canonicalizer)->canonicalize($document)), true, flags: JSON_THROW_ON_ERROR);
 
     $disagreed = [];

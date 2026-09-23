@@ -7,14 +7,14 @@ use Docuccino\Core\SpecValidation\Validator;
 /**
  * The hand-written fixtures are the input most of this suite reasons about, so a fixture the
  * product could never have emitted proves nothing about the product. Anything under Fixtures/
- * that declares a `uir` version is held here to the schema it claims: nothing read the corpus
- * that way before, and 22 node ids sat at the wrong length with the whole suite green.
+ * that presents itself as a UIR document is held here to the schema it claims: nothing read the
+ * corpus that way before, and 22 node ids sat at the wrong length with the whole suite green.
  */
 
 /**
  * Every fixture file presenting itself as a UIR document, keyed by file name.
  *
- * `uir` is what makes the claim — the OpenAPI and Postman meta-schemas living in the same
+ * `x-docuccino` is what makes the claim — the OpenAPI and Postman meta-schemas living in the same
  * directory are somebody else's documents and are not held to ours.
  *
  * @return array<string, array<string, mixed>>
@@ -25,7 +25,7 @@ $uirFixtures = static function (): array {
     foreach (glob(dirname(__DIR__).'/Fixtures/*.json') ?: [] as $path) {
         $decoded = json_decode((string) file_get_contents($path), true, flags: JSON_THROW_ON_ERROR);
 
-        if (is_array($decoded) && array_key_exists('uir', $decoded)) {
+        if (is_array($decoded) && array_key_exists('x-docuccino', $decoded)) {
             /** @var array<string, mixed> $decoded */
             $documents[basename($path)] = $decoded;
         }
@@ -57,9 +57,10 @@ it('holds every fixture that claims to be a UIR document to the UIR schema', fun
 });
 
 it('holds every fixture node id to the id grammar the schema states', function () use ($uirFixtures): void {
-    $schema = json_decode((string) file_get_contents(Validator::defaultSchemaPath()), true, flags: JSON_THROW_ON_ERROR);
+    // Read out of the schema rather than restated here, so the guard tracks the grammar it guards. A
+    // node id is the extension's own grammar, so that is the half of the family it comes from.
+    $schema = json_decode((string) file_get_contents(Validator::defaultExtensionSchemaPath()), true, flags: JSON_THROW_ON_ERROR);
 
-    // Read out of the schema rather than restated here, so the guard tracks the grammar it guards.
     $defs = is_array($schema) ? ($schema['$defs'] ?? null) : null;
     $nodeId = is_array($defs) ? ($defs['nodeId'] ?? null) : null;
     $pattern = is_array($nodeId) ? ($nodeId['pattern'] ?? null) : null;

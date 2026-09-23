@@ -93,8 +93,6 @@ function postmanLeaves(array $items, string $prefix = ''): array
 function postmanDocumentWithPaths(array $paths, array $tags = []): array
 {
     $document = [
-        '$schema' => 'https://spec.docuccino.app/uir/1.0/schema.json',
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'info' => ['title' => 'T', 'version' => '1.0.0'],
         'paths' => $paths,
@@ -120,7 +118,7 @@ function postmanSchemaFixtures(): array
     foreach (glob(dirname(__DIR__).'/Fixtures/*.json') ?: [] as $path) {
         $decoded = json_decode((string) file_get_contents($path), true);
 
-        if (is_array($decoded) && isset($decoded['uir'], $decoded['info'])) {
+        if (is_array($decoded) && isset($decoded['openapi'], $decoded['info'], $decoded['x-docuccino'])) {
             $fixtures[] = basename($path);
         }
     }

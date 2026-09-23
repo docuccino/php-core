@@ -17,7 +17,6 @@ use Docuccino\Core\SpecValidation\Validator;
 function minimalDocument(): array
 {
     return [
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'info' => ['title' => 'Empty API', 'version' => '1.0.0'],
         'paths' => [],

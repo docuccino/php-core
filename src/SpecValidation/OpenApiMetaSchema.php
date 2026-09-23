@@ -43,7 +43,7 @@ use stdClass;
  * a document may contain.
  *
  * @phpstan-type VendoredSchema array{file: string, published: string, sha256: string}
- * @phpstan-type KeyGates array{paths: list<string>, components: list<string>, responses: list<string>}
+ * @phpstan-type KeyGates array{document: list<string>, paths: list<string>, components: list<string>, responses: list<string>}
  */
 final class OpenApiMetaSchema
 {
@@ -448,8 +448,13 @@ final class OpenApiMetaSchema
      * The `patternProperties` KEY GATES the 3.1/3.2 meta-schemas enforce only through
      * `unevaluatedProperties: false` — which is off, for the opis defects named in {@see self::validator()}.
      * Turning that keyword off silently took all 28 of those sites with it, so a `paths` key not starting
-     * with `/` and a response keyed `twohundred` both validated clean. This walks the three gates back on
+     * with `/` and a response keyed `twohundred` both validated clean. This walks those gates back on
      * directly, which needs no validator and no `$ref` resolution.
+     *
+     * The DOCUMENT ROOT is one of them, and the one that had been paying for it: the OpenAPI Object
+     * enumerates its members and admits nothing else but `^x-`, so with the keyword off a root member no
+     * OpenAPI version defines validated clean at every version. Without this gate there is no answer to
+     * "is this a valid OpenAPI document, full stop" — which is the question the artifact exists to pass.
      *
      * Patterns are READ OUT of the vendored file, never restated here, so a schema whose gate changes
      * moves this with it — and the digest in {@see SCHEMAS} is what stops that reading from being
@@ -465,7 +470,7 @@ final class OpenApiMetaSchema
         }
 
         $gates = self::keyGates($format);
-        $findings = [];
+        $findings = self::gateKeys($instance, $gates['document'], '', 'document');
 
         foreach (['paths', 'components'] as $member) {
             $findings = [...$findings, ...self::gateKeys($instance->{$member} ?? null, $gates[$member], '/'.$member, $member)];
@@ -505,11 +510,11 @@ final class OpenApiMetaSchema
             }
 
             $findings[] = sprintf(
-                '%s patternProperties: The key "%s" matches none of %s (schema /$defs/%s)',
+                '%s patternProperties: The key "%s" matches none of %s (schema %s)',
                 $pointer.'/'.self::escape((string) $key),
                 $key,
                 implode(', ', $patterns),
-                $gate,
+                $gate === 'document' ? '/properties' : '/$defs/'.$gate,
             );
         }
 
@@ -517,9 +522,10 @@ final class OpenApiMetaSchema
     }
 
     /**
-     * The gate patterns for `paths`, `components` and an operation's `responses`, read from the vendored
-     * file. A declared `properties` key (`responses`' `default`) is an exact-match alternative, and every
-     * one of the three `$ref`s the specification-extensions schema, so `^x-` is always allowed.
+     * The gate patterns for the document root, `paths`, `components` and an operation's `responses`,
+     * read from the vendored file. A declared `properties` key (the root's own members, `responses`'
+     * `default`) is an exact-match alternative, and each of the four reaches the specification-extensions
+     * schema, so `^x-` is always allowed.
      *
      * Cached per format for the same reason {@see self::validator()} is: this runs once per document and
      * the read behind it decodes a 39KB file.
@@ -532,13 +538,15 @@ final class OpenApiMetaSchema
             return self::$keyGates[$format];
         }
 
-        $defs = self::member(self::decode($format), '$defs');
+        $schema = self::decode($format);
+        $defs = self::member($schema, '$defs');
         $extensions = array_keys(get_object_vars(self::member(self::member($defs, 'specification-extensions'), 'patternProperties')));
 
-        $patterns = static function (string $def) use ($defs, $extensions): array {
-            $node = self::member($defs, $def);
-
-            $found = array_keys(get_object_vars(self::member($node, 'patternProperties')));
+        // The root states its members with `properties` alone and closes with `unevaluatedProperties`;
+        // the three maps state theirs with `patternProperties`. Reading both makes one reader answer
+        // for all four.
+        $patterns = static function (stdClass $node) use ($extensions): array {
+            $found = array_keys(self::members($node->patternProperties ?? null));
 
             foreach (array_keys(self::members($node->properties ?? null)) as $literal) {
                 $found[] = '^'.preg_quote($literal, '~').'$';
@@ -548,9 +556,10 @@ final class OpenApiMetaSchema
         };
 
         return self::$keyGates[$format] = [
-            'paths' => $patterns('paths'),
-            'components' => $patterns('components'),
-            'responses' => $patterns('responses'),
+            'document' => $patterns($schema),
+            'paths' => $patterns(self::member($defs, 'paths')),
+            'components' => $patterns(self::member($defs, 'components')),
+            'responses' => $patterns(self::member($defs, 'responses')),
         ];
     }
 

@@ -1,6 +1,4 @@
 {
-  "$schema": "https://spec.docuccino.app/uir/1.0/schema.json",
-  "uir": "1.0.0",
   "openapi": "3.2.0",
   "jsonSchemaDialect": "https://spec.openapis.org/oas/3.2/dialect/base",
   "info": {
@@ -124,6 +122,6 @@
   },
   "x-docuccino": {
     "document": { "id": "doc:default", "configHash": "cfg-abc", "contentHash": "8ae1a8897d11e03848922edfd5c56e346c19e1c7905584f9988f42bb57b9d2ae" },
-    "generator": { "name": "docuccino/laravel", "version": "0.1.0", "specVersion": "1.0.0" }
+    "generator": { "name": "docuccino/laravel", "version": "0.1.0", "specVersion": "2.0.0", "schema": "https://spec.docuccino.app/uir/2.0/schema.json" }
   }
 }

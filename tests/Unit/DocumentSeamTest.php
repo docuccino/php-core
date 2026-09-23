@@ -15,7 +15,6 @@ use Docuccino\Core\Document\UirDocument;
  */
 it('swaps the document extension while preserving every other member', function (): void {
     $base = new UirDocument(
-        uir: '1.0.0',
         openapi: '3.2.0',
         info: ['title' => 'X', 'version' => '1'],
         paths: [],
@@ -27,7 +26,6 @@ it('swaps the document extension while preserving every other member', function 
 
     expect($updated)->not->toBe($base);
     expect($updated->docuccino)->toBe($extension);
-    expect($updated->uir)->toBe('1.0.0');
     expect($updated->openapi)->toBe('3.2.0');
     expect($updated->info)->toBe(['title' => 'X', 'version' => '1']);
     expect($updated->rest)->toBe(['x-vendor' => true]);

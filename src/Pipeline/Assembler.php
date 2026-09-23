@@ -83,8 +83,6 @@ final class Assembler
         $componentSchemas = $this->buildComponents($components);
 
         $doc = [
-            '$schema' => UirSpec::schemaUrl(),
-            'uir' => UirSpec::VERSION,
             'openapi' => self::OPENAPI_VERSION,
             'jsonSchemaDialect' => self::DIALECT,
             'info' => $document->info,
@@ -151,7 +149,15 @@ final class Assembler
 
         $doc['x-docuccino'] = [
             'document' => ['id' => $documentId, 'configHash' => $document->hash()],
-            'generator' => ['name' => $this->generatorName, 'version' => $generatorVersion, 'specVersion' => UirSpec::VERSION],
+            // The spec version and the schema URL live here rather than at the root, where the OpenAPI
+            // Object admits neither: this subtree is excluded from `contentHash`, so a spec bump can
+            // never dirty a committed diff.
+            'generator' => [
+                'name' => $this->generatorName,
+                'version' => $generatorVersion,
+                'specVersion' => UirSpec::VERSION,
+                'schema' => UirSpec::schemaUrl(),
+            ],
         ];
 
         foreach ($components->diagnostics() as $diagnostic) {

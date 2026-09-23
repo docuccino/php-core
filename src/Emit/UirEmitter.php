@@ -9,18 +9,20 @@ use Docuccino\Core\Canonical\CanonicalJsonSerializer;
 use Docuccino\Core\Document\UirDocument;
 
 /**
- * Emits a {@see UirDocument} as canonical UIR JSON — canonicalised (member order, sorted keys,
- * method/parameter order) then serialised deterministically.
+ * Emits a {@see UirDocument} in full — canonicalised (member order, sorted keys, method/parameter
+ * order) then serialised deterministically. It is the `full` format: the same document
+ * {@see OpenApi32Emitter} writes, with the `x-docuccino` extension retained rather than stripped.
  *
- * How much provenance comes out is {@see EmitOptions::$provenance}:
+ * How much provenance comes out is {@see EmitOptions::$provenance}, whose `full` shares a word with
+ * the format id and nothing else — one names the artifact, the other how much trail survives in it:
  *
  * - `full` — every record, `overrode` trail included;
  * - `winners` — records kept, each `overrode` list dropped, so shadowed-value history doesn't bloat
  *   committed artifacts;
  * - `none` — provenance stripped from every `x-docuccino` member.
  *
- * `full` is the default, so a plain `emit()` reproduces the committed goldens byte-for-byte; the CLI
- * picks `winners` for committed artifacts.
+ * {@see ProvenanceLevel::Full} is the default, so a plain `emit()` reproduces the committed goldens
+ * byte-for-byte; the CLI picks `winners` for committed artifacts.
  *
  * @internal
  */
@@ -33,7 +35,7 @@ final readonly class UirEmitter implements ReportingEmitter
 
     public function format(): string
     {
-        return 'uir';
+        return 'full';
     }
 
     public function emit(UirDocument $document, EmitOptions $options = new EmitOptions(provenance: ProvenanceLevel::Full)): string

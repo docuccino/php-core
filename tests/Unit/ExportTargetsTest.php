@@ -44,25 +44,25 @@ it('reads a list of targets', function (): void {
     $config = configWithExport(['targets' => [
         ['format' => 'openapi-3.2', 'path' => 'docs/openapi.json'],
         ['format' => 'openapi-3.1', 'path' => 'docs/openapi-3.1.yaml'],
-        ['format' => 'uir', 'path' => 'docs/api.uir.json'],
+        ['format' => 'full', 'path' => 'docs/api.uir.json'],
     ]]);
 
     expect(targetPairs($config))->toBe([
         ['openapi-3.2', 'docs/openapi.json'],
         ['openapi-3.1', 'docs/openapi-3.1.yaml'],
-        ['uir', 'docs/api.uir.json'],
+        ['full', 'docs/api.uir.json'],
     ])->and($config->exportTargetIssues())->toBe([]);
 });
 
 it('lets a target list supersede export.path, and says the path is now dead config', function (): void {
     $config = configWithExport([
         'path' => 'docs/openapi.json',
-        'targets' => [['format' => 'uir', 'path' => 'docs/api.uir.json']],
+        'targets' => [['format' => 'full', 'path' => 'docs/api.uir.json']],
     ]);
 
     // The shipped config ships a `path`, so adding targets next to it is the expected upgrade move —
     // it must work, and it must say the leftover key writes nothing.
-    expect(targetPairs($config))->toBe([['uir', 'docs/api.uir.json']]);
+    expect(targetPairs($config))->toBe([['full', 'docs/api.uir.json']]);
 
     $issues = $config->exportTargetIssues();
     expect($issues)->toHaveCount(1)
@@ -91,33 +91,33 @@ it('reports every way a target list can be wrong', function (mixed $export, stri
     expect($matching[0]['detail'])->toBe($detail);
 })->with([
     'empty list' => [['targets' => []], 'empty', ''],
-    'not a list' => [['targets' => ['a' => ['format' => 'uir', 'path' => 'x.json']]], 'empty', ''],
+    'not a list' => [['targets' => ['a' => ['format' => 'full', 'path' => 'x.json']]], 'empty', ''],
     'entry is a scalar' => [['targets' => ['nope']], 'shape', 'string'],
     'missing format' => [['targets' => [['path' => 'x.json']]], 'shape', ''],
-    'missing path' => [['targets' => [['format' => 'uir']]], 'shape', ''],
+    'missing path' => [['targets' => [['format' => 'full']]], 'shape', ''],
     'blank format' => [['targets' => [['format' => '', 'path' => 'x.json']]], 'shape', ''],
     'unknown format' => [['targets' => [['format' => 'swagger-2.0', 'path' => 'x.json']]], 'unknown-format', 'swagger-2.0'],
-    'yaml on a json-only format' => [['targets' => [['format' => 'uir', 'path' => 'x.yaml']]], 'yaml-unsupported', 'uir => x.yaml'],
+    'yaml on a json-only format' => [['targets' => [['format' => 'full', 'path' => 'x.yaml']]], 'yaml-unsupported', 'full => x.yaml'],
     'two targets one path' => [['targets' => [
         ['format' => 'openapi-3.2', 'path' => 'x.json'],
         ['format' => 'openapi-3.1', 'path' => 'x.json'],
     ]], 'duplicate-path', 'x.json'],
     'two targets one format' => [['targets' => [
-        ['format' => 'uir', 'path' => 'a.json'],
-        ['format' => 'uir', 'path' => 'b.json'],
-    ]], 'duplicate-format', 'uir'],
+        ['format' => 'full', 'path' => 'a.json'],
+        ['format' => 'full', 'path' => 'b.json'],
+    ]], 'duplicate-format', 'full'],
 ]);
 
 it('drops a malformed entry from the targets it reads, keeping the usable ones', function (): void {
     $config = configWithExport(['targets' => [
         ['format' => 'openapi-3.2', 'path' => 'docs/openapi.json'],
         'not-a-target',
-        ['format' => 'uir', 'path' => 'docs/api.uir.json'],
+        ['format' => 'full', 'path' => 'docs/api.uir.json'],
     ]]);
 
     expect(targetPairs($config))->toBe([
         ['openapi-3.2', 'docs/openapi.json'],
-        ['uir', 'docs/api.uir.json'],
+        ['full', 'docs/api.uir.json'],
     ])->and(array_column($config->exportTargetIssues(), 'problem'))->toContain('shape');
 });
 

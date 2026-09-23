@@ -468,7 +468,6 @@ it('names a repointed discriminator mapping through the path a diff actually run
     // routes the `invoice` tag to another type, every generated client deserialises it as that type, and
     // the gate says so at a path a reviewer can find.
     $document = static fn (string $target): UirDocument => UirDocument::fromArray([
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'info' => ['title' => 'API', 'version' => '1.0.0'],
         'paths' => ['/things' => ['get' => [

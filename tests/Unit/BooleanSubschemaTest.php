@@ -41,7 +41,6 @@ function booleanSubschemaDocument(string $keyword, mixed $value): array
     };
 
     return [
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'info' => ['title' => 'API', 'version' => '1.0.0'],
         'paths' => [],
@@ -57,7 +56,7 @@ function booleanSubschemaPublished(string $format, array $document): string
         flags: JSON_THROW_ON_ERROR,
     );
 
-    if ($format !== 'uir') {
+    if ($format !== 'full') {
         // The oracle. A spelling no validator accepts is the defect this file exists for.
         expect(OpenApiMetaSchema::findings($format, $graph))->toBe([], $format.' meta-schema');
     }
@@ -103,7 +102,7 @@ it('publishes a boolean subschema as written in every dialect that spells one', 
 
         $document = booleanSubschemaDocument($keyword, $value);
 
-        foreach (['uir', 'openapi-3.2', 'openapi-3.1'] as $format) {
+        foreach (['full', 'openapi-3.2', 'openapi-3.1'] as $format) {
             expect(booleanSubschemaPublished($format, $document))->toBe($expected, $keyword.' '.$written.' '.$format);
         }
     }
@@ -167,7 +166,7 @@ it('publishes an empty subschema slot as the empty schema, not as a list', funct
     $document = booleanSubschemaDocument($keyword, []);
     $dropped = in_array($keyword, OpenApi30DownlevelEmitter::UNSUPPORTED_SCHEMA_KEYWORDS, true);
 
-    foreach (['uir', 'openapi-3.2', 'openapi-3.1'] as $format) {
+    foreach (['full', 'openapi-3.2', 'openapi-3.1'] as $format) {
         expect(booleanSubschemaPublished($format, $document))->toBe($expected, $keyword.' '.$format);
     }
 
@@ -304,7 +303,6 @@ it('reads an absent subschema as the empty one, so a constraint arriving there i
 
 it('names the narrowing a boolean makes on the path a diff actually runs', function (): void {
     $document = static fn (mixed $items): UirDocument => UirDocument::fromArray([
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'info' => ['title' => 'API', 'version' => '1.0.0'],
         'paths' => ['/things' => ['get' => [
@@ -331,7 +329,6 @@ it('names the narrowing a boolean makes on the path a diff actually runs', funct
 
 it('sees a boolean at the media type schema slot rather than reporting the media type gone', function (): void {
     $document = static fn (mixed $schema): UirDocument => UirDocument::fromArray([
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'info' => ['title' => 'API', 'version' => '1.0.0'],
         'paths' => ['/things' => ['post' => [
@@ -375,7 +372,7 @@ it('widens a value that is no schema at all to a vague-but-valid one', function 
     foreach ([null, 'nonsense', 7, 1.5] as $value) {
         $document = booleanSubschemaDocument($keyword, $value);
 
-        foreach (['uir', 'openapi-3.2', 'openapi-3.1'] as $format) {
+        foreach (['full', 'openapi-3.2', 'openapi-3.1'] as $format) {
             expect(booleanSubschemaPublished($format, $document))->toBe($expected, $keyword.' '.$format);
         }
 

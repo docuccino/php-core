@@ -12,8 +12,8 @@ use Docuccino\Core\Document\UirDocument;
 use Docuccino\Core\SpecValidation\EmittedSpecCheck;
 
 /**
- * Emits a {@see UirDocument} as pure OpenAPI 3.2 (JSON or YAML): every `x-docuccino` member goes,
- * along with the UIR-only top-level `$schema` and `uir`. Options can re-emit ids as flat
+ * Emits a {@see UirDocument} as pure OpenAPI 3.2 (JSON or YAML): every `x-docuccino` member goes, and
+ * so does the root `$schema`/`uir` pair an artifact written before UIR 2.0 carries. Options can re-emit ids as flat
  * `x-docuccino-id` members and map schema mock hints to a faker member; provenance always goes. So
  * does the content layer — OAS has nowhere to put it, and `info.description`/tag descriptions already
  * live in standard fields.
@@ -74,6 +74,12 @@ final readonly class OpenApi32Emitter implements ReportingEmitter
     {
         $array = $document->toArray();
 
+        // A compatibility strip, not dead code: UIR 2.0 writes neither member, but the adapter's
+        // VIEWER hydrates a committed artifact and re-emits it, and one written before 2.0 carries
+        // both at the root — where the OpenAPI Object admits neither, so serving them back would
+        // publish an invalid document. They ride in `rest` now, so this is the only thing that drops
+        // them. The viewer is the whole of that reach, which is what this comment used to overstate:
+        // the diff commands hydrate a committed artifact too, and never emit one.
         unset($array['$schema'], $array['uir']);
 
         /** @var array<string, mixed> $stripped */

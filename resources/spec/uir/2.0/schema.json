@@ -1,0 +1,444 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spec.docuccino.app/uir/2.0/schema.json",
+  "title": "UIR Document",
+  "description": "UIR 2.0 (draft). A valid OpenAPI 3.2 document that additionally satisfies the Docuccino extension schema (https://spec.docuccino.app/uir/2.0/extension.schema.json), whose `x-docuccino` member is allowed on every object node. That schema is EMBEDDED below under `$defs/extension`, as a resource carrying its own `$id`, so this file validates a document on its own — nothing here is fetched, and nothing has to be registered. It is also published standalone at the URL above, for applying to an OpenAPI document this schema does not describe. OAS structure is permitted structurally (objects with `x-*` passthrough); everything under `x-docuccino` is defined strictly, by that schema. Determinism guarantee: no timestamp-like or otherwise non-deterministic members are defined anywhere, here or in the extension.",
+  "type": "object",
+  "required": ["openapi", "info", "paths"],
+  "x-canonicalOrder": ["openapi", "jsonSchemaDialect", "info", "servers", "security", "tags", "paths", "webhooks", "components", "x-docuccino"],
+  "properties": {
+    "openapi": { "type": "string", "pattern": "^3\\.\\d+(\\.\\d+)?$" },
+    "jsonSchemaDialect": { "type": "string" },
+    "info": { "$ref": "#/$defs/info" },
+    "servers": { "type": "array", "items": { "$ref": "#/$defs/server" } },
+    "security": { "type": "array", "items": { "type": "object" } },
+    "tags": { "type": "array", "items": { "$ref": "#/$defs/tag" } },
+    "paths": { "$ref": "#/$defs/paths" },
+    "webhooks": { "type": "object", "additionalProperties": { "$ref": "#/$defs/pathItem" } },
+    "components": { "$ref": "#/$defs/components" },
+    "x-docuccino": { "$ref": "https://spec.docuccino.app/uir/2.0/extension.schema.json" }
+  },
+  "patternProperties": { "^x-": true },
+  "additionalProperties": false,
+  "$defs": {
+    "extension": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "https://spec.docuccino.app/uir/2.0/extension.schema.json",
+      "title": "Docuccino Extension",
+      "type": "object",
+      "description": "The Docuccino extension: the `x-docuccino` member a Docuccino-built document carries. This schema describes that member alone, so it applies on top of ANY OpenAPI document — nothing else about the document is assumed. The document root carries the shape below; every object node of the document carries `#/$defs/node`. Strictly closed and carrying no timestamps by design, so no non-deterministic member can be introduced.",
+      "x-canonicalOrder": ["document", "generator", "content", "workflows", "diagnostics"],
+      "properties": {
+        "document": { "$ref": "#/$defs/documentMeta" },
+        "generator": { "$ref": "#/$defs/generator" },
+        "content": { "$ref": "#/$defs/content" },
+        "workflows": { "type": "array", "items": { "$ref": "#/$defs/workflow" } },
+        "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/diagnostic" } }
+      },
+      "additionalProperties": false,
+      "$defs": {
+        "node": {
+          "type": "object",
+          "description": "Node-level x-docuccino. Strictly closed (additionalProperties false) so no timestamp-like or non-deterministic members can be introduced, EXCEPT the `facts` container: integration-recorded semantic facts (representation-independent, e.g. a withTrashed route binding), whose contents are integration-defined and which consumers ignore when unknown. Facts carry no timestamps, preserving determinism.",
+          "x-canonicalOrder": ["id", "provenance", "mock", "facts"],
+          "properties": {
+            "id": { "$ref": "#/$defs/nodeId" },
+            "provenance": { "type": "array", "items": { "$ref": "#/$defs/provenanceRecord" } },
+            "mock": { "$ref": "#/$defs/mockHint" },
+            "facts": { "type": "object", "additionalProperties": true }
+          },
+          "additionalProperties": false
+        },
+        "documentMeta": {
+          "type": "object",
+          "x-canonicalOrder": ["id", "configHash", "contentHash"],
+          "required": ["id"],
+          "properties": {
+            "id": { "$ref": "#/$defs/docId" },
+            "configHash": { "type": "string" },
+            "contentHash": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "generator": {
+          "type": "object",
+          "description": "What built this document, rather than anything about the API: the tool, its version, the extension spec version the document is written to, and the URL that spec is served at. Excluded from contentHash by design, so a tool or spec upgrade never dirties a committed diff.",
+          "x-canonicalOrder": ["name", "version", "specVersion", "schema"],
+          "required": ["name", "version", "specVersion"],
+          "properties": {
+            "name": { "type": "string" },
+            "version": { "type": "string" },
+            "specVersion": { "$ref": "#/$defs/semver" },
+            "schema": { "type": "string", "format": "uri" }
+          },
+          "additionalProperties": false
+        },
+        "content": {
+          "type": "object",
+          "description": "The narrative content layer: the compiled `pages` registry and the `nav` tree consumers render the sidebar from. Participates in contentHash, so a prose edit or a nav move is a visible (non-breaking) changelog entry.",
+          "x-canonicalOrder": ["pages", "nav"],
+          "properties": {
+            "pages": { "type": "array", "items": { "$ref": "#/$defs/page" } },
+            "nav": { "type": "array", "items": { "$ref": "#/$defs/navNode" } }
+          },
+          "additionalProperties": false
+        },
+        "page": {
+          "type": "object",
+          "x-canonicalOrder": ["id", "slug", "title", "summary", "order", "tags", "content", "provenance"],
+          "required": ["id", "slug"],
+          "properties": {
+            "id": { "$ref": "#/$defs/pageId" },
+            "slug": { "type": "string" },
+            "title": { "type": "string" },
+            "summary": { "type": "string" },
+            "order": { "type": "integer" },
+            "tags": { "type": "array", "items": { "type": "string" } },
+            "content": { "type": "string" },
+            "provenance": { "type": "array", "items": { "$ref": "#/$defs/provenanceRecord" } }
+          },
+          "additionalProperties": false
+        },
+        "navNode": {
+          "type": "object",
+          "description": "One node of the compiled navigation tree. `group` nodes carry `children`; `page`/`operation` nodes reference a stable id via `ref` (a `page:`/`op:` id); `tag` nodes reference an OAS tag name. Broken operation/tag refs are diagnostics at assembly, never emitted silently.",
+          "x-canonicalOrder": ["type", "ref", "title", "children"],
+          "required": ["type"],
+          "properties": {
+            "type": { "enum": ["group", "page", "operation", "tag"] },
+            "ref": { "type": "string" },
+            "title": { "type": "string" },
+            "children": { "type": "array", "items": { "$ref": "#/$defs/navNode" } }
+          },
+          "additionalProperties": false
+        },
+        "workflow": {
+          "type": "object",
+          "description": "One declared multi-step workflow: a named sequence of this document's own operations, what it takes in, and what it hands back. Participates in contentHash, so adding or re-ordering a step is a visible, non-breaking changelog entry.",
+          "x-canonicalOrder": ["id", "summary", "description", "inputs", "steps", "outputs"],
+          "required": ["id", "steps"],
+          "properties": {
+            "id": { "$ref": "#/$defs/workflowName" },
+            "summary": { "type": "string" },
+            "description": { "type": "string" },
+            "inputs": { "$ref": "#/$defs/schema" },
+            "steps": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/workflowStep" } },
+            "outputs": { "type": "object", "additionalProperties": { "type": "string" } }
+          },
+          "additionalProperties": false
+        },
+        "workflowStep": {
+          "type": "object",
+          "description": "One step of a workflow. `operation` is the called operation's own node id rather than its operationId: an operationId is a name minted from the route and re-minted when the route changes, so a workflow keyed on one points at nothing after a rename, while a node id is a function of the operation itself. Emitters resolve it to whatever name their format addresses operations by.",
+          "x-canonicalOrder": ["id", "operation", "description", "parameters", "body", "outputs"],
+          "required": ["id", "operation"],
+          "properties": {
+            "id": { "$ref": "#/$defs/workflowName" },
+            "operation": { "$ref": "#/$defs/nodeId" },
+            "description": { "type": "string" },
+            "parameters": { "type": "array", "items": { "$ref": "#/$defs/stepParameter" } },
+            "body": { "$ref": "#/$defs/stepBody" },
+            "outputs": { "type": "object", "additionalProperties": { "type": "string" } }
+          },
+          "additionalProperties": false
+        },
+        "stepParameter": {
+          "type": "object",
+          "description": "One value a step passes to the operation it calls. `in` is OpenAPI's own parameter location, because the parameter being supplied is one the operation already declares.",
+          "x-canonicalOrder": ["name", "in", "value"],
+          "required": ["name", "in"],
+          "properties": {
+            "name": { "type": "string" },
+            "in": { "enum": ["path", "query", "header", "cookie"] },
+            "value": {}
+          },
+          "additionalProperties": false
+        },
+        "stepBody": {
+          "type": "object",
+          "description": "The request body a step sends. The payload is carried as written — part literal, part runtime expression — rather than checked against the operation's request schema, because an expression has no value until the workflow runs.",
+          "x-canonicalOrder": ["contentType", "payload"],
+          "required": ["contentType"],
+          "properties": {
+            "contentType": { "type": "string" },
+            "payload": {}
+          },
+          "additionalProperties": false
+        },
+        "workflowName": {
+          "type": "string",
+          "description": "A workflow or step identifier, constrained to the character set Arazzo allows for its own workflowId and stepId so a declared name never has to be rewritten to be emitted.",
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "provenanceRecord": {
+          "type": "object",
+          "x-canonicalOrder": ["producer", "layer", "fields", "source", "confidence", "overrode"],
+          "required": ["producer", "layer"],
+          "properties": {
+            "producer": { "$ref": "#/$defs/producer" },
+            "layer": { "$ref": "#/$defs/layer" },
+            "fields": { "type": "array", "items": { "type": "string" } },
+            "source": { "$ref": "#/$defs/sourceRecord" },
+            "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+            "overrode": { "type": "array", "items": { "$ref": "#/$defs/overrodeEntry" } }
+          },
+          "additionalProperties": false
+        },
+        "overrodeEntry": {
+          "type": "object",
+          "x-canonicalOrder": ["field", "value", "producer"],
+          "required": ["field"],
+          "properties": {
+            "field": { "type": "string" },
+            "value": true,
+            "producer": { "$ref": "#/$defs/producer" }
+          },
+          "additionalProperties": false
+        },
+        "sourceRecord": {
+          "type": "object",
+          "x-canonicalOrder": ["file", "line", "symbol"],
+          "required": ["file"],
+          "properties": {
+            "file": { "type": "string" },
+            "line": { "type": "integer", "minimum": 0 },
+            "symbol": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "mockHint": {
+          "type": "object",
+          "x-canonicalOrder": ["faker", "seedGroup"],
+          "properties": {
+            "faker": { "type": "string" },
+            "seedGroup": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "diagnostic": {
+          "type": "object",
+          "x-canonicalOrder": ["severity", "code", "message", "source", "routeSignature", "help"],
+          "required": ["severity", "code", "message"],
+          "properties": {
+            "severity": { "enum": ["error", "warning", "info", "hint"] },
+            "code": { "type": "string" },
+            "message": { "type": "string" },
+            "source": { "$ref": "#/$defs/sourceRecord" },
+            "routeSignature": { "type": "string" },
+            "help": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "schema": {
+          "type": ["object", "boolean"],
+          "x-canonicalOrder": ["x-docuccino", "$ref", "type", "format", "enum", "const", "default", "items", "prefixItems", "properties", "required", "additionalProperties", "allOf", "anyOf", "oneOf", "not"],
+          "properties": {
+            "x-docuccino": { "$ref": "#/$defs/node" },
+            "properties": { "type": "object", "additionalProperties": { "$ref": "#/$defs/schema" } },
+            "patternProperties": { "type": "object", "additionalProperties": { "$ref": "#/$defs/schema" } },
+            "items": { "$ref": "#/$defs/schema" },
+            "prefixItems": { "type": "array", "items": { "$ref": "#/$defs/schema" } },
+            "allOf": { "type": "array", "items": { "$ref": "#/$defs/schema" } },
+            "anyOf": { "type": "array", "items": { "$ref": "#/$defs/schema" } },
+            "oneOf": { "type": "array", "items": { "$ref": "#/$defs/schema" } },
+            "not": { "$ref": "#/$defs/schema" }
+          },
+          "patternProperties": { "^x-": true },
+          "additionalProperties": true
+        },
+        "nodeId": {
+          "type": "string",
+          "pattern": "^(op|par|sch|res):v1:[0-9a-z]{16}$"
+        },
+        "docId": {
+          "type": "string",
+          "pattern": "^doc:.+$"
+        },
+        "pageId": {
+          "type": "string",
+          "pattern": "^page:v1:[0-9a-z]{16}$"
+        },
+        "producer": {
+          "type": "string",
+          "pattern": "^(inference|attribute|docblock|overlay|config|fallback|integration:[a-z0-9]([a-z0-9-]*[a-z0-9])?)$"
+        },
+        "layer": {
+          "enum": ["inference", "integration", "docblock", "attribute", "overlay", "config", "fallback"]
+        },
+        "semver": {
+          "type": "string",
+          "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-[0-9A-Za-z-.]+)?(?:\\+[0-9A-Za-z-.]+)?$"
+        }
+      }
+    },
+    "info": {
+      "type": "object",
+      "x-canonicalOrder": ["title", "summary", "description", "termsOfService", "contact", "license", "version", "x-docuccino"],
+      "required": ["title", "version"],
+      "properties": {
+        "title": { "type": "string" },
+        "summary": { "type": "string" },
+        "description": { "type": "string" },
+        "termsOfService": { "type": "string" },
+        "contact": { "type": "object" },
+        "license": { "type": "object" },
+        "version": { "type": "string" },
+        "x-docuccino": { "$ref": "https://spec.docuccino.app/uir/2.0/extension.schema.json#/$defs/node" }
+      },
+      "patternProperties": { "^x-": true }
+    },
+    "server": {
+      "type": "object",
+      "description": "An OAS 3.2 Server Object. `name` is 3.2-only — a short label for the server, which OAS 3.1 has no word for, so the 3.1 downlevel drops it with a warning.",
+      "x-canonicalOrder": ["url", "description", "name", "variables", "x-docuccino"],
+      "required": ["url"],
+      "properties": {
+        "url": { "type": "string" },
+        "description": { "type": "string" },
+        "name": { "type": "string" },
+        "variables": { "type": "object" },
+        "x-docuccino": { "$ref": "https://spec.docuccino.app/uir/2.0/extension.schema.json#/$defs/node" }
+      },
+      "patternProperties": { "^x-": true }
+    },
+    "tag": {
+      "type": "object",
+      "description": "An OAS 3.2 Tag Object. `parent` names another tag in this array (the emitter drops a parent that names no defined tag, and any link that would close a cycle); `kind` is a free-form machine-readable category (`nav`, `badge`, `audience` … ). Neither exists in OAS 3.1, so the 3.1 downlevel drops them with a warning.",
+      "x-canonicalOrder": ["name", "summary", "description", "externalDocs", "parent", "kind", "x-docuccino"],
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string" },
+        "summary": { "type": "string" },
+        "description": { "type": "string" },
+        "externalDocs": { "type": "object" },
+        "parent": { "type": "string" },
+        "kind": { "type": "string" },
+        "x-docuccino": { "$ref": "https://spec.docuccino.app/uir/2.0/extension.schema.json#/$defs/node" }
+      },
+      "patternProperties": { "^x-": true }
+    },
+    "paths": {
+      "type": "object",
+      "propertyNames": { "pattern": "^/" },
+      "additionalProperties": { "$ref": "#/$defs/pathItem" }
+    },
+    "pathItem": {
+      "type": "object",
+      "x-canonicalOrder": ["x-docuccino", "$ref", "summary", "description", "servers", "parameters", "get", "put", "post", "delete", "options", "head", "patch", "trace", "query", "additionalOperations"],
+      "properties": {
+        "x-docuccino": { "$ref": "https://spec.docuccino.app/uir/2.0/extension.schema.json#/$defs/node" },
+        "$ref": { "type": "string" },
+        "summary": { "type": "string" },
+        "description": { "type": "string" },
+        "servers": { "type": "array", "items": { "$ref": "#/$defs/server" } },
+        "parameters": { "type": "array", "items": { "$ref": "#/$defs/parameter" } },
+        "get": { "$ref": "#/$defs/operation" },
+        "put": { "$ref": "#/$defs/operation" },
+        "post": { "$ref": "#/$defs/operation" },
+        "delete": { "$ref": "#/$defs/operation" },
+        "options": { "$ref": "#/$defs/operation" },
+        "head": { "$ref": "#/$defs/operation" },
+        "patch": { "$ref": "#/$defs/operation" },
+        "trace": { "$ref": "#/$defs/operation" },
+        "query": { "$ref": "#/$defs/operation" },
+        "additionalOperations": { "$ref": "#/$defs/additionalOperations" }
+      },
+      "patternProperties": { "^x-": true },
+      "additionalProperties": false
+    },
+    "additionalOperations": {
+      "type": "object",
+      "description": "OAS 3.2's map of HTTP method to Operation Object, carrying the methods a Path Item has no fixed field for. RFC 9110 restricts a method to `1*tchar`, and the nine OAS spells as fixed fields are excluded because a Path Item states those there. OAS 3.1 and below have no word for this member, so the 3.1 downlevel drops it with a warning.",
+      "propertyNames": {
+        "pattern": "^[a-zA-Z0-9!#$%&'*+.^_`|~-]+$",
+        "not": { "enum": ["GET", "PUT", "POST", "DELETE", "OPTIONS", "HEAD", "PATCH", "TRACE", "QUERY"] }
+      },
+      "additionalProperties": { "$ref": "#/$defs/operation" }
+    },
+    "operation": {
+      "type": "object",
+      "x-canonicalOrder": ["x-docuccino", "operationId", "summary", "description", "externalDocs", "deprecated", "tags", "security", "servers", "parameters", "requestBody", "responses", "callbacks"],
+      "properties": {
+        "x-docuccino": { "$ref": "https://spec.docuccino.app/uir/2.0/extension.schema.json#/$defs/node" },
+        "operationId": { "type": "string" },
+        "summary": { "type": "string" },
+        "description": { "type": "string" },
+        "externalDocs": { "type": "object" },
+        "deprecated": { "type": "boolean" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "security": { "type": "array", "items": { "type": "object" } },
+        "servers": { "type": "array", "items": { "$ref": "#/$defs/server" } },
+        "parameters": { "type": "array", "items": { "$ref": "#/$defs/parameter" } },
+        "requestBody": { "type": "object" },
+        "responses": { "type": "object", "additionalProperties": { "$ref": "#/$defs/response" } },
+        "callbacks": { "type": "object" }
+      },
+      "patternProperties": { "^x-": true },
+      "additionalProperties": false
+    },
+    "parameter": {
+      "type": "object",
+      "x-canonicalOrder": ["x-docuccino", "$ref", "name", "in", "description", "required", "deprecated", "allowEmptyValue", "style", "explode", "allowReserved", "schema", "example", "examples", "content"],
+      "anyOf": [
+        { "required": ["$ref"] },
+        { "required": ["schema"] },
+        { "required": ["content"] }
+      ],
+      "properties": {
+        "x-docuccino": { "$ref": "https://spec.docuccino.app/uir/2.0/extension.schema.json#/$defs/node" },
+        "$ref": { "type": "string" },
+        "name": { "type": "string" },
+        "in": { "enum": ["path", "query", "header", "cookie"] },
+        "description": { "type": "string" },
+        "required": { "type": "boolean" },
+        "deprecated": { "type": "boolean" },
+        "allowEmptyValue": { "type": "boolean" },
+        "style": { "type": "string" },
+        "explode": { "type": "boolean" },
+        "allowReserved": { "type": "boolean" },
+        "schema": { "$ref": "https://spec.docuccino.app/uir/2.0/extension.schema.json#/$defs/schema" },
+        "example": true,
+        "examples": { "type": "object" },
+        "content": { "type": "object" }
+      },
+      "patternProperties": { "^x-": true },
+      "additionalProperties": false
+    },
+    "response": {
+      "type": "object",
+      "x-canonicalOrder": ["x-docuccino", "$ref", "summary", "description", "headers", "content", "links"],
+      "properties": {
+        "x-docuccino": { "$ref": "https://spec.docuccino.app/uir/2.0/extension.schema.json#/$defs/node" },
+        "$ref": { "type": "string" },
+        "summary": { "type": "string" },
+        "description": { "type": "string" },
+        "headers": { "type": "object" },
+        "content": { "type": "object" },
+        "links": { "type": "object" }
+      },
+      "patternProperties": { "^x-": true },
+      "additionalProperties": false
+    },
+    "components": {
+      "type": "object",
+      "description": "The OAS 3.2 Components Object. `mediaTypes` is 3.2-only — reusable Media Type Objects, which OAS 3.1 has no word for, so the 3.1 downlevel drops it with a warning.",
+      "x-canonicalOrder": ["schemas", "responses", "parameters", "examples", "requestBodies", "headers", "mediaTypes", "securitySchemes", "links", "callbacks", "pathItems", "x-docuccino"],
+      "properties": {
+        "schemas": { "type": "object", "additionalProperties": { "$ref": "https://spec.docuccino.app/uir/2.0/extension.schema.json#/$defs/schema" } },
+        "responses": { "type": "object", "additionalProperties": { "$ref": "#/$defs/response" } },
+        "parameters": { "type": "object", "additionalProperties": { "$ref": "#/$defs/parameter" } },
+        "examples": { "type": "object" },
+        "requestBodies": { "type": "object" },
+        "headers": { "type": "object" },
+        "mediaTypes": { "type": "object" },
+        "securitySchemes": { "type": "object" },
+        "links": { "type": "object" },
+        "callbacks": { "type": "object" },
+        "pathItems": { "type": "object", "additionalProperties": { "$ref": "#/$defs/pathItem" } },
+        "x-docuccino": { "$ref": "https://spec.docuccino.app/uir/2.0/extension.schema.json#/$defs/node" }
+      },
+      "patternProperties": { "^x-": true },
+      "additionalProperties": false
+    }
+  }
+}

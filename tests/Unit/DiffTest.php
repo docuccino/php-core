@@ -15,6 +15,7 @@ use Docuccino\Core\Document\UirDocument;
 use Docuccino\Core\Draft\SchemaKeywords;
 use Docuccino\Core\Emit\EmitOptions;
 use Docuccino\Core\Emit\OpenApi32Emitter;
+use Docuccino\Core\Identity\ContentHasher;
 use Docuccino\Core\Identity\IdentityGenerator;
 use Docuccino\Core\Support\JsonValue;
 
@@ -148,7 +149,6 @@ it('reports no API churn for an emitted artifact against the document it came fr
  */
 it('reads a {} property schema as the empty schema it is, not as a missing property', function (): void {
     $document = static fn (mixed $displayName): array => [
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'info' => ['title' => 'T', 'version' => '1.0.0'],
         'paths' => [],
@@ -2103,7 +2103,6 @@ it('keeps a webhook and a path template of the same name apart', function (): vo
     // is all there is to key on: keyed on it alone the two are one operation, and an edit to the webhook
     // reads as an edit to the path — or, once their content parts them, as both being replaced.
     $doc = [
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'paths' => ['/forms' => ['get' => ['summary' => 'List forms', 'responses' => ['200' => ['description' => 'Forms']]]]],
         'webhooks' => ['/forms' => ['get' => ['summary' => 'Poll me', 'responses' => ['200' => ['description' => 'Ack']]]]],
@@ -3097,3 +3096,74 @@ it('tells two values JSON cannot encode apart, so a removed enum value is still 
     'strings that are not valid UTF-8' => ["\xB1\x31", "\xB2\x31"],
     'INF and NAN' => [INF, NAN],
 ]);
+
+/**
+ * The one load-bearing compatibility property of a breaking release, executed rather than promised:
+ * an artifact committed before UIR 2.0 still pairs against one built after it, and the `contentHash`
+ * a consumer has in their repository does not move.
+ *
+ * Both halves were prose until now, in the design doc and in the upgrade notes, and nothing in the
+ * suite fed a pre-2.0-shaped document to anything at all. `ALGO_VERSION` stays `v1` and identities
+ * never read a document-level member, so the pairing holds — but the whole point of a rule this
+ * release rests on is that breaking it has to fail a test rather than reach a user.
+ */
+it('pairs an artifact written before UIR 2.0 against one built after it, hash unmoved', function (): void {
+    $generator = ['name' => 'docuccino/laravel', 'version' => '0.19.0'];
+
+    // Exactly what a v0.19 export wrote: the spec version and schema URL at the root, where the
+    // OpenAPI Object admits neither and where UIR 2.0 took them from.
+    $legacy = [
+        '$schema' => 'https://spec.docuccino.app/uir/1.1/schema.json',
+        'uir' => '1.1.0',
+        ...diffBase(),
+    ];
+    $legacy['x-docuccino']['generator'] = [...$generator, 'specVersion' => '1.1.0'];
+
+    // And the same application, rebuilt after the upgrade: same API, both facts moved under
+    // `generator`, and a newer tool version besides.
+    $modern = diffBase();
+    $modern['x-docuccino']['generator'] = [
+        'name' => 'docuccino/laravel',
+        'version' => '0.20.0',
+        'specVersion' => '2.0.0',
+        'schema' => 'https://spec.docuccino.app/uir/2.0/schema.json',
+    ];
+
+    // The pairing: nothing about the API changed, so nothing is reported. A document-level member
+    // entering identity would show up here as every operation being replaced.
+    expect(diffOf($legacy, $modern)->isEmpty())->toBeTrue()
+        // The same the other way round, because a user diffs in both directions.
+        ->and(diffOf($modern, $legacy)->isEmpty())->toBeTrue();
+
+    // The control, and the shape that WOULD break it: `ALGO_VERSION` staying `v1` is the whole of why
+    // the two artifacts pair, and an emptiness assertion over a differ that had stopped pairing
+    // anything would pass just as quietly. Bump it and a v0.19 artifact is not comparable at all —
+    // which is the outcome this release had to avoid, so it is worth seeing refused.
+    /** @var array<string, mixed> $reminted */
+    $reminted = json_decode(str_replace(':v1:', ':v2:', (string) json_encode($modern)), true, flags: JSON_THROW_ON_ERROR);
+
+    expect(IdentityGenerator::ALGO_VERSION)->toBe('v1')
+        ->and(fn (): mixed => diffOf($legacy, $reminted))->toThrow(IncomparableDocumentsException::class);
+
+    // Hydration keeps the older artifact whole: both root members ride in `rest`, so the differ is
+    // reading the document that is on disk rather than a version of it with two members quietly gone.
+    $hydrated = UirDocument::fromArray($legacy)->toArray();
+
+    expect($hydrated['$schema'] ?? null)->toBe('https://spec.docuccino.app/uir/1.1/schema.json')
+        ->and($hydrated['uir'] ?? null)->toBe('1.1.0');
+
+    // And the hash. v0.19's hasher opened by unsetting the two root members, which is spelled out
+    // here rather than asked of the current code — a guard that asks the code for its own rule agrees
+    // with whatever the code does. What that tool hashed and what this one hashes must be the same
+    // bytes, or every consumer's next build tells them their API changed.
+    $asTheOlderToolHashedIt = $legacy;
+    unset($asTheOlderToolHashedIt['$schema'], $asTheOlderToolHashedIt['uir']);
+
+    expect((new ContentHasher)->hash($asTheOlderToolHashedIt))->toBe((new ContentHasher)->hash($modern));
+
+    // The control: the hash is not simply insensitive to everything. A real content change moves it.
+    $edited = $modern;
+    $edited['paths']['/api/v1/forms/{id}']['get']['summary'] = 'Show one form';
+
+    expect((new ContentHasher)->hash($edited))->not->toBe((new ContentHasher)->hash($modern));
+});

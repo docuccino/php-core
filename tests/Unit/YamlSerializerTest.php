@@ -20,22 +20,22 @@ it('serialises identical canonical input to byte-identical YAML across runs', fu
 });
 
 it('preserves canonical member order rather than re-sorting', function (): void {
-    // Canonicalisation fixes order (uir before openapi before info); YAML must not disturb it.
+    // Canonicalisation fixes order (openapi before jsonSchemaDialect before info); YAML must not
+    // disturb it.
     $canonical = $this->canonicalizer->canonicalize(workedExample());
 
     $yaml = $this->yaml->serialize($canonical);
 
-    $uirPos = strpos($yaml, 'uir:');
     $openapiPos = strpos($yaml, 'openapi:');
+    $dialectPos = strpos($yaml, 'jsonSchemaDialect:');
     $infoPos = strpos($yaml, 'info:');
 
-    expect($uirPos)->toBeLessThan($openapiPos);
-    expect($openapiPos)->toBeLessThan($infoPos);
+    expect($openapiPos)->toBeLessThan($dialectPos);
+    expect($dialectPos)->toBeLessThan($infoPos);
 });
 
 it('uses block style rather than inline braces for populated maps', function (): void {
     $yaml = $this->yaml->serialize($this->canonicalizer->canonicalize([
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'info' => ['title' => 'API', 'version' => '1.0.0'],
     ]));
@@ -69,7 +69,6 @@ it('round-tripping cannot tell a map from a sequence, which is why the bytes are
 it('writes the paths of a routeless document as a map', function (): void {
     // `paths` is an OAS Map; a document with no routes still owes a map, not `paths: []`.
     $yaml = $this->yaml->serialize($this->canonicalizer->canonicalize([
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'info' => ['title' => 'API', 'version' => '1.0.0'],
         'paths' => [],

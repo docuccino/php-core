@@ -112,7 +112,6 @@ function documentWith32OnlyValues(): array
     ];
 
     return [
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'info' => ['title' => 'API', 'version' => '1.0.0'],
         'paths' => [
@@ -167,7 +166,6 @@ function documentWith32OnlyValues(): array
 function documentWith32OnlyConstructs(): array
 {
     return [
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'jsonSchemaDialect' => 'https://spec.openapis.org/oas/3.2/dialect/base',
         'info' => ['title' => 'API', 'version' => '1.0.0'],
@@ -300,7 +298,6 @@ it('projects a mock hint onto the configured faker member, the same as 3.2 does'
     // Nothing about a hint is 3.2-only — it leaves as an `x-` extension, which every OAS version takes
     // — so the downlevel has no reason to drop it and no reason to warn.
     $document = UirDocument::fromArray([
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'info' => ['title' => 'API', 'version' => '1.0.0'],
         'paths' => [],
@@ -378,7 +375,6 @@ it('inlines a shared media type rather than dangling the $ref that named it', fu
     // 3.1 keeps no `components.mediaTypes`, so dropping the bucket without inlining would publish a
     // document every validator accepts and every client generator breaks on.
     $document = UirDocument::fromArray([
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'info' => ['title' => 'API', 'version' => '1.0.0'],
         'paths' => ['/a' => ['get' => [
@@ -404,7 +400,6 @@ it('leaves an object the drop emptied an object, rather than a list', function (
     // Object and an OAuth Flows Object. `[]` at either is a document no validator accepts, and it is the
     // drop itself that would produce one.
     $uir = UirDocument::fromArray([
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'info' => ['title' => 'API', 'version' => '1.0.0'],
         'paths' => [],
@@ -437,7 +432,6 @@ it('leaves an object the drop emptied an object, rather than a list', function (
 
 it('drops a mock hint entirely when no faker key is configured', function (): void {
     $document = UirDocument::fromArray([
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'info' => ['title' => 'API', 'version' => '1.0.0'],
         'paths' => [],
@@ -549,7 +543,6 @@ it('takes the parameter member the drop emptied rather than publishing it empty'
 
 it('empties the shared bucket, and the components object with it, rather than leaving either a list', function (string $format): void {
     $document = UirDocument::fromArray([
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'info' => ['title' => 'API', 'version' => '1.0.0'],
         'paths' => ['/a' => ['get' => [
@@ -595,7 +588,6 @@ it('ends a shared-parameter $ref cycle rather than following it', function (): v
     // Nothing 3.1 objects to is anywhere in this document; the pair only proves the chain walk stops. A
     // guard that recognised fewer shapes than the chain it protects would hang here instead.
     $document = UirDocument::fromArray([
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'info' => ['title' => 'API', 'version' => '1.0.0'],
         'paths' => ['/a' => ['get' => [

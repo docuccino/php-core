@@ -63,7 +63,6 @@ it('is idempotent: emitting canonical output again yields identical bytes', func
 
 it('orders parameters by in-rank then name', function (): void {
     $doc = [
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'info' => ['title' => 'T', 'version' => '1.0.0'],
         'paths' => [
@@ -99,7 +98,6 @@ it('orders parameters that state neither an `in` nor a name, whichever order the
     ];
 
     $canonical = $this->canonicalizer->canonicalize([
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'info' => ['title' => 'T', 'version' => '1.0.0'],
         'paths' => [
@@ -118,7 +116,6 @@ it('orders parameters that state neither an `in` nor a name, whichever order the
 
 it('sorts map keys by code point and orders methods canonically', function (): void {
     $doc = [
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'info' => ['title' => 'T', 'version' => '1.0.0'],
         'paths' => [
@@ -136,7 +133,6 @@ it('sorts map keys by code point and orders methods canonically', function (): v
 it('preserves declaration order while deduplicating enum values', function (): void {
     $schema = ['type' => 'string', 'enum' => ['b', 'a', 'b', 'c', 'a']];
     $doc = [
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'info' => ['title' => 'T', 'version' => '1.0.0'],
         'paths' => [],
@@ -153,7 +149,6 @@ it('orders map keys by unicode code point, including multibyte keys', function (
     // canonicaliser's byte-wise key sort IS the normative code-point sort (design §3). Code points:
     // A=U+0041, a=U+0061, z=U+007A, é=U+00E9, 💡=U+1F4A1.
     $doc = [
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'info' => ['title' => 'T', 'version' => '1.0.0'],
         'paths' => [],
@@ -183,7 +178,6 @@ it('orders map keys by unicode code point, including multibyte keys', function (
 
 it('orders tag members in OAS 3.2 Tag Object order and keeps declaration order of the list', function (): void {
     $doc = [
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'info' => ['title' => 'T', 'version' => '1.0.0'],
         'paths' => [],
@@ -201,16 +195,15 @@ it('orders tag members in OAS 3.2 Tag Object order and keeps declaration order o
 
 it('passes unknown x-* members through verbatim but canonicalises known members', function (): void {
     $doc = [
-        'openapi' => '3.2.0',
-        'uir' => '1.0.0',
         'info' => ['version' => '1.0.0', 'title' => 'T'],
+        'openapi' => '3.2.0',
         'paths' => [],
         'x-vendor' => ['z' => 1, 'a' => 2],
     ];
 
     $canonical = $this->canonicalizer->canonicalize($doc);
 
-    expect(array_keys($canonical))->toBe(['uir', 'openapi', 'info', 'paths', 'x-vendor']);
+    expect(array_keys($canonical))->toBe(['openapi', 'info', 'paths', 'x-vendor']);
     expect(array_keys($canonical['info']))->toBe(['title', 'version']);
     expect($canonical['x-vendor'])->toBe(['z' => 1, 'a' => 2]);
 });
@@ -222,7 +215,6 @@ it('keeps an object-valued member a JSON object even when its keys are a 0..n se
     // place that can close it whatever synthesised the keys.
     $doc = [
         'openapi' => '3.2.0',
-        'uir' => '1.0.0',
         'info' => ['version' => '1.0.0', 'title' => 'T'],
         'paths' => [],
         'components' => [
@@ -251,7 +243,6 @@ it('keeps an object-valued member a JSON object even when its keys are a 0..n se
 it('passes an x-* member through in whatever shape it arrived in', function (): void {
     $doc = [
         'openapi' => '3.2.0',
-        'uir' => '1.0.0',
         'info' => ['version' => '1.0.0', 'title' => 'T'],
         'paths' => [],
         'components' => [
@@ -294,7 +285,6 @@ it('emits a producer-built object-valued extension and its JSON round trip as th
 
     $cold = [
         'openapi' => '3.2.0',
-        'uir' => '1.0.0',
         'info' => ['version' => '1.0.0', 'title' => 'T'],
         'paths' => [],
         'components' => ['schemas' => ['Tier' => $decorated]],
@@ -317,7 +307,6 @@ it('emits a producer-built object-valued extension and its JSON round trip as th
 it('reads every spelling of an enum-value-keyed map back as an object', function (string $spelling): void {
     $document = [
         'openapi' => '3.2.0',
-        'uir' => '1.0.0',
         'info' => ['version' => '1.0.0', 'title' => 'T'],
         'paths' => [],
         'components' => ['schemas' => ['Tier' => ['type' => 'string', 'x-enumDescriptions' => JsonValue::decode($spelling)]]],
@@ -404,8 +393,6 @@ it('widens anything that is no schema at all to the empty schema, at every subsc
  */
 it('says nothing when it widens, at any emitted format', function (): void {
     $document = [
-        '$schema' => 'https://spec.docuccino.app/uir/1.0/schema.json',
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'info' => ['title' => 'T', 'version' => '1.0.0'],
         'paths' => ['/t' => ['get' => ['operationId' => 't.i', 'responses' => ['200' => ['description' => 'OK', 'content' => [
@@ -433,8 +420,6 @@ it('says nothing when it widens, at any emitted format', function (): void {
  */
 it('cannot see the widening from the spec validator, because the hop that hides it is the hop that makes JSON', function (): void {
     $document = static fn (array $subject): array => [
-        '$schema' => 'https://spec.docuccino.app/uir/1.0/schema.json',
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'info' => ['title' => 'T', 'version' => '1.0.0'],
         'paths' => ['/t' => ['get' => ['operationId' => 't.i', 'responses' => ['200' => ['description' => 'OK']]]]],
@@ -443,6 +428,9 @@ it('cannot see the widening from the spec validator, because the hop that hides 
 
     $withoutTheHop = static function (array $doc): array {
         $schema = json_decode((string) file_get_contents(Validator::defaultSchemaPath()), false, flags: JSON_THROW_ON_ERROR);
+
+        // Nothing registered: the document schema embeds every resource it references, so a raw opis
+        // run needs the same one file the product's own validator reads.
         $error = (new OpisValidator)->validate(json_decode((string) json_encode($doc), false, flags: JSON_THROW_ON_ERROR), $schema)->error();
 
         return $error === null ? [] : (new ErrorFormatter)->format($error, true);

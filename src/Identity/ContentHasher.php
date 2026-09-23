@@ -9,16 +9,16 @@ use Docuccino\Core\Canonical\CanonicalJsonSerializer;
 
 /**
  * `contentHash`: hex SHA-256 over the document's canonical serialization, minus everything that
- * describes the TOOL rather than the API — `x-docuccino.generator`, `x-docuccino.diagnostics`, and the
- * `$schema`/`uir` pair naming the spec version the document is written to — so tool upgrades and
- * diagnostic churn don't dirty committed diffs. `x-docuccino.document.contentHash` is excluded too — a
- * hash can't be one of its own inputs — which keeps the value recomputable and stable across rewrites.
+ * describes the TOOL rather than the API — `x-docuccino.generator` and `x-docuccino.diagnostics` — so
+ * tool upgrades and diagnostic churn don't dirty committed diffs. `x-docuccino.document.contentHash`
+ * is excluded too — a hash can't be one of its own inputs — which keeps the value recomputable and
+ * stable across rewrites.
  *
- * The spec version belongs in that set for exactly the reason `generator` does, and was left out of it
- * until a UIR minor actually shipped: every consumer diffing two artifacts across the upgrade would
- * have seen every document's hash move and read it as "the API changed". What a spec minor ADDS still
- * moves the hash, because that is content — a workflow list appearing is a real difference. The
- * version STRING saying which spec was used is not.
+ * The spec version and the schema URL are in that set because they live under `generator`, which is
+ * where they belong: every consumer diffing two artifacts across a spec upgrade would otherwise see
+ * every document's hash move and read it as "the API changed". What a spec version ADDS still moves
+ * the hash, because that is content — a workflow list appearing is a real difference. The version
+ * STRING saying which spec was used is not.
  *
  * @internal
  */
@@ -34,8 +34,6 @@ final readonly class ContentHasher
      */
     public function hash(array $document): string
     {
-        unset($document['$schema'], $document['uir']);
-
         if (isset($document['x-docuccino']) && is_array($document['x-docuccino'])) {
             unset($document['x-docuccino']['generator'], $document['x-docuccino']['diagnostics']);
 

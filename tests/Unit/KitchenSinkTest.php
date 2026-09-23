@@ -38,10 +38,7 @@ it('round-trips losslessly: OAS 3.2 output equals the x-docuccino-stripped canon
 
     $oas = (new OpenApi32Emitter)->emit(UirDocument::fromArray($uir));
 
-    $stripped = stripDocuccino($uir);
-    unset($stripped['$schema'], $stripped['uir']);
-
-    $expected = (new CanonicalJsonSerializer)->serialize((new Canonicalizer)->canonicalize($stripped));
+    $expected = (new CanonicalJsonSerializer)->serialize((new Canonicalizer)->canonicalize(stripDocuccino($uir)));
 
     expect($oas)->toBe($expected);
 });

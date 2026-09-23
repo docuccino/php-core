@@ -27,7 +27,7 @@ use Docuccino\Core\Tests\Support\EmittedReferences;
  */
 function referenceSubjects(): array
 {
-    $formats = array_values(array_filter(Formats::ids(), static fn (string $id): bool => str_starts_with($id, 'openapi-')));
+    $formats = Formats::plainOpenApi();
     sort($formats);
 
     $subjects = [];
@@ -49,7 +49,7 @@ function referenceFixtures(): array
     foreach (glob(dirname(__DIR__).'/Fixtures/*.json') ?: [] as $path) {
         $decoded = json_decode((string) file_get_contents($path), true);
 
-        if (is_array($decoded) && isset($decoded['uir'], $decoded['info'])) {
+        if (is_array($decoded) && isset($decoded['openapi'], $decoded['info'], $decoded['x-docuccino'])) {
             $fixtures[] = basename($path);
         }
     }
@@ -141,7 +141,6 @@ describe('a $ref to a shared path item', function (): void {
      */
     $emit = static function (array $document): array {
         $result = (new OpenApi30DownlevelEmitter)->emitWithReport(UirDocument::fromArray([
-            'uir' => '1.0.0',
             'openapi' => '3.2.0',
             'info' => ['title' => 'API', 'version' => '1.0.0'],
             ...$document,

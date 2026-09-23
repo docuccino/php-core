@@ -1,6 +1,4 @@
 {
-  "$schema": "https://spec.docuccino.app/uir/1.0/schema.json",
-  "uir": "1.0.0",
   "openapi": "3.2.0",
   "info": { "title": "Uploads API", "version": "1.0.0" },
   "paths": {
@@ -161,5 +159,8 @@
         "additionalProperties": false
       }
     }
+  },
+  "x-docuccino": {
+    "generator": { "name": "docuccino/laravel", "version": "0.1.0", "specVersion": "2.0.0", "schema": "https://spec.docuccino.app/uir/2.0/schema.json" }
   }
 }

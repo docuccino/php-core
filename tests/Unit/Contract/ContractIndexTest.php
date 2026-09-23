@@ -107,7 +107,10 @@ it('reads the provenance recorded on a node named by id, and says nothing about 
 });
 
 it('decodes its own JSON, and refuses text that is not a JSON object', function (): void {
-    expect(ContractIndex::fromJson('{"uir":"1.0.0"}')->isUir())->toBeTrue();
+    expect(ContractIndex::fromJson('{"x-docuccino":{"generator":{"specVersion":"2.0.0"}}}')->isUir())->toBeTrue()
+        // A plain OpenAPI export is the other half of the question, and the one a failure message
+        // changes its wording for.
+        ->and(ContractIndex::fromJson('{"openapi":"3.2.0"}')->isUir())->toBeFalse();
 
     expect(static fn () => ContractIndex::fromJson('not json'))->toThrow(JsonException::class);
     expect(static fn () => ContractIndex::fromJson('42'))->toThrow(JsonException::class, 'not a JSON object');
@@ -124,7 +127,6 @@ it('hands the differ a document that keeps an empty object apart from an empty l
     // against ITSELF reported every empty-object example inside it changing shape. `comparable()` reads
     // the kept JSON text instead, exactly as `graph()` does for validation.
     $json = (string) json_encode([
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'info' => ['title' => 'Forms API', 'version' => '1.0.0'],
         'paths' => ['/forms' => ['get' => [

@@ -232,7 +232,7 @@ final class ContractMessages
             sprintf('The contract is OpenAPI %s, which defines no `webhooks` member.', PlainText::of($index->openApiVersion())),
             '',
             '  Every webhook the document had was dropped on the way down to 3.0, so there is nothing here',
-            '  to check a delivery against. Assert against the UIR artifact, or a 3.1 or 3.2 export.',
+            '  to check a delivery against. Assert against the full artifact, or a 3.1 or 3.2 export.',
         ]), $hint);
     }
 

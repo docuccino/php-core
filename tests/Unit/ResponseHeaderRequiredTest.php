@@ -17,7 +17,6 @@ use Docuccino\Core\Emit\UirEmitter;
 function requiredHeaderDocument(): UirDocument
 {
     return UirDocument::fromArray([
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'info' => ['title' => 'API', 'version' => '1.0.0'],
         'paths' => [
@@ -66,7 +65,7 @@ it('carries a response header\'s required out through every emitter', function (
         ->and($headers['X-Trace'])->not->toHaveKey('required')
         ->and($decoded['components']['headers']['RetryAfter']['required'])->toBeTrue();
 })->with([
-    'uir' => [fn (UirDocument $d): string => (new UirEmitter)->emit($d)],
+    'openapi 3.2 full' => [fn (UirDocument $d): string => (new UirEmitter)->emit($d)],
     'openapi 3.2' => [fn (UirDocument $d): string => (new OpenApi32Emitter)->emit($d)],
     'openapi 3.1' => [fn (UirDocument $d): string => (new OpenApi31DownlevelEmitter)->emit($d)],
     'openapi 3.0' => [fn (UirDocument $d): string => (new OpenApi30DownlevelEmitter)->emit($d)],

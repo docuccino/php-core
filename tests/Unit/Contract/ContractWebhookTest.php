@@ -378,9 +378,9 @@ it('says an artifact its format cannot carry webhooks in has none, rather than t
         return $document;
     });
 
-    expect(ContractMessages::webhooksUnsupported($downlevelled, 'Export it as UIR.'))
+    expect(ContractMessages::webhooksUnsupported($downlevelled, 'Export the full artifact.'))
         ->toContain('The contract is OpenAPI 3.0.4, which defines no `webhooks` member.')
         ->toContain('Every webhook the document had was dropped on the way down to 3.0')
-        ->toContain('Assert against the UIR artifact, or a 3.1 or 3.2 export.')
-        ->toContain('Export it as UIR.');
+        ->toContain('Assert against the full artifact, or a 3.1 or 3.2 export.')
+        ->toContain('Export the full artifact.');
 });

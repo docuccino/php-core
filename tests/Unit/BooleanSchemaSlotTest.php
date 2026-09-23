@@ -169,7 +169,7 @@ function booleanSchemaSlotPublished(string $format, array $document, array $poin
         flags: JSON_THROW_ON_ERROR,
     );
 
-    if ($format !== 'uir') {
+    if ($format !== 'full') {
         // A spelling no validator accepts is half of what this file guards.
         expect(OpenApiMetaSchema::findings($format, $graph))->toBe([], $format.' meta-schema');
     }
@@ -196,7 +196,6 @@ function booleanSchemaSlotPublished(string $format, array $document, array $poin
 function booleanSchemaSlotDocument(callable $build, mixed $value): array
 {
     return [
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'info' => ['title' => 'API', 'version' => '1.0.0'],
         'paths' => [],
@@ -237,7 +236,7 @@ it('publishes a schema slot as written in every dialect that spells a boolean', 
     $document = booleanSchemaSlotDocument($build, $value);
     $expected = (string) json_encode($value);
 
-    foreach (['uir', 'openapi-3.2', 'openapi-3.1'] as $format) {
+    foreach (['full', 'openapi-3.2', 'openapi-3.1'] as $format) {
         expect(booleanSchemaSlotPublished($format, $document, $pointer))->toBe($expected, $format);
     }
 })->with(booleanSchemaSlotCases());
@@ -249,7 +248,7 @@ it('reads a 3.2-only schema slot as a schema where the dialect has one', functio
     $document = booleanSchemaSlotDocument($build, $value);
     $expected = $value === [] ? '{}' : (string) json_encode($value);
 
-    foreach (['uir', 'openapi-3.2'] as $format) {
+    foreach (['full', 'openapi-3.2'] as $format) {
         expect(booleanSchemaSlotPublished($format, $document, $pointer))->toBe($expected, $format);
     }
 })->with(booleanSchemaSlot32Cases());
@@ -290,7 +289,7 @@ it('keeps a boolean component schema the document references, so the $ref resolv
         'components' => ['schemas' => ['Forbidden' => $v]],
     ], false);
 
-    foreach (['uir', 'openapi-3.2', 'openapi-3.1', 'openapi-3.0'] as $format) {
+    foreach (['full', 'openapi-3.2', 'openapi-3.1', 'openapi-3.0'] as $format) {
         $graph = json_decode(
             Formats::emit($format, UirDocument::fromArray($document), new EmitOptions)->output,
             flags: JSON_THROW_ON_ERROR,
@@ -369,7 +368,7 @@ it('widens a value that is no schema at all, rather than dropping the slot', fun
     // empty schema says "anything", which is vague and honest, where a missing member says something else
     // and a missing component breaks every reference to it.
     foreach ([7, 'nonsense', new stdClass] as $value) {
-        expect(booleanSchemaSlotPublished('uir', booleanSchemaSlotDocument($build, $value), $pointer))
+        expect(booleanSchemaSlotPublished('full', booleanSchemaSlotDocument($build, $value), $pointer))
             ->toBe('{}', get_debug_type($value));
     }
 })->with(array_map(

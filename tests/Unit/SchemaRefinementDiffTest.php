@@ -524,7 +524,6 @@ it('names a tightened bound through the path a diff actually runs', function ():
     // The end-to-end claim: this is the edit `--enforce` used to pass as safe. A request body that took
     // a 255-character title now takes ten, and the gate says so, at the path a reviewer can find.
     $document = static fn (int $cap): UirDocument => UirDocument::fromArray([
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'info' => ['title' => 'API', 'version' => '1.0.0'],
         'paths' => ['/things' => ['post' => [

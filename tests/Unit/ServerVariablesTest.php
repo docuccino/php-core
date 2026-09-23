@@ -27,7 +27,6 @@ use Docuccino\Core\Emit\Postman\CollectionEmitter;
 function emittedServers(string $format, array $servers): array
 {
     $result = Formats::emit($format, UirDocument::fromArray([
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'info' => ['title' => 'API', 'version' => '1.0.0'],
         'servers' => $servers,
@@ -156,7 +155,6 @@ it('names the variables in name order, never in the order a config listed them',
 
 it('raises the same code from the OpenAPI emitters and from a Postman collection', function (): void {
     $document = UirDocument::fromArray([
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'info' => ['title' => 'API', 'version' => '1.0.0'],
         'servers' => [['url' => 'https://api.example.com/{version}', 'variables' => ['version' => ['enum' => ['v1']]]]],

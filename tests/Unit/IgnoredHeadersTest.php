@@ -51,8 +51,6 @@ it('reads the declarations OAS says are not declarations, and no others', functi
  */
 it('has every reader that acts on the rule agree about a request header declaration', function (string $name, bool $ignored): void {
     $document = [
-        '$schema' => 'https://spec.docuccino.app/uir/1.0/schema.json',
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'info' => ['title' => 'T', 'version' => '1.0.0'],
         'paths' => ['/invoices' => ['get' => [
@@ -98,8 +96,6 @@ it('has every reader that acts on the rule agree about a request header declarat
 
 it('has every reader that acts on the rule agree about a response header declaration', function (string $name, bool $ignored): void {
     $document = [
-        '$schema' => 'https://spec.docuccino.app/uir/1.0/schema.json',
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'info' => ['title' => 'T', 'version' => '1.0.0'],
         'paths' => ['/invoices' => ['get' => [
@@ -491,8 +487,6 @@ it('names the operation and the declaration, and says where the fact belongs', f
  */
 it('still publishes the declaration it reports', function (): void {
     $document = [
-        '$schema' => 'https://spec.docuccino.app/uir/1.0/schema.json',
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'info' => ['title' => 'T', 'version' => '1.0.0'],
         'paths' => ['/invoices' => ['get' => [

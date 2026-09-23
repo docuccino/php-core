@@ -32,7 +32,7 @@ function formatRows(): array
         'openapi-3.2' => ['openapi-3.2', true, true, '"openapi": "3.2.0"', 'worked-example.json'],
         'openapi-3.1' => ['openapi-3.1', true, true, '"openapi": "3.1.1"', 'worked-example.json'],
         'openapi-3.0' => ['openapi-3.0', true, true, '"openapi": "3.0.4"', 'worked-example.json'],
-        'uir' => ['uir', false, true, '"uir":', 'worked-example.json'],
+        'full' => ['full', false, true, '"x-docuccino":', 'worked-example.json'],
         'postman' => ['postman', false, false, 'schema.getpostman.com', 'worked-example.json'],
         'arazzo' => ['arazzo', true, false, '"arazzo": "1.1.0"', 'workflows.uir.json'],
     ];
@@ -105,7 +105,7 @@ it('agrees with each emitter about the id it answers to', function (string $form
 it('serialises YAML only for the formats that have a YAML form', function (string $format, bool $yaml, bool $servable, string $marker, string $fixture): void {
     $result = Formats::emit($format, UirDocument::fromArray(formatFixture($fixture)), (new EmitOptions)->withYaml());
 
-    // UIR ignores the flag entirely and stays canonical JSON; the OpenAPI formats honour it.
+    // The full format ignores the flag entirely and stays canonical JSON; the rest honour it.
     expect(str_starts_with(trim($result->output), '{'))->toBe(! $yaml);
 })->with('formats');
 
@@ -113,7 +113,7 @@ it('reports what a downlevel could not carry, and nothing for a lossless format'
     $document = UirDocument::fromArray(kitchenSink());
 
     expect(Formats::emit('openapi-3.2', $document, new EmitOptions)->report->isEmpty())->toBeTrue()
-        ->and(Formats::emit('uir', $document, new EmitOptions)->report->isEmpty())->toBeTrue()
+        ->and(Formats::emit('full', $document, new EmitOptions)->report->isEmpty())->toBeTrue()
         ->and(Formats::emit('openapi-3.0', $document, new EmitOptions)->report->isEmpty())->toBeFalse();
 });
 
@@ -125,15 +125,41 @@ it('throws on an unknown format rather than falling back to a default', function
         ->toThrow(InvalidArgumentException::class, 'swagger-2.0');
 });
 
+/*
+ * The upgrade path, run rather than claimed. `uir` is in people's CI pipelines and this release takes
+ * it away with no alias, so the refusal is the first thing that upgrade shows them: it has to name the
+ * id to type, not leave them matching a six-item list by eye. Executed both ways round — the retired
+ * id is genuinely refused, AND an ordinary typo gets no invented replacement.
+ */
+it('names the replacement when a retired format id is asked for', function (): void {
+    expect(Formats::supports('uir'))->toBeFalse('the retired id must not resolve to an emitter');
+
+    $thrown = null;
+
+    try {
+        Formats::emit('uir', UirDocument::fromArray(workedExample()), new EmitOptions);
+    } catch (InvalidArgumentException $e) {
+        $thrown = $e;
+    }
+
+    expect($thrown)->not->toBeNull('a retired format id must still be refused')
+        ->and($thrown?->getMessage())->toContain('"uir" is now "full".');
+});
+
+it('invents no replacement for a format id it never had', function (): void {
+    expect(Formats::replacementHint('swagger-2.0'))->toBe('')
+        ->and(Formats::replacementHint('uir'))->toBe(' "uir" is now "full".');
+});
+
 it('prefers the most faithful format the viewer can serve, in table order', function (): void {
-    expect(Formats::viewerPreference())->toBe(['openapi-3.2', 'openapi-3.1', 'openapi-3.0', 'uir'])
+    expect(Formats::viewerPreference())->toBe(['openapi-3.2', 'openapi-3.1', 'openapi-3.0', 'full'])
         ->and(Formats::DEFAULT)->toBe('openapi-3.2');
 });
 
-it('prefers UIR for a contract, and names only formats the table knows', function (): void {
+it('prefers the full artifact for a contract, and names only formats the table knows', function (): void {
     // Its own order, not the table's: the viewer wants the most faithful OpenAPI, the contract
     // assertions want the one artifact that carries provenance.
-    expect(Formats::contractPreference())->toBe(['uir', 'openapi-3.2', 'openapi-3.1', 'openapi-3.0']);
+    expect(Formats::contractPreference())->toBe(['full', 'openapi-3.2', 'openapi-3.1', 'openapi-3.0']);
 
     foreach (Formats::contractPreference() as $format) {
         expect(Formats::supports($format))->toBeTrue();
@@ -146,12 +172,12 @@ it('leaves a collection out of the contract preference, being a client and not a
 });
 
 it('carries no shared default for provenance, so each format keeps its own', function (): void {
-    // UirEmitter defaults to Full and the OpenAPI emitters to None; Formats::emit() takes options
+    // UirEmitter defaults to Full and the plain OpenAPI emitters to None; Formats::emit() takes options
     // explicitly so neither default can leak into the other.
     $document = UirDocument::fromArray(workedExample());
 
-    expect(Formats::emit('uir', $document, new EmitOptions(provenance: ProvenanceLevel::Full))->output)->toContain('"provenance"')
-        ->and(Formats::emit('uir', $document, new EmitOptions(provenance: ProvenanceLevel::None))->output)->not->toContain('"provenance"');
+    expect(Formats::emit('full', $document, new EmitOptions(provenance: ProvenanceLevel::Full))->output)->toContain('"provenance"')
+        ->and(Formats::emit('full', $document, new EmitOptions(provenance: ProvenanceLevel::None))->output)->not->toContain('"provenance"');
 });
 
 /**
@@ -188,12 +214,78 @@ it('splits the formats into the ones with a published schema behind them and the
     $unchecked = array_values(array_filter(Formats::ids(), static fn (string $f): bool => ! Formats::checksEmittedArtifact($f)));
 
     expect($checked)->toBe(['openapi-3.2', 'openapi-3.1', 'openapi-3.0'])
-        // Three different reasons, and the column is worth having because they are different. UIR
-        // answers to its own schema on every build, before any emission. A Postman collection has no
+        // Three different reasons, and the column is worth having because they are different. The full
+        // artifact answers to the UIR schema on every build, before any emission. A Postman collection has no
         // published specification to be held to at all. An Arazzo description HAS one and is held to it
         // in the suite rather than at run time: the runtime check reads `OpenApiMetaSchema`, whose
         // traversal and whose diagnostic are both OpenAPI-shaped, so saying `true` here would mean
         // reporting an Arazzo failure as an OpenAPI one.
-        ->and($unchecked)->toBe(['uir', 'postman', 'arazzo'])
+        ->and($unchecked)->toBe(['full', 'postman', 'arazzo'])
         ->and(Formats::checksEmittedArtifact('swagger-2.0'))->toBeFalse();
+});
+
+/**
+ * The fifth column, split both ways so neither half can go vacuous, and stated from the CONTRACT
+ * rather than read back off the table: a format publishes plain OpenAPI when its artifact is an
+ * OpenAPI description carrying no `x-docuccino` member. Measured on the bytes, because the column
+ * exists to stop a reader deciding this from the id: what makes `full` the one that is not plain is
+ * what its artifact retains, and a check read back off the table would agree with the table.
+ */
+it('says which formats publish an OpenAPI description with the extension stripped', function (): void {
+    $plain = Formats::plainOpenApi();
+    $rest = array_values(array_filter(
+        Formats::ids(),
+        static fn (string $format): bool => ! Formats::publishesPlainOpenApi($format),
+    ));
+
+    expect($plain)->toBe(['openapi-3.2', 'openapi-3.1', 'openapi-3.0'])
+        ->and($rest)->toBe(['full', 'postman', 'arazzo'])
+        ->and(Formats::publishesPlainOpenApi('swagger-2.0'))->toBeFalse();
+
+    $document = UirDocument::fromArray(workedExample());
+
+    foreach ($plain as $format) {
+        $output = Formats::emit($format, $document, new EmitOptions)->output;
+
+        // An OpenAPI description, and no extension member anywhere in it.
+        expect($output)->toContain('"openapi"')
+            ->and($output)->not->toContain('"x-docuccino"');
+    }
+
+    // And the format the column exists to exclude: OpenAPI, and carrying the extension.
+    $full = Formats::emit('full', $document, new EmitOptions)->output;
+
+    expect($full)->toContain('"openapi"')
+        ->and($full)->toContain('"x-docuccino"');
+});
+
+/**
+ * The two artifact columns agree row for row, and until now nothing said so — two guards covering two
+ * columns cover their two columns and say nothing about whether they answer alike.
+ *
+ * They are not the same question. The fourth asks whether EMITTING holds the bytes it wrote to a
+ * published specification for the version they claim; the fifth asks whether the artifact is an OpenAPI
+ * description with the extension STRIPPED. Nothing makes those equivalent — a format could be held to a
+ * schema and still carry the extension, or be plain and answer to nothing — so their agreeing across
+ * all six rows is a fact about today's table rather than a property of the questions, and a row added
+ * with one column right and the other wrong would ship unnoticed.
+ *
+ * One divergence is already in sight, and it is Arazzo's: its description IS held to a published
+ * schema, in the suite rather than at run time, so the day that check moves to emission the fourth
+ * column goes true and the fifth stays false. That is the sanctioned exception, and this test is what
+ * will say so when it arrives — the answer then is to name `arazzo` here, not to delete the assertion.
+ */
+it('keeps the two artifact columns answering alike, bar the divergence Arazzo has coming', function (): void {
+    $parted = array_values(array_filter(
+        Formats::ids(),
+        static fn (string $format): bool => Formats::checksEmittedArtifact($format) !== Formats::publishesPlainOpenApi($format),
+    ));
+
+    expect($parted)->toBe([], 'formats whose published-schema column and plain-OpenAPI column disagree')
+        // Agreement between two columns that were false everywhere, or true everywhere, would be no
+        // agreement worth asserting — so both columns are held to having both answers in them.
+        ->and(array_values(array_filter(Formats::ids(), Formats::checksEmittedArtifact(...))))->not->toBeEmpty()
+        ->and(array_values(array_filter(Formats::ids(), Formats::publishesPlainOpenApi(...))))->not->toBeEmpty()
+        ->and(array_values(array_filter(Formats::ids(), static fn (string $f): bool => ! Formats::checksEmittedArtifact($f))))->not->toBeEmpty()
+        ->and(array_values(array_filter(Formats::ids(), static fn (string $f): bool => ! Formats::publishesPlainOpenApi($f))))->not->toBeEmpty();
 });

@@ -55,8 +55,6 @@ final class Canonicalizer
     public function canonicalize(array $document): array
     {
         return $this->build($document, [
-            '$schema' => $this->keep(...),
-            'uir' => $this->keep(...),
             'openapi' => $this->keep(...),
             'jsonSchemaDialect' => $this->keep(...),
             'info' => $this->canonicalizeInfo(...),
@@ -638,6 +636,7 @@ final class Canonicalizer
                 'name' => $this->keep(...),
                 'version' => $this->keep(...),
                 'specVersion' => $this->keep(...),
+                'schema' => $this->keep(...),
             ])),
             'content' => fn (mixed $v): mixed => $this->object($v, fn (array $content) => $this->build($content, [
                 'pages' => fn (mixed $p): mixed => $this->mapList($p, $this->canonicalizePage(...)),

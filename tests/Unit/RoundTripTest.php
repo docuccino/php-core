@@ -14,7 +14,6 @@ it('round-trips the worked example, preserving all members', function (): void {
 
 it('preserves unknown x-* members byte-for-byte through the model', function (): void {
     $input = [
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'x-vendor' => ['nested' => ['deep' => [1, 2, 3]], 'flag' => true],
         'info' => ['title' => 'T', 'version' => '1.0.0'],

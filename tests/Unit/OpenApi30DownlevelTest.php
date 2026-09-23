@@ -39,7 +39,6 @@ function downlevelFixture(): array
 function downlevel30(array $schema): array
 {
     $result = (new OpenApi30DownlevelEmitter)->emitWithReport(UirDocument::fromArray([
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'info' => ['title' => 'API', 'version' => '1.0.0'],
         'paths' => [],
@@ -254,7 +253,6 @@ describe('prose beside a $ref', function (): void {
         ];
 
         $result = (new OpenApi30DownlevelEmitter)->emitWithReport(UirDocument::fromArray([
-            'uir' => '1.0.0',
             'openapi' => '3.2.0',
             'info' => ['title' => 'API', 'version' => '1.0.0'],
             'paths' => [
@@ -316,7 +314,6 @@ describe('an operation with no responses', function (): void {
      */
     $emit = static function (array $paths): array {
         $result = (new OpenApi30DownlevelEmitter)->emitWithReport(UirDocument::fromArray([
-            'uir' => '1.0.0',
             'openapi' => '3.2.0',
             'info' => ['title' => 'API', 'version' => '1.0.0'],
             'paths' => $paths,
@@ -382,7 +379,6 @@ describe('an operation with no responses', function (): void {
 
     it('changes nothing for 3.1 and 3.2, which accept an operation with none', function (ReportingEmitter $emitter) use ($placeholder): void {
         $document = UirDocument::fromArray([
-            'uir' => '1.0.0',
             'openapi' => '3.2.0',
             'info' => ['title' => 'API', 'version' => '1.0.0'],
             'paths' => ['/things' => ['get' => ['operationId' => 'things.index']]],
@@ -759,7 +755,6 @@ describe('the scan that guards the 3.0 emission', function (): void {
         // Nothing here is a keyword: one is a component name, one is a property name, and 3.0 reads
         // both as the names they are.
         $emitted = (new OpenApi30DownlevelEmitter)->emit(UirDocument::fromArray([
-            'uir' => '1.0.0',
             'openapi' => '3.2.0',
             'info' => ['title' => 'API', 'version' => '1.0.0'],
             'paths' => ['/things' => ['get' => ['responses' => ['200' => [
@@ -814,7 +809,6 @@ it('keeps a projected mock hint through the 3.0 downlevel', function (): void {
     // The projection happens in the 3.2 pass this emitter chains off, so what arrives here is an
     // ordinary `x-` member — and 3.0 passes those through untouched, with nothing to report.
     $result = (new OpenApi30DownlevelEmitter)->emitWithReport(UirDocument::fromArray([
-        'uir' => '1.0.0',
         'openapi' => '3.2.0',
         'info' => ['title' => 'API', 'version' => '1.0.0'],
         'paths' => [],

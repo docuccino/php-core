@@ -78,12 +78,13 @@ final class ContractIndex
     }
 
     /**
-     * Whether this is a UIR document rather than a plain OpenAPI export. Only UIR carries
+     * Whether this is a full artifact rather than a plain OpenAPI export. The extension member is what
+     * names one — everything else about it IS an OpenAPI document — and only it carries
      * `x-docuccino.provenance`, so a failure message says less when this is false.
      */
     public function isUir(): bool
     {
-        return isset($this->document['uir']);
+        return isset($this->document['x-docuccino']);
     }
 
     /** @return array<string, mixed> */

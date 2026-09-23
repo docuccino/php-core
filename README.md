@@ -9,8 +9,8 @@
 **The framework-agnostic engine behind [Docuccino](https://docuccino.app)** — the document model,
 canonicalizer, identities, OpenAPI emitters and semantic diff.
 
-Core compiles an application into a **UIR**: a Universal Intermediate Representation, an OpenAPI
-3.2-shaped JSON document that is deterministic and carries a stable identity and provenance for every
+Core compiles an application into an OpenAPI 3.2-shaped JSON document that is deterministic and
+carries, under one reserved `x-docuccino` member, a stable identity and provenance for every
 operation, schema and parameter. From it, core emits OpenAPI 3.2 and 3.1, validates against the
 published JSON Schema, and answers *what changed* between two documents rather than only *what the
 endpoints are*.
@@ -27,7 +27,7 @@ composer require docuccino/core
 
 ## Usage
 
-Emit a canonical OpenAPI 3.2 document from a built UIR document:
+Emit a canonical OpenAPI 3.2 document from a built document:
 
 ```php
 use Docuccino\Core\Emit\EmitOptions;
@@ -56,10 +56,11 @@ $changes = (new DocumentDiffer())->diff($oldDocument, $newDocument);
 ## Documentation
 
 Full documentation is at **[docs.docuccino.app](https://docs.docuccino.app)**. See especially the
-[UIR format overview](https://docs.docuccino.app/uir/),
-[spec hosting](https://docs.docuccino.app/uir/hosting/) and
-[writing an extension](https://docs.docuccino.app/extending/extension-authoring/). The versioned UIR
-JSON Schema is served at <https://spec.docuccino.app/uir/1.0/schema.json>.
+[the Docuccino extension](https://docs.docuccino.app/uir/),
+[schema hosting](https://docs.docuccino.app/uir/hosting/) and
+[writing an extension](https://docs.docuccino.app/extending/extension-authoring/). The versioned
+JSON Schema is served at <https://spec.docuccino.app/uir/2.0/schema.json>, with the extension half at
+<https://spec.docuccino.app/uir/2.0/extension.schema.json>.
 
 ## Issues and contributing
 
