@@ -6,6 +6,7 @@ namespace Docuccino\Core\Lint;
 
 use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
+use Docuccino\Core\Document\DocumentMembers;
 use Docuccino\Core\Extensions\Context\DocumentContext;
 use Docuccino\Core\Extensions\Contracts\DocumentTransformer;
 use Docuccino\Core\Extensions\Document\UirDocumentDraft;
@@ -90,17 +91,43 @@ final class SensitiveFieldLint implements DocumentTransformer
     /**
      * Depth-first collect of every `properties` key and published parameter name matching a
      * heuristic, plus a JSON pointer to it. Component and inline schemas look the same from here, and
-     * so do the three positions a parameter is published at.
+     * so do the three positions a parameter is published at. Inside a map of names ({@see DocumentMembers})
+     * a key called `example` is a name, and a value member is scanned whole rather than walked for
+     * property names it merely spells.
      *
      * @param  list<string>  $path
      * @param  list<LeakFinding>  $findings
+     * @param  ?string  $inNameMap  the name map $node is, or null where its keys are keywords
      */
-    private function walk(mixed $node, array $path, array &$findings): void
+    private function walk(mixed $node, array $path, array &$findings, ?string $inNameMap = null): void
     {
         if (! is_array($node)) {
             return;
         }
 
+        if ($inNameMap === null) {
+            $this->keywords($node, $path, $findings);
+        }
+
+        // A value member was scanned whole above. An `x-` member is still walked: what it publishes can
+        // leak as readily as a schema does.
+        foreach ($node as $key => $child) {
+            if (is_array($child) && ! ($inNameMap === null && in_array((string) $key, self::VALUE_KEYS, true))) {
+                $this->walk($child, [...$path, (string) $key], $findings, DocumentMembers::nameMap((string) $key, $inNameMap));
+            }
+        }
+    }
+
+    /**
+     * What one node's keywords publish: the names under its `properties`, the parameters it lists, and
+     * the values it carries.
+     *
+     * @param  array<mixed>  $node
+     * @param  list<string>  $path
+     * @param  list<LeakFinding>  $findings
+     */
+    private function keywords(array $node, array $path, array &$findings): void
+    {
         $properties = $node['properties'] ?? null;
         if (is_array($properties)) {
             foreach ($properties as $name => $schema) {
@@ -127,12 +154,6 @@ final class SensitiveFieldLint implements DocumentTransformer
         foreach (self::VALUE_KEYS as $key) {
             if (array_key_exists($key, $node)) {
                 $this->scanValue($node[$key], $key, [...$path, $key], $findings);
-            }
-        }
-
-        foreach ($node as $key => $child) {
-            if (is_array($child)) {
-                $this->walk($child, [...$path, (string) $key], $findings);
             }
         }
     }

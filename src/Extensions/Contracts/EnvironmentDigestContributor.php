@@ -7,7 +7,7 @@ namespace Docuccino\Core\Extensions\Contracts;
 /**
  * A gated seam contributing one segment of the document-level fragment-cache environment digest
  * (design §10): booted-app state that shapes an operation's output but that no route file reflects —
- * auth guards, a paginator's parameter names, the morph map, registered render callbacks, spatie-data
+ * auth guards, a paginator's parameter names, registered render callbacks, spatie-data
  * globals and so on. Each is a global fact whose change can alter any route, so the aggregate keys
  * the cache once per document rather than per route.
  *

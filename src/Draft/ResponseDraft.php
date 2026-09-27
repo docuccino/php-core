@@ -316,6 +316,58 @@ final class ResponseDraft
     }
 
     /**
+     * One response that is any of `$parts` — every one at a single status, each what the server sends on
+     * some requests. Fields and claims merge as {@see absorb()} merges them, first part first. A media type
+     * only one part sends keeps that part's body; one that several parts send, with bodies this cannot
+     * show are one, is published under an empty schema with no example — the representation is known,
+     * and which shape it carries is not. A single part is returned as is.
+     *
+     * @internal Core-only; the error-response finalization is the one caller.
+     */
+    public static function eitherOf(self $first, self ...$rest): self
+    {
+        if ($rest === []) {
+            return $first;
+        }
+
+        $parts = [$first, ...$rest];
+
+        /** @var array<string, int> $carriers */
+        $carriers = [];
+        foreach ($parts as $part) {
+            foreach (array_keys($part->content) as $mediaType) {
+                $carriers[(string) $mediaType] = ($carriers[(string) $mediaType] ?? 0) + 1;
+            }
+        }
+
+        // Media types registered first, in the order the parts carry them, so the merged response's primary
+        // media type is the first part's whatever the collisions.
+        $either = new self($first->status);
+        foreach (array_keys($carriers) as $mediaType) {
+            $either->content((string) $mediaType);
+        }
+
+        foreach ($parts as $part) {
+            $single = clone $part;
+            foreach ($carriers as $mediaType => $count) {
+                if ($count > 1) {
+                    unset(
+                        $single->content[$mediaType],
+                        $single->examples[$mediaType],
+                        $single->examplePlaceholders[$mediaType],
+                        $single->declaredExamples[$mediaType],
+                        $single->declaredExample[$mediaType],
+                        $single->illustratedExamples[$mediaType],
+                    );
+                }
+            }
+            $either->absorb($single);
+        }
+
+        return $either;
+    }
+
+    /**
      * Retract the media RANGE body a named media type supersedes — the response half of the retraction
      * rule stated in full at {@see OperationDraft::supersedeStatusRange()}. The any-media-type range is
      * what a producer documents a stream it could not read under; it also captures

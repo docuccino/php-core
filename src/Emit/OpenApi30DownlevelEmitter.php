@@ -38,7 +38,7 @@ use Docuccino\Core\Support\JsonPointer;
  * code, `downlevel.ref-siblings`, for both answers at a `$ref` — a schema's siblings moving into an
  * `allOf`, and a reference's own prose coming off — with the message saying which.
  *
- * @phpstan-type Position self::FIELDS|self::PATH_ITEM|self::NAMES|self::PATH_ITEMS|self::CALLBACKS|self::LINKS|self::LINK|self::SCHEMA|self::SCHEMA_MAP
+ * @phpstan-type Position self::FIELDS|self::PATH_ITEM|self::NAMES|self::EXTENSIBLE_NAMES|self::PATH_ITEMS|self::CALLBACKS|self::LINKS|self::LINK|self::SCHEMA|self::SCHEMA_MAP
  * @phpstan-type Removed array{pathItems: array<string, mixed>, securitySchemes: list<string>, inlining: list<string>}
  * @phpstan-type PathItemChain array{item: array<string, mixed>|null, chain: list<string>, cycle: bool}
  *
@@ -118,14 +118,13 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
      * Fixed fields whose value is a map keyed by names the application chose — a status code, a media
      * type, a component name — and whose members are ordinary objects. `paths`, `callbacks` and `links`
      * are maps too and are listed separately, because what their members ARE is the thing the walk has to
-     * know.
+     * know; so is `responses`, whose Object also admits extensions.
      */
     private const array NAMED_MAP_FIELDS = [
         'content',
         'encoding',
         'examples',
         'headers',
-        'responses',
         'scopes',
         'variables',
     ];
@@ -138,6 +137,9 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
 
     /** A map keyed by application-chosen names, whose members are ordinary objects. */
     private const string NAMES = 'names';
+
+    /** The same, in an Object that also admits `x-` extensions beside the names: an operation's `responses`. */
+    private const string EXTENSIBLE_NAMES = 'extensible-names';
 
     /** A map whose members are Path Items: `paths`, and a Callback Object's expression map. */
     private const string PATH_ITEMS = 'path-items';
@@ -502,12 +504,13 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
      */
     private static function member(string $kind, string $key, string $pointer): ?string
     {
-        if (str_starts_with($key, 'x-')) {
+        // An extension only where the Object admits one: inside a map of names, `x-request-id` is a name.
+        if (str_starts_with($key, 'x-') && in_array($kind, [self::FIELDS, self::PATH_ITEM, self::LINK, self::EXTENSIBLE_NAMES], true)) {
             return null;
         }
 
         return match ($kind) {
-            self::NAMES => self::FIELDS,
+            self::NAMES, self::EXTENSIBLE_NAMES => self::FIELDS,
             self::PATH_ITEMS => self::PATH_ITEM,
             self::CALLBACKS => self::PATH_ITEMS,
             self::LINKS => self::LINK,
@@ -541,6 +544,7 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
             $key === 'paths' => self::PATH_ITEMS,
             $key === 'callbacks' => self::CALLBACKS,
             $key === 'links' => self::LINKS,
+            $key === 'responses' => self::EXTENSIBLE_NAMES,
             in_array($key, self::NAMED_MAP_FIELDS, true) => self::NAMES,
             default => self::FIELDS,
         };
@@ -1002,18 +1006,20 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
             $schema[$keyword] = $kept;
             $schema['nullable'] = true;
 
-            if (count($kept) !== 1) {
+            $lone = count($kept) === 1 ? Arr::stringKeyed(is_array($kept[0]) ? $kept[0] : []) : null;
+            if ($lone !== null) {
+                unset($schema[$keyword]);
+                $schema = $this->foldBranch($schema, $lone);
+            }
+
+            // A choice survives — the branches left, or the one folded in being itself an anyOf/oneOf.
+            if ($lone === null || isset($lone['anyOf']) || isset($lone['oneOf'])) {
                 $diagnostics[] = new Diagnostic(
                     severity: Severity::Info,
                     code: 'downlevel.nullable-composition',
                     message: sprintf('Moved the `{type: null}` branch at %s/%s onto the parent as `nullable: true`, which OpenAPI 3.0 reads loosely beside a composition.', $pointer, $keyword),
                 );
-
-                continue;
             }
-
-            unset($schema[$keyword]);
-            $schema = $this->foldBranch($schema, Arr::stringKeyed(is_array($kept[0]) ? $kept[0] : []));
         }
 
         return $schema;

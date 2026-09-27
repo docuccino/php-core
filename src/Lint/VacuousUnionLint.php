@@ -6,6 +6,7 @@ namespace Docuccino\Core\Lint;
 
 use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
+use Docuccino\Core\Document\DocumentMembers;
 use Docuccino\Core\Extensions\Context\DocumentContext;
 use Docuccino\Core\Extensions\Contracts\DocumentTransformer;
 use Docuccino\Core\Extensions\Document\UirDocumentDraft;
@@ -25,12 +26,6 @@ use Docuccino\Core\Extensions\Ordering\Priorities;
 #[ExtensionOrder(priority: Priorities::LAST)]
 final class VacuousUnionLint implements DocumentTransformer
 {
-    /**
-     * Keywords whose value is DATA rather than a schema. An example or a default may be any JSON at
-     * all, including something shaped exactly like a union, so the walk stops at these.
-     */
-    private const DATA_KEYWORDS = ['enum', 'examples', 'example', 'default', 'const'];
-
     public function __construct(
         private readonly LintRuleOptions $options = new LintRuleOptions,
     ) {}
@@ -69,18 +64,19 @@ final class VacuousUnionLint implements DocumentTransformer
      * at least one other branch. A branch is empty when nothing but `x-` extension members constrain
      * it — provenance rides inside schemas, and it constrains nothing.
      *
-     * The walk descends through schema subtrees only: an `x-` member and the value of a data-carrying
-     * keyword ({@see DATA_KEYWORDS}) are skipped, because a literal value shaped like `{"anyOf": …}`
-     * is an example of a union, not one.
+     * The walk skips what {@see DocumentMembers} reads as data — an example, a default, an `x-` member —
+     * because a literal value shaped like `{"anyOf": …}` is an example of a union, not one; and inside a
+     * map of names (`properties`, `responses`) a key named `default` is a name like any other.
      *
      * @param  array<array-key, mixed>  $node
+     * @param  ?string  $inNameMap  the name map $node is, or null where its keys are keywords
      * @return list<VacuousUnion>
      */
-    private static function vacuousUnions(array $node, string $pointer): array
+    private static function vacuousUnions(array $node, string $pointer, ?string $inNameMap = null): array
     {
         $found = [];
 
-        $anyOf = $node['anyOf'] ?? null;
+        $anyOf = $inNameMap === null ? ($node['anyOf'] ?? null) : null;
         if (is_array($anyOf) && array_is_list($anyOf) && count($anyOf) > 1) {
             $empty = array_filter($anyOf, self::isUnconstrained(...));
 
@@ -91,12 +87,8 @@ final class VacuousUnionLint implements DocumentTransformer
 
         foreach ($node as $key => $value) {
             $name = (string) $key;
-            if (str_starts_with($name, 'x-') || in_array($name, self::DATA_KEYWORDS, true)) {
-                continue;
-            }
-
-            if (is_array($value)) {
-                $found = [...$found, ...self::vacuousUnions($value, $pointer.'/'.$name)];
+            if (is_array($value) && ! DocumentMembers::holdsData($name, $value, $inNameMap)) {
+                $found = [...$found, ...self::vacuousUnions($value, $pointer.'/'.$name, DocumentMembers::nameMap($name, $inNameMap))];
             }
         }
 

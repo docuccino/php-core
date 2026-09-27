@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\SpecValidation;
 
+use Docuccino\Core\Document\DocumentMembers;
 use Docuccino\Core\Emit\Formats;
 use Opis\JsonSchema\Validator;
 use RuntimeException;
@@ -83,19 +84,10 @@ final class OpenApiMetaSchema
     private const array METHODS = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace', 'query'];
 
     /**
-     * Members whose value is arbitrary DATA rather than a document node, so nothing inside one is read as
-     * a reference. `default`, `const` and `enum` are a Schema Object's literals; `example` and an Example
-     * Object's `value` are what an author wrote for a consumer to copy.
-     *
-     * @var list<string>
-     */
-    private const array LITERALS = ['example', 'default', 'const', 'enum', 'value'];
-
-    /**
      * A Link Object's two members that hold ANY value — a literal body, or a map of literals and runtime
      * expressions — so a `$ref` written inside one is data. Everywhere else `requestBody` and
-     * `parameters` hold document nodes, so this is a POSITION rather than another name in
-     * {@see LITERALS}: blanket-skipping either name would blind the walk at an operation.
+     * `parameters` hold document nodes, so this is a POSITION rather than another of
+     * {@see DocumentMembers}' literals: blanket-skipping either name would blind the walk at an operation.
      *
      * @var list<string>
      */
@@ -103,26 +95,14 @@ final class OpenApiMetaSchema
 
     /**
      * JSON Schema's own members whose value is a map of NAMES, so a key inside one is never a keyword —
-     * the fact both walks over a SCHEMA turn on ({@see opensNameMap()}), and the JSON-Schema half of
-     * {@see nameMaps()}. Not a copy of the subschema-position table: `dependentSchemas` carries
-     * subschemas and is absent, `definitions` carries them under a dialect we lift away and is present.
+     * the fact both walks over a SCHEMA turn on ({@see opensNameMap()}). Not a copy of the
+     * subschema-position table: `dependentSchemas` carries subschemas and is absent, `definitions`
+     * carries them under a dialect we lift away and is present. The walk over a whole document reads
+     * {@see DocumentMembers} instead.
      *
      * @var list<string>
      */
     private const array SCHEMA_NAME_MAPS = ['properties', 'definitions', 'patternProperties', '$defs'];
-
-    /**
-     * The same fact for OpenAPI's own members, for the walk over an INSTANCE. Kept as a union across
-     * versions and positions: a member that is a LIST where it appears (`parameters` in a path item) is
-     * walked as a list and never consults this at all.
-     *
-     * @var list<string>
-     */
-    private const array OAS_NAME_MAPS = [
-        'additionalOperations', 'callbacks', 'content', 'encoding', 'examples', 'headers', 'mapping',
-        'mediaTypes', 'parameters', 'paths', 'pathItems', 'requestBodies', 'responses', 'schemas',
-        'scopes', 'securitySchemes', 'variables', 'webhooks',
-    ];
 
     /** @var array<string, Validator> */
     private static array $validators = [];
@@ -327,11 +307,11 @@ final class OpenApiMetaSchema
      *
      * The walk is conservative on purpose, because a false finding here accuses the emitter of a defect
      * it does not have. A key is only read as `$ref` where it is a KEYWORD: inside a map of NAMES
-     * ({@see nameMaps()}) every key is a name, so `properties.$ref` is a property and `responses.default`
-     * is a Response Object rather than a literal; and the members that hold arbitrary DATA
-     * ({@see LITERALS}, a Schema Object's `examples` list, a Link Object's {@see LINK_LITERALS}, any
-     * `x-` extension) are not descended into at all, so a `$ref` written inside an example is data and
-     * stays data.
+     * ({@see DocumentMembers}) every key is a name, so `properties.$ref` is a property and
+     * `responses.default` is a Response Object rather than a literal; and the members that hold
+     * arbitrary DATA (what {@see DocumentMembers} reads as data, and a Link Object's
+     * {@see LINK_LITERALS}) are not descended into at all, so a `$ref` written inside an example is data
+     * and stays data.
      *
      * @return list<string>
      */
@@ -342,22 +322,23 @@ final class OpenApiMetaSchema
         }
 
         $findings = [];
-        self::walkReferences($instance, $instance, '', false, false, $findings);
+        self::walkReferences($instance, $instance, '', null, false, $findings);
         sort($findings);
 
         return $findings;
     }
 
     /**
+     * @param  ?string  $inNameMap  the name map $node is, or null where its keys are keywords
      * @param  bool  $isLink  whether $node is a Link Object, whose two data members {@see LINK_LITERALS}
      *                        names are not descended into
      * @param  list<string>  $findings
      */
-    private static function walkReferences(mixed $node, stdClass $root, string $pointer, bool $inNameMap, bool $isLink, array &$findings): void
+    private static function walkReferences(mixed $node, stdClass $root, string $pointer, ?string $inNameMap, bool $isLink, array &$findings): void
     {
         if (is_array($node)) {
             foreach ($node as $index => $item) {
-                self::walkReferences($item, $root, $pointer.'/'.$index, false, false, $findings);
+                self::walkReferences($item, $root, $pointer.'/'.$index, null, false, $findings);
             }
 
             return;
@@ -375,30 +356,22 @@ final class OpenApiMetaSchema
                 continue;
             }
 
-            if (! $inNameMap) {
-                if ($key === '$ref') {
-                    if (is_string($value) && str_starts_with($value, '#/') && ! self::resolves($root, $value)) {
-                        $findings[] = sprintf('%s $ref: "%s" names nothing this document defines', $at, $value);
-                    }
-
-                    continue;
+            if ($inNameMap === null && $key === '$ref') {
+                if (is_string($value) && str_starts_with($value, '#/') && ! self::resolves($root, $value)) {
+                    $findings[] = sprintf('%s $ref: "%s" names nothing this document defines', $at, $value);
                 }
 
-                if (in_array($key, self::LITERALS, true) || str_starts_with($key, 'x-')) {
-                    continue;
-                }
+                continue;
+            }
 
-                // A Schema Object's `examples` is a LIST of literals; a Media Type Object's is a MAP of
-                // Example Objects, each of which may be a reference. The kind is what tells them apart.
-                if ($key === 'examples' && ! $value instanceof stdClass) {
-                    continue;
-                }
+            if (DocumentMembers::holdsData($key, $value, $inNameMap)) {
+                continue;
             }
 
             // A `links` map holds Link Objects, so the flag is raised on the MAP and consumed one level
             // down, where each Link Object's own members are read.
-            if (! $inNameMap && $key === 'links') {
-                self::walkReferences($value, $root, $at, true, true, $findings);
+            if ($inNameMap === null && $key === 'links') {
+                self::walkReferences($value, $root, $at, 'links', true, $findings);
 
                 continue;
             }
@@ -407,8 +380,8 @@ final class OpenApiMetaSchema
                 $value,
                 $root,
                 $at,
-                ! $inNameMap && in_array($key, self::nameMaps(), true),
-                $inNameMap && $isLink,
+                DocumentMembers::nameMap($key, $inNameMap),
+                $inNameMap !== null && $isLink,
                 $findings,
             );
         }
@@ -791,16 +764,5 @@ final class OpenApiMetaSchema
     private static function opensNameMap(bool $inMap, string $key): bool
     {
         return ! $inMap && in_array($key, self::SCHEMA_NAME_MAPS, true);
-    }
-
-    /**
-     * Every member whose value is a map of names, for a walk over an OpenAPI document — which carries
-     * Schema Objects, so it is both halves.
-     *
-     * @return list<string>
-     */
-    private static function nameMaps(): array
-    {
-        return [...self::SCHEMA_NAME_MAPS, ...self::OAS_NAME_MAPS];
     }
 }

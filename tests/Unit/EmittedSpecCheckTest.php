@@ -254,6 +254,13 @@ it('reads a $ref-shaped value in a data position as data', function (string $pos
             'responses' => ['200' => ['description' => 'OK', 'links' => ['self' => ['operationId' => 'things.index', 'requestBody' => $ref]]]],
         ]]]]],
         'a specification extension' => ['a specification extension', ['x-vendor' => $ref]],
+        // 3.2's Example Object carries the application's data under `dataValue` exactly as under `value`.
+        'an Example Object dataValue' => ['an Example Object dataValue', $mediaType(['schema' => ['type' => 'object'], 'examples' => ['one' => ['dataValue' => $ref]]])],
+        // A Responses Object's keys are status codes, but it admits extensions beside them: one is data.
+        'an extension on a responses map' => ['an extension on a responses map', ['paths' => ['/things' => ['get' => [
+            'operationId' => 'things.index',
+            'responses' => ['200' => ['description' => 'OK'], 'x-vendor' => $ref],
+        ]]]]],
     ];
 });
 

@@ -71,6 +71,23 @@ it('finds a vacuous union nested inside properties and items', function () use (
         ->and($findings[0]->message)->toContain('/properties/rows/items/anyOf');
 });
 
+it('reads a property or response by what it holds, whatever it is named', function (array $responses, string $pointer) use ($on): void {
+    // `default`, `enum` and `x-` are keywords only where the keys are keywords. As a property name or a
+    // response code each holds a schema, and a vacuous union there is one like any other.
+    $findings = lintDiagnostics(new VacuousUnionLint($on), lintDocument(['GET /api/a' => ['responses' => $responses]]));
+
+    expect($findings)->toHaveCount(1)
+        ->and($findings[0]->message)->toContain($pointer);
+})->with([
+    'a property named default' => [['200' => ['content' => ['application/json' => ['schema' => ['type' => 'object', 'properties' => ['default' => ['anyOf' => [[], ['type' => 'string']]]]]]]]], '/properties/default/anyOf'],
+    'a property named enum' => [['200' => ['content' => ['application/json' => ['schema' => ['type' => 'object', 'properties' => ['enum' => ['anyOf' => [[], ['type' => 'string']]]]]]]]], '/properties/enum/anyOf'],
+    'a property named x-y' => [['200' => ['content' => ['application/json' => ['schema' => ['type' => 'object', 'properties' => ['x-y' => ['anyOf' => [[], ['type' => 'string']]]]]]]]], '/properties/x-y/anyOf'],
+    'the default response' => [
+        ['default' => ['content' => ['application/json' => ['schema' => ['anyOf' => [[], ['type' => 'string']]]]]]],
+        '/responses/default/content/application/json/schema/anyOf',
+    ],
+]);
+
 it('says so differently when every branch is empty', function () use ($on): void {
     $document = lintDocument(['GET /api/positions' => [
         'responses' => ['200' => ['content' => ['application/json' => ['schema' => [

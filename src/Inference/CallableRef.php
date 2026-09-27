@@ -13,6 +13,9 @@ use Docuccino\Core\Provenance\MessagePaths;
  * to treat it as — so a catch-all `render(Throwable $e)` is analysed once per thrown type, harvesting
  * only the return path reachable for that type (PHPStan's `instanceof` narrowing at each return site,
  * source-order first match).
+ *
+ * `$narrowToEvery` asks for every return the narrowed type can reach rather than the first, as a response
+ * post-processor is read ({@see ReturnSite}).
  */
 final readonly class CallableRef
 {
@@ -23,6 +26,7 @@ final readonly class CallableRef
         public int $line = 0,
         public ?string $narrowParameter = null,
         public ?string $narrowType = null,
+        public bool $narrowToEvery = false,
     ) {}
 
     /** A closure located by line rather than a named method. */
@@ -34,7 +38,9 @@ final readonly class CallableRef
     /** A stable label for diagnostics, stub maps, and cache keys. */
     public function symbol(): string
     {
-        return $this->narrowType !== null ? $this->target().'#'.$this->narrowType : $this->target();
+        $symbol = $this->narrowType !== null ? $this->target().'#'.$this->narrowType : $this->target();
+
+        return $this->narrowToEvery ? $symbol.'#every' : $symbol;
     }
 
     /**

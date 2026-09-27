@@ -237,6 +237,32 @@ describe('document members 3.0 does not define', function (): void {
     });
 });
 
+it('downlevels a member named like an extension where the map it sits in holds names', function (): void {
+    // A header, a media type, a component is NAMED by the application, and `x-request-id` is a name
+    // like any other there: only an Object that admits extensions — the Responses Object here — reads
+    // an `x-` key as one. Left as written, the header's 2020-12 schema is a 3.0 artifact no validator
+    // accepts.
+    $header = ['schema' => ['type' => ['string', 'null']]];
+    $result = (new OpenApi30DownlevelEmitter)->emitWithReport(UirDocument::fromArray([
+        'openapi' => '3.2.0',
+        'info' => ['title' => 'API', 'version' => '1.0.0'],
+        'paths' => ['/a' => ['get' => ['operationId' => 'a.get', 'responses' => [
+            '200' => ['description' => 'ok', 'headers' => ['x-request-id' => $header]],
+            'x-vendor' => ['type' => ['string', 'null']],
+        ]]]],
+        'components' => ['headers' => ['x-trace' => $header], 'schemas' => ['x-thing' => ['type' => ['string', 'null']]]],
+    ]));
+    $decoded = json_decode($result->output, true, flags: JSON_THROW_ON_ERROR);
+
+    $nullableString = ['schema' => ['type' => 'string', 'nullable' => true]];
+    expect($decoded['paths']['/a']['get']['responses']['200']['headers']['x-request-id'])->toBe($nullableString)
+        ->and($decoded['components']['headers']['x-trace'])->toBe($nullableString)
+        ->and($decoded['components']['schemas']['x-thing'])->toBe(['type' => 'string', 'nullable' => true])
+        // The Responses Object's own extension is the application's data, and passes through as written.
+        ->and($decoded['paths']['/a']['get']['responses']['x-vendor'])->toBe(['type' => ['string', 'null']])
+        ->and(array_map(static fn ($d): string => $d->code, $result->report->diagnostics))->not->toContain('document.openapi-invalid');
+});
+
 describe('prose beside a $ref', function (): void {
     /**
      * One document with a `$ref` in all three positions that carry prose: a Reference Object, whose
@@ -448,6 +474,22 @@ describe('schema dialect conversions', function (): void {
         'null branch beside a real union stays a composition' => [
             ['oneOf' => [['type' => 'string'], ['type' => 'integer'], ['type' => 'null']]],
             ['oneOf' => [['type' => 'string'], ['type' => 'integer']], 'nullable' => true],
+            ['downlevel.nullable-composition'],
+        ],
+        // The same loose reading when the one surviving branch is itself a choice: 3.0.3's `nullable` adds
+        // null only beside a `type`, so a 3.0 reader may take `{oneOf, nullable}` as "one of these" alone,
+        // where 3.1 says "one of these, or null". The fold is the best 3.0 can spell; the note says so.
+        'null branch beside a lone tagged union still reads loosely' => [
+            ['anyOf' => [
+                ['oneOf' => [['$ref' => '#/components/schemas/Other'], ['$ref' => '#/components/schemas/Other']], 'discriminator' => ['propertyName' => 'kind']],
+                ['type' => 'null'],
+            ]],
+            ['oneOf' => [['$ref' => '#/components/schemas/Other'], ['$ref' => '#/components/schemas/Other']], 'discriminator' => ['propertyName' => 'kind'], 'nullable' => true],
+            ['downlevel.nullable-composition'],
+        ],
+        'null branch beside a lone anyOf still reads loosely' => [
+            ['oneOf' => [['anyOf' => [['type' => 'string'], ['type' => 'integer']]], ['type' => 'null']]],
+            ['anyOf' => [['type' => 'string'], ['type' => 'integer']], 'nullable' => true],
             ['downlevel.nullable-composition'],
         ],
         'const becomes a single-value enum' => [

@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Extensions\Context;
 
+use Docuccino\Core\Draft\ResponseDraft;
+use Docuccino\Core\Extensions\Contracts\ErrorResponseFinalizer;
+use Docuccino\Core\Extensions\Contracts\Finalization;
 use Docuccino\Core\Extensions\Contracts\OperationExtension;
 use Docuccino\Core\Extensions\Contracts\RouteBindingFieldSchemaResolver;
 use Docuccino\Core\Extensions\Contracts\RouteBindingKeyResolver;
@@ -132,8 +135,60 @@ final class RouteContext
      * The first exception mapper that both supports the throw and yields a draft, paired with that
      * draft — the one home for that chain resolution. Every extension that synthesizes a throw comes
      * through here and then applies the draft under its own producer and source.
+     *
+     * The rendered draft then passes through every {@see ErrorResponseFinalizer} in order, since that is
+     * what the application sends. A finalizer that REPLACES it withdraws what rendering it registered —
+     * the components its body hoisted, the notes it left — exactly as a dropped response does
+     * ({@see ComponentRegistry::restore()}), so nothing the document publishes points at a body nobody is
+     * sent. Dependency files stay: the decision is a function of them.
      */
     public function mapThrow(ThrownException $throw): ?MappedResponse
+    {
+        $finalizers = $this->extensions->errorResponseFinalizers;
+        $components = $finalizers === [] ? null : $this->components->snapshot();
+        $notes = $finalizers === [] ? null : $this->notes->snapshot();
+
+        $mapped = $this->render($throw);
+        if ($mapped === null || $components === null || $notes === null) {
+            return $mapped;
+        }
+
+        foreach ($finalizers as $finalizer) {
+            $rendered = $mapped->draft;
+            $finalization = $finalizer->finalization($throw, $rendered, $this);
+            if ($finalization === Finalization::Keeps) {
+                continue;
+            }
+
+            $before = [$this->components->snapshot(), $this->notes->snapshot()];
+            if ($finalization === Finalization::Replaces) {
+                $this->components->restore($components);
+                $this->notes->restore($notes);
+            }
+
+            // One throw is one response, so every part shares a status: the rendered one's where it is
+            // still sent, else whichever the first replacement states.
+            $responses = $finalizer->responses($throw, $rendered, $this, $this->components);
+            $status = $finalization === Finalization::Extends ? $rendered->status : ($responses[0] ?? $rendered)->status;
+            $built = array_values(array_filter($responses, static fn (ResponseDraft $draft): bool => $draft->status === $status));
+
+            if ($built === []) {
+                // Nothing to send instead, or beside, is no change: everything stands as it was before this
+                // finalizer was asked, the rendered response's registrations included.
+                $this->components->restore($before[0]);
+                $this->notes->restore($before[1]);
+
+                continue;
+            }
+
+            $parts = $finalization === Finalization::Extends ? [$rendered, ...$built] : $built;
+            $mapped = new MappedResponse($mapped->mapper, ResponseDraft::eitherOf(...$parts), $finalizer);
+        }
+
+        return $mapped;
+    }
+
+    private function render(ThrownException $throw): ?MappedResponse
     {
         foreach ($this->extensions->exceptionToResponse as $mapper) {
             if (! $mapper->supports($throw, $this)) {

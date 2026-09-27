@@ -371,6 +371,28 @@ it('drops every 3.2-only member from the fixture that carries them all', functio
     }
 });
 
+it('drops a 3.2-only member under a key named like an extension where the map holds names', function (): void {
+    // An example, a header or a response is NAMED by the application, and `x-sample` is a name like any
+    // other in `components.examples`: its `dataValue` is 3.2's, and left as written the 3.1 artifact is
+    // one no validator accepts. Only an Object that admits extensions reads an `x-` key as one.
+    $result = (new OpenApi31DownlevelEmitter)->emitWithReport(UirDocument::fromArray([
+        'openapi' => '3.2.0',
+        'info' => ['title' => 'API', 'version' => '1.0.0'],
+        'paths' => ['/a' => ['get' => ['operationId' => 'a.get', 'responses' => [
+            '200' => ['description' => 'ok', 'content' => ['application/json' => ['examples' => ['x-inline' => ['dataValue' => 1]]]]],
+            'x-vendor' => ['dataValue' => 1],
+        ]]]],
+        'components' => ['examples' => ['x-sample' => ['summary' => 'One', 'dataValue' => 1]]],
+    ]));
+    $decoded = json_decode($result->output, true, flags: JSON_THROW_ON_ERROR);
+
+    expect($decoded['components']['examples']['x-sample'])->toBe(['summary' => 'One'])
+        ->and($decoded['paths']['/a']['get']['responses']['200']['content']['application/json']['examples']['x-inline'])->toBe([])
+        // The Responses Object's own extension is the application's data, and passes through as written.
+        ->and($decoded['paths']['/a']['get']['responses']['x-vendor'])->toBe(['dataValue' => 1])
+        ->and(array_map(static fn ($d): string => $d->code, $result->report->diagnostics))->not->toContain('document.openapi-invalid');
+});
+
 it('inlines a shared media type rather than dangling the $ref that named it', function (): void {
     // 3.1 keeps no `components.mediaTypes`, so dropping the bucket without inlining would publish a
     // document every validator accepts and every client generator breaks on.

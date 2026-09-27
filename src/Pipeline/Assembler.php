@@ -14,6 +14,7 @@ use Docuccino\Core\Extensions\Contracts\DocumentTransformer;
 use Docuccino\Core\Extensions\Document\UirDocumentDraft;
 use Docuccino\Core\Extensions\Schema\ComponentNames;
 use Docuccino\Core\Extensions\Schema\ComponentRegistry;
+use Docuccino\Core\Extensions\Schema\DiscriminatedUnion;
 use Docuccino\Core\Identity\ContentHasher;
 use Docuccino\Core\Identity\IdentityGenerator;
 use Docuccino\Core\Overlay\OverlayApplier;
@@ -145,6 +146,14 @@ final class Assembler
         $doc = $this->publishSchemaNames($doc, $components->schemaRenames());
         $doc = ComponentNames::rename($doc, $responseRenames, 'responses');
         $doc = $this->publishSecuritySchemeNames($doc, $schemeRenames);
+
+        // Over every finished component and under the published names, so whether a union is
+        // discriminated is a function of its members' bodies and never of which one a route met first.
+        [$doc, $undiscriminated] = DiscriminatedUnion::settle($doc);
+        foreach ($undiscriminated as $diagnostic) {
+            $diagnostics[] = $diagnostic;
+        }
+
         $doc = self::orderComponents($doc);
 
         $doc['x-docuccino'] = [

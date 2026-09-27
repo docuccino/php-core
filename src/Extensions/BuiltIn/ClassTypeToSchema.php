@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Extensions\BuiltIn;
 
+use Docuccino\Core\Diagnostics\Diagnostic;
+use Docuccino\Core\Diagnostics\Severity;
 use Docuccino\Core\Extensions\Contracts\SchemaContext;
 use Docuccino\Core\Extensions\Contracts\TypeToSchema;
 use Docuccino\Core\Extensions\Schema\ComponentHoist;
@@ -12,10 +14,13 @@ use Docuccino\Core\Extensions\Schema\MockHints;
 use Docuccino\Core\Extensions\Schema\PropertyAnnotations;
 use Docuccino\Core\Extensions\Schema\SchemaIdentity;
 use Docuccino\Core\Extensions\Schema\SchemaResult;
+use Docuccino\Core\Extensions\Schema\SealedHierarchy;
 use Docuccino\Core\Inference\ClassRef;
 use Docuccino\Core\Inference\DType\ClassT;
 use Docuccino\Core\Inference\DType\DType;
 use Docuccino\Core\Inference\DType\UnionT;
+use Docuccino\Core\Provenance\ClassNames;
+use Docuccino\Core\Support\NameList;
 
 /**
  * A named class → an object schema hoisted to `components.schemas` and referenced by `$ref`. Properties
@@ -23,6 +28,7 @@ use Docuccino\Core\Inference\DType\UnionT;
  * {@see SchemaIdentity} so a plain DTO hides a property exactly as a Data class or a model does. Being
  * the framework-agnostic fallback, it is the ONLY mapper a plain DTO reaches, so it leaves the component
  * name and diff identity to {@see ComponentHoist}'s attribute fallback rather than forcing the short name.
+ * A sealed interface or abstract class publishes the union of what it permits ({@see SealedHierarchy}).
  */
 final class ClassTypeToSchema implements TypeToSchema
 {
@@ -42,6 +48,11 @@ final class ClassTypeToSchema implements TypeToSchema
         }
 
         $fqcn = $type->fqcn;
+
+        $sealed = SealedHierarchy::of($fqcn);
+        if ($sealed !== null) {
+            return $this->hoist->hoist($context, $fqcn, static fn (): ?array => self::sealed($fqcn, $sealed, $context));
+        }
 
         return $this->hoist->hoist($context, $fqcn, function () use ($fqcn, $context): ?array {
             $metadata = $context->engine()->classMetadata(new ClassRef($fqcn));
@@ -101,5 +112,31 @@ final class ClassTypeToSchema implements TypeToSchema
 
             return MockHints::applyTo($context, $object, $fqcn);
         });
+    }
+
+    /**
+     * The union a seal permits, or null (the bare object, reported) where it names a non-subtype.
+     *
+     * @return array<string, mixed>|null
+     */
+    private static function sealed(string $fqcn, SealedHierarchy $sealed, SchemaContext $context): ?array
+    {
+        if ($sealed->unreadable !== []) {
+            $context->diagnostic(new Diagnostic(
+                severity: Severity::Warning,
+                code: 'docblock.sealed-unreadable',
+                message: sprintf(
+                    'The @phpstan-sealed tag on %1$s names %2$s, which %3$s not a class extending or implementing it, so a value typed %1$s is published as a bare object.',
+                    ClassNames::publishable($fqcn),
+                    NameList::of($sealed->unreadable),
+                    count($sealed->unreadable) === 1 ? 'is' : 'are',
+                ),
+                help: 'Name every permitted subtype by a class the file can resolve — imported, or fully qualified — and only classes that really extend or implement the sealed type.',
+            ));
+
+            return null;
+        }
+
+        return $context->convert(UnionT::of($sealed->members));
     }
 }

@@ -5,6 +5,8 @@ declare(strict_types=1);
 use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
 use Docuccino\Core\Inference\ActionAnalysis;
+use Docuccino\Core\Inference\CallableRef;
+use Docuccino\Core\Inference\CallCondition;
 use Docuccino\Core\Inference\ClassMetadata;
 use Docuccino\Core\Inference\ComponentDeclaration;
 use Docuccino\Core\Inference\DType\ScalarT;
@@ -229,4 +231,45 @@ it('round-trips a source location carrying a byte offset', function (): void {
     expect($payload)->toBe(['file' => '/app/a.php', 'line' => 4, 'pos' => 91])
         ->and(SourceLocation::fromArray($payload)->toArray())->toBe($payload)
         ->and(SourceLocation::fromArray(['file' => 9])->file)->toBe('');
+});
+
+it('round-trips the parameter a return hands back and the calls proven at it, and omits both where there are none', function (): void {
+    $site = new ReturnSite(
+        ScalarT::string(),
+        new SourceLocation('/app/x.php', 3),
+        returnsParameter: 'response',
+        conditions: [
+            new CallCondition('request', 'is', ['api/*', 'hooks/*'], false),
+            new CallCondition('response', 'getStatusCode', [], 419),
+        ],
+    );
+    $payload = $site->toArray();
+
+    expect(ReturnSite::fromArray($payload)->toArray())->toBe($payload)
+        ->and(ReturnSite::fromArray($payload)->conditions[1]->value)->toBe(419)
+        // Absent keys, not empty ones, so an analysis carrying neither serializes as it always did.
+        ->and((new ReturnSite(ScalarT::string(), new SourceLocation('')))->toArray())->toBe(['type' => ScalarT::string()->toArray(), 'location' => (new SourceLocation(''))->toArray()]);
+});
+
+it('carries both facts onto a declaration made further out on the call path', function (): void {
+    $site = new ReturnSite(ScalarT::string(), new SourceLocation('/app/x.php', 3), returnsParameter: 'response', conditions: [new CallCondition('request', 'is', ['api/*'], true)]);
+    $moved = $site->withComponent(new ComponentDeclaration('Problem', 'App\\Renderer::render'));
+
+    expect($moved->returnsParameter)->toBe('response')
+        ->and($moved->conditions)->toBe($site->conditions);
+});
+
+it('degrades a malformed call condition around the members it can still read', function (): void {
+    // A scalar coerces, as everywhere else in the model; anything that is not one leaves the member empty.
+    $decoded = CallCondition::fromArray(['parameter' => 1, 'method' => [], 'arguments' => ['api/*', 3], 'value' => ['x']]);
+
+    expect($decoded->toArray())->toBe(['parameter' => '1', 'method' => '', 'arguments' => ['api/*'], 'value' => false]);
+});
+
+it('keys a callable analysed for every reachable return apart from one analysed for the first', function (): void {
+    $first = new CallableRef('/app/bootstrap.php', null, null, 12, 'e', 'App\\Exceptions\\Missing');
+    $every = new CallableRef('/app/bootstrap.php', null, null, 12, 'e', 'App\\Exceptions\\Missing', narrowToEvery: true);
+
+    expect($every->symbol())->not->toBe($first->symbol())
+        ->and($every->target())->toBe($first->target());
 });

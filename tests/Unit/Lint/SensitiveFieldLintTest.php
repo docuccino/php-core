@@ -187,6 +187,30 @@ it('points at the exact leaf inside a nested examples map or enum list', functio
     expect($pointers[1])->toContain('/components/schemas/Model/enum/1');
 });
 
+it('reads a property by what it holds, whatever it is named', function (string $name): void {
+    // Inside `properties` every key is a name: a property called `example` or `default` holds a schema,
+    // so its own example is scanned once, where it is written, and the schema is not read as a value.
+    $document = ['components' => ['schemas' => ['Model' => ['type' => 'object', 'properties' => [
+        $name => ['type' => 'string', 'description' => 'AKIAIOSFODNN7EXAMPLE', 'example' => 'xoxb-123456789012-abcdefghijkl'],
+    ]]]]];
+
+    $messages = array_map(static fn (object $d): string => (string) $d->message, lintFindings($document));
+
+    expect($messages)->toHaveCount(1)
+        ->and($messages[0])->toContain('/components/schemas/Model/properties/'.$name.'/example ');
+})->with(['example', 'examples', 'default', 'const', 'enum', 'other']);
+
+it('reads no property names out of a published value', function (): void {
+    // An example is what the server sends. A key in it named `properties` is data, so what sits under it
+    // is not a property this document declares; the credential-shape scan still reads every leaf.
+    $document = ['components' => ['schemas' => ['Model' => [
+        'type' => 'object',
+        'example' => ['properties' => ['password' => 'hunter2']],
+    ]]]];
+
+    expect(lintFindings($document))->toBe([]);
+});
+
 it('silences a leaked value by pointer via the safelist', function (): void {
     $options = new SensitiveFieldLintOptions(allow: ['/components/schemas/Model/example/type']);
 

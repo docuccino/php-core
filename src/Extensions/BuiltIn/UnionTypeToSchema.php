@@ -6,6 +6,7 @@ namespace Docuccino\Core\Extensions\BuiltIn;
 
 use Docuccino\Core\Extensions\Contracts\SchemaContext;
 use Docuccino\Core\Extensions\Contracts\TypeToSchema;
+use Docuccino\Core\Extensions\Schema\DiscriminatedUnion;
 use Docuccino\Core\Extensions\Schema\SchemaResult;
 use Docuccino\Core\Extensions\Schema\SchemaUnion;
 use Docuccino\Core\Inference\DType\DType;
@@ -15,7 +16,8 @@ use Docuccino\Core\Inference\DType\UnionT;
 /**
  * A union → its members converted and handed to {@see SchemaUnion}, which owns how the document
  * expresses a set: a nullable type-array for a single type plus null (`type: [string, null]`, the JSON
- * Schema 2020-12 idiom), else an `anyOf` with a `{type: null}` branch when nullable.
+ * Schema 2020-12 idiom), else an `anyOf` with a `{type: null}` branch when nullable. Whether members a
+ * tag tells apart earn a `discriminator` is decided over the finished document ({@see DiscriminatedUnion}).
  */
 final class UnionTypeToSchema implements TypeToSchema
 {

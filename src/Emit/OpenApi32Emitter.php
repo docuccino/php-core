@@ -7,6 +7,7 @@ namespace Docuccino\Core\Emit;
 use Docuccino\Core\Canonical\Canonicalizer;
 use Docuccino\Core\Canonical\CanonicalJsonSerializer;
 use Docuccino\Core\Diagnostics\Diagnostic;
+use Docuccino\Core\Document\DocumentMembers;
 use Docuccino\Core\Document\NodeIdentity;
 use Docuccino\Core\Document\UirDocument;
 use Docuccino\Core\SpecValidation\EmittedSpecCheck;
@@ -88,7 +89,14 @@ final readonly class OpenApi32Emitter implements ReportingEmitter
         return $stripped;
     }
 
-    private function strip(mixed $node, EmitOptions $options): mixed
+    /**
+     * Every node's `x-docuccino` off, projected where the options ask. Members are read by
+     * {@see DocumentMembers}: a header or property NAMED `x-…` is a node like any other, and data — an
+     * example, an extension's value — is published as written.
+     *
+     * @param  ?string  $inNameMap  the name map $node is, or null where its keys are keywords
+     */
+    private function strip(mixed $node, EmitOptions $options, ?string $inNameMap = null): mixed
     {
         if (! is_array($node)) {
             return $node;
@@ -98,14 +106,18 @@ final readonly class OpenApi32Emitter implements ReportingEmitter
             return array_map(fn (mixed $item): mixed => $this->strip($item, $options), $node);
         }
 
-        $docuccino = $node['x-docuccino'] ?? null;
-        unset($node['x-docuccino']);
+        $docuccino = null;
+        if ($inNameMap === null) {
+            $docuccino = $node['x-docuccino'] ?? null;
+            unset($node['x-docuccino']);
+        }
 
         $out = [];
         foreach ($node as $key => $value) {
-            $out[(string) $key] = str_starts_with((string) $key, 'x-')
+            $key = (string) $key;
+            $out[$key] = DocumentMembers::holdsData($key, $value, $inNameMap)
                 ? $value
-                : $this->strip($value, $options);
+                : $this->strip($value, $options, DocumentMembers::nameMap($key, $inNameMap));
         }
 
         if (is_array($docuccino)) {

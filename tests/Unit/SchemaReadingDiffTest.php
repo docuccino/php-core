@@ -60,7 +60,7 @@ function readingDecidedEverywhere(): array
 }
 
 /**
- * A schema carrying a Discriminator Object over a union — the shape a polymorphic relation publishes.
+ * A schema carrying a Discriminator Object over a union — the shape a union of tagged classes publishes.
  *
  * @param  array<string, string>  $mapping
  * @param  array<string, mixed>  $extra

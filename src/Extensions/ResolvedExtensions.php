@@ -7,6 +7,7 @@ namespace Docuccino\Core\Extensions;
 use Composer\InstalledVersions;
 use Docuccino\Core\Extensions\Contracts\DocumentTransformer;
 use Docuccino\Core\Extensions\Contracts\EnvironmentDigestContributor;
+use Docuccino\Core\Extensions\Contracts\ErrorResponseFinalizer;
 use Docuccino\Core\Extensions\Contracts\ExceptionToResponse;
 use Docuccino\Core\Extensions\Contracts\OperationExtension;
 use Docuccino\Core\Extensions\Contracts\OperationPhase;
@@ -88,6 +89,7 @@ final readonly class ResolvedExtensions
      * @param  list<RouteBindingKeyResolver>  $routeBindingKeyResolvers  gated namers of the column a binding matches on
      * @param  list<EnvironmentDigestContributor>  $environmentDigestContributors  gated booted-app cache-digest segments
      * @param  list<RouteNoteCollector>  $routeNoteCollectors  gated aggregators of per-route notes a document transformer reports
+     * @param  list<ErrorResponseFinalizer>  $errorResponseFinalizers  applied in order to every mapped error response
      */
     public function __construct(
         public array $routeResolvers = [],
@@ -104,6 +106,7 @@ final readonly class ResolvedExtensions
         public array $routeBindingKeyResolvers = [],
         public array $environmentDigestContributors = [],
         public array $routeNoteCollectors = [],
+        public array $errorResponseFinalizers = [],
     ) {
         $byPhase = [];
         foreach ($operationExtensions as $extension) {
@@ -324,7 +327,7 @@ final readonly class ResolvedExtensions
      */
     private function partitions(): array
     {
-        return [$this->routeResolvers, $this->operationExtensions, $this->typeToSchema, $this->exceptionToResponse, $this->documentTransformers, $this->ruleTransformers, $this->responseAnalysisTargets, $this->responseStatusResolvers, $this->payloadMediaTypeResolvers, $this->routeBindingSchemaResolvers, $this->routeBindingFieldSchemaResolvers, $this->routeBindingKeyResolvers, $this->environmentDigestContributors, $this->routeNoteCollectors];
+        return [$this->routeResolvers, $this->operationExtensions, $this->typeToSchema, $this->exceptionToResponse, $this->documentTransformers, $this->ruleTransformers, $this->responseAnalysisTargets, $this->responseStatusResolvers, $this->payloadMediaTypeResolvers, $this->routeBindingSchemaResolvers, $this->routeBindingFieldSchemaResolvers, $this->routeBindingKeyResolvers, $this->environmentDigestContributors, $this->routeNoteCollectors, $this->errorResponseFinalizers];
     }
 
     /**

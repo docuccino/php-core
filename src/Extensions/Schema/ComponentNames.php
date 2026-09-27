@@ -337,7 +337,8 @@ final class ComponentNames
     }
 
     /**
-     * Rewrite every `#/components/{$kind}/…` reference under `$node` through a rename map.
+     * Rewrite every `#/components/{$kind}/…` reference under `$node` through a rename map — a `$ref`, and
+     * the one reference OpenAPI spells as a plain string, a `discriminator.mapping` value.
      *
      * @template TKey of array-key
      *
@@ -354,13 +355,17 @@ final class ComponentNames
         $prefix = self::PREFIX.$kind.'/';
 
         foreach ($node as $key => $value) {
-            if ($key === '$ref' && is_string($value) && str_starts_with($value, $prefix)) {
-                $renamed = $renames[substr($value, strlen($prefix))] ?? null;
-                if ($renamed !== null) {
-                    $node[$key] = $prefix.$renamed;
-                }
+            if ($key === '$ref' && is_string($value)) {
+                $node[$key] = self::renamed($value, $prefix, $renames);
 
                 continue;
+            }
+
+            if ($key === 'discriminator' && is_array($value) && is_array($value['mapping'] ?? null)) {
+                $value['mapping'] = array_map(
+                    static fn (mixed $target): mixed => is_string($target) ? self::renamed($target, $prefix, $renames) : $target,
+                    $value['mapping'],
+                );
             }
 
             if (is_array($value)) {
@@ -369,6 +374,18 @@ final class ComponentNames
         }
 
         return $node;
+    }
+
+    /** @param  array<string, string>  $renames */
+    private static function renamed(string $ref, string $prefix, array $renames): string
+    {
+        if (! str_starts_with($ref, $prefix)) {
+            return $ref;
+        }
+
+        $renamed = $renames[substr($ref, strlen($prefix))] ?? null;
+
+        return $renamed === null ? $ref : $prefix.$renamed;
     }
 
     /**

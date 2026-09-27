@@ -105,6 +105,9 @@ final readonly class OpenApi31DownlevelEmitter implements ReportingEmitter
     /** A map, keyed by names the application chose, of child objects. */
     private const string MAP = 'map';
 
+    /** The same, in an Object that also admits `x-` extensions beside the names: an operation's `responses`. */
+    private const string EXTENSIBLE_MAP = 'extensible-map';
+
     /** A map of Path Items, which {@see downlevelPathMap()} owns. */
     private const string PATH_ITEMS = 'path-items';
 
@@ -196,7 +199,7 @@ final readonly class OpenApi31DownlevelEmitter implements ReportingEmitter
             'servers' => [self::LIST, self::SERVER],
             'parameters' => [self::LIST, self::PARAMETER],
             'requestBody' => [self::ONE, self::REQUEST_BODY],
-            'responses' => [self::MAP, self::RESPONSE],
+            'responses' => [self::EXTENSIBLE_MAP, self::RESPONSE],
             'callbacks' => [self::CALLBACKS, self::PATH_ITEM],
         ],
         self::REQUEST_BODY => [
@@ -583,6 +586,7 @@ final readonly class OpenApi31DownlevelEmitter implements ReportingEmitter
                 self::LIST => $this->walkList($childKind, $value, $child, $read, $diagnostics),
                 self::PATH_ITEMS => $this->downlevelPathMap($value, $child, $read, $diagnostics),
                 self::CALLBACKS => $this->walkMap($childKind, $value, $child, $read, $diagnostics, callbacks: true),
+                self::EXTENSIBLE_MAP => $this->walkMap($childKind, $value, $child, $read, $diagnostics, extensible: true),
                 default => $this->walkMap($childKind, $value, $child, $read, $diagnostics),
             };
 
@@ -736,7 +740,8 @@ final readonly class OpenApi31DownlevelEmitter implements ReportingEmitter
 
     /**
      * A map keyed by names the application chose. `$callbacks` says its members are themselves maps of
-     * Path Items rather than objects of `$kind`. The one map a member can leave entirely is
+     * Path Items rather than objects of `$kind`; `$extensible` that its Object also admits `x-` members,
+     * which are then data rather than names. The one map a member can leave entirely is
      * `components.parameters`: a shared parameter 3.1 cannot express is reported here, where it is
      * defined, and {@see parameterIsDropped()} takes the `$ref`s that named it.
      *
@@ -745,7 +750,7 @@ final readonly class OpenApi31DownlevelEmitter implements ReportingEmitter
      * @param  list<Diagnostic>  $diagnostics
      * @return array<string, mixed>
      */
-    private function walkMap(string $kind, array $map, string $pointer, array $read, array &$diagnostics, bool $callbacks = false): array
+    private function walkMap(string $kind, array $map, string $pointer, array $read, array &$diagnostics, bool $callbacks = false, bool $extensible = false): array
     {
         if ($kind === self::MEDIA_TYPE) {
             return $this->walkMediaTypeMap($map, $pointer, $read, $diagnostics);
@@ -757,7 +762,8 @@ final readonly class OpenApi31DownlevelEmitter implements ReportingEmitter
             $name = (string) $name;
             $child = JsonPointer::child($pointer, $name);
 
-            if (str_starts_with($name, 'x-') || ! is_array($member)) {
+            // An extension only where the Object admits one: inside a map of names, `x-sample` is a name.
+            if (($extensible && str_starts_with($name, 'x-')) || ! is_array($member)) {
                 $out[$name] = $member;
 
                 continue;
@@ -829,7 +835,7 @@ final readonly class OpenApi31DownlevelEmitter implements ReportingEmitter
             $name = (string) $name;
             $child = JsonPointer::child($pointer, $name);
 
-            if (str_starts_with($name, 'x-') || ! is_array($member)) {
+            if (! is_array($member)) {
                 $out[$name] = $member;
 
                 continue;

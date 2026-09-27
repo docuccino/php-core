@@ -25,7 +25,7 @@ interface SchemaContext
 
     /**
      * Convert one member of a composite that occupies the SAME document position as the composite
-     * itself — a union branch, an intersection member, a morph variant. Root-ness ({@see atRoot()})
+     * itself — a union branch, an intersection member. Root-ness ({@see atRoot()})
      * carries through, so a mapper deciding a response-root envelope still sees the root under a
      * union; {@see convert()} descends into a nested position and would hide it.
      *
@@ -88,8 +88,8 @@ interface SchemaContext
     public function lowerConfidence(float $confidence): void;
 
     /**
-     * Record a diagnostic raised while converting a type, e.g. a morph variant with no morph-map
-     * alias. Folded into the document's diagnostic channel via the component registry.
+     * Record a diagnostic raised while converting a type, e.g. a sealed type whose seal cannot be read.
+     * Folded into the document's diagnostic channel via the component registry.
      */
     public function diagnostic(Diagnostic $diagnostic): void;
 }

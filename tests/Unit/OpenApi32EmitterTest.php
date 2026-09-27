@@ -23,6 +23,26 @@ it('strips every x-docuccino member by default', function (): void {
     expect($json)->toContain('x-enumDescriptions');
 });
 
+it('strips the provenance of a member named like an extension where the map holds names', function (): void {
+    // A header or a property is NAMED by the application, and `x-request-id` is a name like any other
+    // there, so its node's provenance is as internal as any other node's. Only an Object that admits
+    // extensions reads an `x-` key as one, and an extension's value is data, published as written.
+    $provenance = ['x-docuccino' => ['provenance' => [['producer' => 'inference', 'layer' => 'inference', 'fields' => ['type']]]]];
+    $json = $this->emitter->emit(UirDocument::fromArray([
+        'openapi' => '3.2.0',
+        'info' => ['title' => 'API', 'version' => '1.0.0'],
+        'paths' => ['/a' => ['get' => ['operationId' => 'a.get', 'responses' => [
+            '200' => ['description' => 'ok', 'headers' => ['x-request-id' => ['schema' => ['type' => 'string'] + $provenance] + $provenance]],
+        ]]]],
+        'components' => ['schemas' => ['Thing' => ['type' => 'object', 'properties' => ['x-y' => ['type' => 'string'] + $provenance]]]],
+    ]));
+    $decoded = json_decode($json, true, flags: JSON_THROW_ON_ERROR);
+
+    expect($json)->not->toContain('provenance')
+        ->and($decoded['paths']['/a']['get']['responses']['200']['headers']['x-request-id'])->toBe(['schema' => ['type' => 'string']])
+        ->and($decoded['components']['schemas']['Thing']['properties']['x-y'])->toBe(['type' => 'string']);
+});
+
 /**
  * A document written before UIR 2.0, which is the only population the emitter's `$schema`/`uir` strip
  * still serves. Nothing this version builds carries either member, so without a subject shaped like

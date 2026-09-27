@@ -6,6 +6,7 @@ namespace Docuccino\Core\TypeGrammar;
 
 use PHPStan\PhpDocParser\Ast\PhpDoc\PhpDocNode;
 use PHPStan\PhpDocParser\Ast\PhpDoc\PhpDocTextNode;
+use PHPStan\PhpDocParser\Ast\Type\TypeNode;
 
 /**
  * The one docblock reader: prose, `@example`, `@summary`/`@description`, `@property`/`@param`/`@var`
@@ -28,6 +29,8 @@ final class DocBlockReader
         '@psalm-property', '@psalm-property-read',
         '@property', '@property-read',
     ];
+
+    private const SEALED_TAGS = ['@phpstan-sealed', '@psalm-inheritors'];
 
     public function __construct(
         private readonly PhpDocParserStack $stack = new PhpDocParserStack,
@@ -118,6 +121,32 @@ final class DocBlockReader
                 $type = trim((string) $tag->type);
                 if ($type !== '') {
                     return $type;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The type a `@phpstan-sealed` (or `@psalm-inheritors`) tag closes a hierarchy over, as written, or
+     * null. Read off the tag's text rather than its node class, which older parsers do not have.
+     */
+    public function sealed(?string $docComment): ?string
+    {
+        $node = $this->stack->parseDocBlock($docComment);
+        if ($node === null) {
+            return null;
+        }
+
+        foreach (self::SEALED_TAGS as $tagName) {
+            foreach ($node->getTagsByName($tagName) as $tag) {
+                $value = $tag->value;
+                $type = property_exists($value, 'type') && $value->type instanceof TypeNode
+                    ? (string) $value->type
+                    : (string) $value;
+                if (trim($type) !== '') {
+                    return trim($type);
                 }
             }
         }
