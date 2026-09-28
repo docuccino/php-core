@@ -7,6 +7,19 @@ User-facing changes to `docuccino/core` — features, fixes, performance work an
 taken from the commit messages scoped `core`. Entries begin after v0.1.2; older history is in
 the [repository](https://github.com/docuccino/docuccino) git log.
 
+## v0.20.3
+
+### Features
+
+- let an extension translate a thrown exception before it is rendered ([#553](https://github.com/docuccino/docuccino/pull/553))
+- publish a union of classes told apart by a fixed tag as a discriminated oneOf ([#544](https://github.com/docuccino/docuccino/pull/544))
+
+### Bug fixes
+
+- describe a response by its own status, and let a declared status retire an unread one ([#560](https://github.com/docuccino/docuccino/pull/560))
+- let a nullable enum or const admit the null it is published beside ([#551](https://github.com/docuccino/docuccino/pull/551))
+- require a plain object's nullable keys that json_encode always writes ([#549](https://github.com/docuccino/docuccino/pull/549))
+
 ## v0.20.2
 
 ### Bug fixes
