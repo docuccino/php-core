@@ -8,6 +8,7 @@ use Docuccino\Core\Canonical\CanonicalJsonSerializer;
 use Docuccino\Core\Document\IgnoredHeaders;
 use Docuccino\Core\Emit\SchemaExampleFactory;
 use Docuccino\Core\Support\Arr;
+use Docuccino\Core\Support\ReasonPhrase;
 use stdClass;
 
 /**
@@ -20,44 +21,6 @@ use stdClass;
  */
 final class SavedExample
 {
-    /** Reason phrases for the statuses an API documents. Unknown codes get an empty phrase. */
-    private const array REASONS = [
-        200 => 'OK',
-        201 => 'Created',
-        202 => 'Accepted',
-        204 => 'No Content',
-        206 => 'Partial Content',
-        301 => 'Moved Permanently',
-        302 => 'Found',
-        303 => 'See Other',
-        304 => 'Not Modified',
-        307 => 'Temporary Redirect',
-        308 => 'Permanent Redirect',
-        400 => 'Bad Request',
-        401 => 'Unauthorized',
-        402 => 'Payment Required',
-        403 => 'Forbidden',
-        404 => 'Not Found',
-        405 => 'Method Not Allowed',
-        406 => 'Not Acceptable',
-        409 => 'Conflict',
-        410 => 'Gone',
-        412 => 'Precondition Failed',
-        413 => 'Content Too Large',
-        415 => 'Unsupported Media Type',
-        418 => "I'm a teapot",
-        422 => 'Unprocessable Content',
-        423 => 'Locked',
-        428 => 'Precondition Required',
-        429 => 'Too Many Requests',
-        451 => 'Unavailable For Legal Reasons',
-        500 => 'Internal Server Error',
-        501 => 'Not Implemented',
-        502 => 'Bad Gateway',
-        503 => 'Service Unavailable',
-        504 => 'Gateway Timeout',
-    ];
-
     /**
      * @param  array<string, mixed>  $response
      * @param  array<string, mixed>  $components
@@ -77,7 +40,7 @@ final class SavedExample
         $example = [
             'name' => self::name($code, $response),
             'originalRequest' => $request,
-            'status' => self::REASONS[$code] ?? '',
+            'status' => ReasonPhrase::of($code),
             'code' => $code,
             'header' => self::headers($mediaType, $response, $components, $examples),
             'cookie' => [],
@@ -95,8 +58,7 @@ final class SavedExample
      */
     private static function name(int $code, array $response): string
     {
-        $reason = self::REASONS[$code] ?? '';
-        $label = $reason === '' ? (string) $code : $code.' '.$reason;
+        $label = $code.' '.ReasonPhrase::of($code);
 
         $description = Description::text($response['description'] ?? null);
 

@@ -74,6 +74,13 @@ interface SchemaContext
     public function depth(): int;
 
     /**
+     * Whether the conversion describes what a client SENDS — a request body or parameter — rather than
+     * what the server writes. A key a client may leave out is optional here even where the server's own
+     * output always carries it, so a class shaped differently on the two sides reads this.
+     */
+    public function describesRequest(): bool;
+
+    /**
      * Record files this conversion read whose contents affect the emitted schema — a reflected
      * Data/Model/Resource class, a `classMetadata` source, an enum cast's backing enum. Skip it and
      * editing that file leaves a warm fragment stale — see RouteContext::dependencies(). Empty

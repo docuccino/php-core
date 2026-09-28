@@ -52,6 +52,9 @@ final class SchemaUnion
      * in under the `type-array` policy; anything that cannot carry one, a `$ref` or an `anyOf`, takes
      * an explicit branch, as does everything under the `anyof` policy. Already-nullable passes through.
      *
+     * A value list that rules null out cannot take the fold ({@see valuesRefuseNull()}): it takes the
+     * branch too, which also leaves an enum's positional name hints parallel to its values.
+     *
      * @param  array<string, mixed>  $schema
      * @param  string  $policy  {@see RepresentationPolicy::$nullable}
      * @return array<string, mixed>
@@ -62,11 +65,11 @@ final class SchemaUnion
         $type = $schema['type'] ?? null;
         $names = self::typeNames($type);
 
-        if ($type === 'null' || in_array('null', $names, true)) {
+        if ($type === 'null' || in_array('null', $names, true) || self::hasNullBranch($schema)) {
             return $schema;
         }
 
-        if ($policy !== 'anyof') {
+        if ($policy !== 'anyof' && ! self::valuesRefuseNull($schema)) {
             if (is_string($type)) {
                 $schema['type'] = [$type, 'null'];
 
@@ -81,6 +84,36 @@ final class SchemaUnion
         }
 
         return ['anyOf' => [$schema, ['type' => 'null']]];
+    }
+
+    /**
+     * Whether an `enum` or `const` on the schema rules null out. Either constrains the value beside
+     * `type`, so no nullable spelling that leaves it in place admits null — the ONE reading every site
+     * widening a schema to null asks ({@see FieldNode} is the validation side's).
+     *
+     * @param  array<string, mixed>  $schema
+     */
+    public static function valuesRefuseNull(array $schema): bool
+    {
+        $enum = $schema['enum'] ?? null;
+        if (is_array($enum) && ! in_array(null, $enum, true)) {
+            return true;
+        }
+
+        return array_key_exists('const', $schema) && $schema['const'] !== null;
+    }
+
+    /**
+     * Whether the schema is already a composition with a `{type: null}` branch — what a second widening
+     * of a branched fragment is handed, and must not nest.
+     *
+     * @param  array<string, mixed>  $schema
+     */
+    private static function hasNullBranch(array $schema): bool
+    {
+        $branches = $schema['anyOf'] ?? null;
+
+        return is_array($branches) && in_array(['type' => 'null'], $branches, true);
     }
 
     /**

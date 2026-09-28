@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Docuccino\Core\Extensions\Validation;
 
 use Docuccino\Core\Extensions\Context\RepresentationPolicy;
+use Docuccino\Core\Extensions\Schema\EnumDecoration;
+use Docuccino\Core\Extensions\Schema\SchemaUnion;
 
 /**
  * One node of the request schema tree the rule builder assembles. A node is an object (it has
@@ -171,6 +173,15 @@ final class FieldNode
             unset($schema['$ref']);
 
             return ['anyOf' => [$reference, ['type' => 'null']]] + $schema;
+        }
+
+        // A value list constrains the value beside `type`, so null folded into the type would still be
+        // refused by it. The list and its positional decoration take a branch of their own; everything
+        // else — prose, a string's pattern — stays on the parent, where null is not constrained by it.
+        if (SchemaUnion::valuesRefuseNull($schema)) {
+            $branch = array_intersect_key($schema, array_flip(['type', 'enum', 'const', ...EnumDecoration::KEYS]));
+
+            return ['anyOf' => [$branch, ['type' => 'null']]] + array_diff_key($schema, $branch);
         }
 
         $types = self::typeWords($schema['type'] ?? null);

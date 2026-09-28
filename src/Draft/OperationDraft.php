@@ -26,6 +26,21 @@ final class OperationDraft
      */
     public const string REDIRECT_RANGE = '3XX';
 
+    /**
+     * The OAS key a body is published under when the code states its status and nothing can read it
+     * (`->setStatusCode($request->integer('code'))`): "any status", which is the truth, rather than a code
+     * the endpoint may never send. Only a `default` response recorded as a stand-in
+     * ({@see ResponseDraft::statusIsUnplaced()}) is this; one a producer publishes as its own catch-all is
+     * not, and nothing here retires it ({@see supersedeUnreadStatus()}).
+     */
+    public const string UNREAD_STATUS = 'default';
+
+    /**
+     * The unread-status stand-in once a declaration has retired it. An unread status can be several codes,
+     * so every status declared after the first takes its findings too, not just the first.
+     */
+    private ?ResponseDraft $retiredUnread = null;
+
     private readonly PatchGuard $guard;
 
     /**
@@ -57,6 +72,8 @@ final class OperationDraft
     private ?string $requestDescription = null;
 
     private ?string $id = null;
+
+    private bool $validatesInput = false;
 
     public function __construct()
     {
@@ -175,6 +192,45 @@ final class OperationDraft
     }
 
     /**
+     * Whether declaring `$status` settles the unread-status stand-in — the one statement of that rule, which
+     * every site deciding it (the retirement below, a notice about the stand-in, whether a body is still
+     * unnamed) asks. A declared status below 400 is one the code could have been setting; an error code
+     * speaks for a failure path, and a range or a non-code key names no status at all.
+     */
+    public static function retiresUnreadStatus(string $status): bool
+    {
+        return preg_match('/^[1-3]\d\d$/D', $status) === 1;
+    }
+
+    /**
+     * Hand the unread-status stand-in's findings to a status a producer has just DECLARED — the same kind of
+     * retraction {@see supersedeStatusRange()} makes for the redirect range, for a different unknown: the
+     * expression nobody could read may take several codes, so EVERY status {@see retiresUnreadStatus()}
+     * accepts takes the findings, and the stand-in goes with the first. The declared status is one the
+     * declaration read, so it is recorded as placed before it absorbs anything.
+     *
+     * A bodyless status takes everything but the body, which it may not carry ({@see ResponseDraft::content()}).
+     */
+    public function supersedeUnreadStatus(string $status, Contribution $by): void
+    {
+        if (! self::retiresUnreadStatus($status)) {
+            return;
+        }
+
+        $standIn = $this->responses[self::UNREAD_STATUS] ?? null;
+        if ($standIn !== null && $standIn->statusIsUnplaced() && $standIn->isSupersededBy($by)) {
+            unset($this->responses[self::UNREAD_STATUS]);
+            $this->retiredUnread = $standIn;
+        }
+
+        if ($this->retiredUnread !== null) {
+            $declared = $this->response($status);
+            $declared->recordStatusPlacement(false);
+            $declared->absorb($this->retiredUnread);
+        }
+    }
+
+    /**
      * Every parameter this operation has a draft for, as its `in:name` key, byte-sorted for the same
      * reason {@see responseStatuses()} is: what this answers must be a function of the parameters and
      * never of the order the producers wrote them.
@@ -231,6 +287,23 @@ final class OperationDraft
     public function declareRequestBodyDescription(string $description): void
     {
         $this->requestDescription ??= $description;
+    }
+
+    /**
+     * Record that the server validates this operation's input against rules, so it can refuse a request
+     * with a 422 — whether the rules were documented as a body or as query parameters, or not at all.
+     * Written by whoever applied the rules and read by a later phase; it is a fact about the draft, not a
+     * field of the document, so nothing freezes it: what it causes is frozen instead.
+     */
+    public function declareValidatesInput(): void
+    {
+        $this->validatesInput = true;
+    }
+
+    /** Whether anything declared that this operation validates its input ({@see declareValidatesInput()}). */
+    public function validatesInput(): bool
+    {
+        return $this->validatesInput;
     }
 
     /** The provenance producer of the currently-winning contribution for a field, or null if unset. */

@@ -68,8 +68,9 @@ final class RecoveredRequest
     }
 
     /**
-     * Drain the schema's diagnostics and write it as a request body (write verbs) or query parameters
-     * (read verbs), attributed to `integration:<producer>`. Pass the single class the body was
+     * Drain the schema's diagnostics, declare that the operation validates its input, and write the
+     * schema as a request body (write verbs) or query parameters (read verbs), attributed to
+     * `integration:<producer>`. Pass the single class the body was
      * recovered from as `$sourceClass` so it can hoist; null (an inline `validate()`) stays inline.
      *
      * `$keys` maps a PHP property name to the key the REQUEST accepts it under, for a source class
@@ -88,6 +89,10 @@ final class RecoveredRequest
         [$result, $declaredRequired] = $this->withDeclarations($result, $context, $sourceClass, $keys);
 
         $contribution = Contribution::integration($producer, $context->actionSource());
+
+        // Recorded before the verb splits: the server validates either way, and a read verb's query
+        // parameters are no evidence of it, since other integrations write those without validating.
+        $operation->declareValidatesInput();
 
         if (! self::documentsBody($context)) {
             $this->applyQueryParameters($operation, $result, $contribution);
@@ -149,7 +154,7 @@ final class RecoveredRequest
         [$schema, $declaredRequired, $fieldDiagnostics] = $this->fields->apply(
             $schema,
             self::declaredOn($sourceClass, $context),
-            $context->converter(),
+            $context->requestConverter(),
             ClassNames::publishable($sourceClass),
         );
 

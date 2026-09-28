@@ -191,6 +191,17 @@ it('does not hoist for read verbs (query parameters, never a body)', function ()
         ->and($op->hasParameter('query', 'q'))->toBeTrue();
 });
 
+it('declares the operation validates its input on either verb', function (string $method): void {
+    // The rules are applied whichever part of the document they land in, and the server refuses a value
+    // they reject either way — so the declaration must not depend on the verb's body-or-query split.
+    $op = new OperationDraft;
+    expect($op->validatesInput())->toBeFalse();
+
+    (new RecoveredRequest)->apply($op, requestContext(new ComponentRegistry, method: $method), objectSchema(['q' => ['type' => 'string']]), 'form-request');
+
+    expect($op->validatesInput())->toBeTrue();
+})->with(['POST', 'PUT', 'PATCH', 'DELETE', 'GET', 'HEAD']);
+
 /**
  * Dataset over every shape the read-verb flattener has to handle. `filter.radius_lat` in validator
  * syntax IS `filter[radius_lat]` on the wire, so a nested field is a bracketed leaf parameter — but a

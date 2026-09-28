@@ -27,6 +27,9 @@ final readonly class CallableRef
         public ?string $narrowParameter = null,
         public ?string $narrowType = null,
         public bool $narrowToEvery = false,
+        // Every reachable return is an exception the framework renders instead (an exception map), read into
+        // ActionAnalysis::$throws as a throw of what it builds; a return naming no class comes back UnknownT.
+        public bool $returnsExceptions = false,
     ) {}
 
     /** A closure located by line rather than a named method. */
@@ -39,6 +42,10 @@ final readonly class CallableRef
     public function symbol(): string
     {
         $symbol = $this->narrowType !== null ? $this->target().'#'.$this->narrowType : $this->target();
+
+        if ($this->returnsExceptions) {
+            return $symbol.'#exceptions';
+        }
 
         return $this->narrowToEvery ? $symbol.'#every' : $symbol;
     }

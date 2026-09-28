@@ -47,6 +47,7 @@ final class SchemaConverter implements TypeSchemaConverter
         private readonly ComponentRegistry $components,
         private readonly RepresentationPolicy $representation = new RepresentationPolicy,
         private readonly RouteDependencies $dependencies = new RouteDependencies,
+        private readonly bool $request = false,
     ) {}
 
     /**
@@ -109,6 +110,11 @@ final class SchemaConverter implements TypeSchemaConverter
     public function depth(): int
     {
         return $this->depth;
+    }
+
+    public function describesRequest(): bool
+    {
+        return $this->request;
     }
 
     public function reference(string $name, array $schema, ?string $schemaId = null): array

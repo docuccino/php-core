@@ -55,8 +55,8 @@ it('assembles every member count, nullable and not, under both policies', functi
 ]);
 
 it('keeps every keyword the member carried when it folds the null in', function (): void {
-    // The whole point of contributing a member rather than replacing the union: a `format`, a
-    // `description` or an `enum` the producer worked out survives being made nullable.
+    // The whole point of contributing a member rather than replacing the union: a `format` or a
+    // `description` the producer worked out survives being made nullable.
     expect(SchemaUnion::of([['type' => 'string', 'format' => 'date-time']], true, 'type-array'))
         ->toBe(['type' => ['string', 'null'], 'format' => 'date-time'])
         ->and(SchemaUnion::of([['type' => 'integer', 'description' => 'Unix timestamp (seconds).']], true, 'type-array'))
@@ -84,6 +84,19 @@ it('widens every fragment shape a producer can hand it', function (array $schema
     ],
     'no type at all' => [[], 'type-array', ['anyOf' => [[], ['type' => 'null']]]],
 
+    // A value list constrains the value beside `type`, so a null folded into the type is still refused
+    // by an `enum` or `const` that omits it — the fold would claim a null the schema rejects.
+    'an enum' => [
+        ['type' => 'string', 'enum' => ['a', 'b'], 'x-enum-varnames' => ['A', 'B']],
+        'type-array',
+        ['anyOf' => [['type' => 'string', 'enum' => ['a', 'b'], 'x-enum-varnames' => ['A', 'B']], ['type' => 'null']]],
+    ],
+    'a const' => [
+        ['type' => 'string', 'const' => 'a'],
+        'type-array',
+        ['anyOf' => [['type' => 'string', 'const' => 'a'], ['type' => 'null']]],
+    ],
+
     // The anyof policy branches everything, so one producer cannot express nullability in a shape the
     // rest of the document does not use.
     'a named type under anyof' => [
@@ -109,6 +122,8 @@ it('is idempotent on a fragment that already admits null', function (array $sche
     'a nullable type list' => [['type' => ['array', 'object', 'null']], 'type-array'],
     'null itself under anyof' => [['type' => 'null'], 'anyof'],
     'a nullable named type under anyof' => [['type' => ['string', 'null']], 'anyof'],
+    'a branch already taken' => [['anyOf' => [['type' => 'string', 'enum' => ['a']], ['type' => 'null']]], 'type-array'],
+    'a branch already taken under anyof' => [['anyOf' => [['$ref' => '#/components/schemas/X'], ['type' => 'null']]], 'anyof'],
 ]);
 
 it('defaults to the type-array policy, the shape most consumers handle best', function (): void {

@@ -1009,7 +1009,7 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
             $lone = count($kept) === 1 ? Arr::stringKeyed(is_array($kept[0]) ? $kept[0] : []) : null;
             if ($lone !== null) {
                 unset($schema[$keyword]);
-                $schema = $this->foldBranch($schema, $lone);
+                $schema = self::admitNull($this->foldBranch($schema, $lone));
             }
 
             // A choice survives — the branches left, or the one folded in being itself an anyOf/oneOf.
@@ -1020,6 +1020,31 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
                     message: sprintf('Moved the `{type: null}` branch at %s/%s onto the parent as `nullable: true`, which OpenAPI 3.0 reads loosely beside a composition.', $pointer, $keyword),
                 );
             }
+        }
+
+        return $schema;
+    }
+
+    /**
+     * A branch folded in beside `nullable: true` that carries a value list. 3.0.3's `nullable` adds null
+     * to the TYPE only, so an `enum` (or a `const`, which becomes one) that omits null would refuse the
+     * null the dropped branch admitted — so the list names it, appended, which leaves the positional name
+     * hints naming the same members. Only here: a `type: [x, null]` beside a list that omits null never
+     * admitted null in the source either, and widening it would be a claim the source does not make.
+     *
+     * @param  array<string, mixed>  $schema
+     * @return array<string, mixed>
+     */
+    private static function admitNull(array $schema): array
+    {
+        if (array_key_exists('const', $schema) && ! array_key_exists('enum', $schema)) {
+            $schema['enum'] = [$schema['const']];
+            unset($schema['const']);
+        }
+
+        $enum = $schema['enum'] ?? null;
+        if (is_array($enum) && ! in_array(null, $enum, true)) {
+            $schema['enum'] = [...array_values($enum), null];
         }
 
         return $schema;

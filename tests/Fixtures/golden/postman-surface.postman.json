@@ -419,7 +419,7 @@
               "_postman_previewlanguage": "text"
             },
             {
-              "name": "422 Unprocessable Content — Validation failed",
+              "name": "422 Unprocessable Entity — Validation failed",
               "originalRequest": {
                 "method": "POST",
                 "header": [
@@ -459,7 +459,7 @@
                   ]
                 }
               },
-              "status": "Unprocessable Content",
+              "status": "Unprocessable Entity",
               "code": 422,
               "header": [],
               "cookie": [],

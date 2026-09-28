@@ -25,6 +25,12 @@ final readonly class ThrownException
         public ThrowDisposition $disposition,
     ) {}
 
+    /** The same throw, raised where it was, rendered as `$fqcn` at `$status` — a translation, or a reading of its status. */
+    public function as(string $fqcn, ?int $status): self
+    {
+        return new self($fqcn, $status, $this->callChain, $this->confidence, $this->disposition);
+    }
+
     /** Identity key: `(fqcn, status)`. */
     public function identityKey(): string
     {

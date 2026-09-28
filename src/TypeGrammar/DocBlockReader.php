@@ -9,7 +9,7 @@ use PHPStan\PhpDocParser\Ast\PhpDoc\PhpDocTextNode;
 use PHPStan\PhpDocParser\Ast\Type\TypeNode;
 
 /**
- * The one docblock reader: prose, `@example`, `@summary`/`@description`, `@property`/`@param`/`@var`
+ * The one docblock reader: prose, `@example`, `@summary`/`@description`, `@property`/`@param`/`@var`/`@return`
  * tags — each with its `@phpstan-`/`@psalm-` prefixed forms — and the OAS summary/description split,
  * all through the shared {@see PhpDocParserStack} so there's a single grammar.
  */
@@ -23,6 +23,8 @@ final class DocBlockReader
     private const VAR_TAGS = ['@phpstan-var', '@psalm-var', '@var'];
 
     private const PARAM_TAGS = ['@phpstan-param', '@psalm-param', '@param'];
+
+    private const RETURN_TAGS = ['@phpstan-return', '@psalm-return', '@return'];
 
     private const PROPERTY_TAGS = [
         '@phpstan-property', '@phpstan-property-read',
@@ -118,6 +120,26 @@ final class DocBlockReader
 
         foreach (self::VAR_TAGS as $tagName) {
             foreach ($node->getVarTagValues($tagName) as $tag) {
+                $type = trim((string) $tag->type);
+                if ($type !== '') {
+                    return $type;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /** The first type a `@return` tag states, in {@see self::RETURN_TAGS} precedence, or null. */
+    public function returnType(?string $docComment): ?string
+    {
+        $node = $this->stack->parseDocBlock($docComment);
+        if ($node === null) {
+            return null;
+        }
+
+        foreach (self::RETURN_TAGS as $tagName) {
+            foreach ($node->getReturnTagValues($tagName) as $tag) {
                 $type = trim((string) $tag->type);
                 if ($type !== '') {
                     return $type;

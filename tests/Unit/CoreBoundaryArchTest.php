@@ -437,6 +437,7 @@ it('freezes the drafts an extension writes through at the methods they mean to p
         OperationDraft::class => [
             'declareRequestBodyDescription',
             'declareRequestBodyExamples',
+            'declareValidatesInput',
             'hasParameter',
             'hasResponse',
             'parameter',
@@ -448,6 +449,7 @@ it('freezes the drafts an extension writes through at the methods they mean to p
             'resolvedField',
             'response',
             'responseStatuses',
+            'retiresUnreadStatus',
             'set',
             'setDeprecated',
             'setDescription',
@@ -456,6 +458,8 @@ it('freezes the drafts an extension writes through at the methods they mean to p
             'setSummary',
             'setTags',
             'supersedeStatusRange',
+            'supersedeUnreadStatus',
+            'validatesInput',
         ],
         ParameterDraft::class => [
             'declareExamples',

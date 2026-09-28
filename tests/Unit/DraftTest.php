@@ -758,3 +758,91 @@ it('carries a declared sentence across the merge into the operation it applies t
         'componentDescription' => 'Nothing is stored under that identifier.',
     ]);
 });
+
+it('holds that an operation validates its input as a draft fact that freezes into nothing', function (): void {
+    // What the fact CAUSES — a 422 — is frozen by whoever reads it; the fact itself is no part of the
+    // document, so declaring it must leave the frozen operation byte-for-byte as it was.
+    $plain = new OperationDraft;
+    $plain->setSummary('List widgets', Contribution::inference());
+
+    $declared = new OperationDraft;
+    $declared->setSummary('List widgets', Contribution::inference());
+    $declared->declareValidatesInput();
+    $declared->declareValidatesInput();
+
+    expect($plain->validatesInput())->toBeFalse()
+        ->and($declared->validatesInput())->toBeTrue()
+        ->and($declared->freeze()->toArray())->toBe($plain->freeze()->toArray());
+});
+
+it('hands an unread status to every success-class status declared for it', function (): void {
+    // `default` stands in for a status the code set and nothing could read. The expression may take
+    // several codes, so each one an author names takes the body — whichever order they are named in —
+    // and the stand-in goes, because the declarations now say which codes there are.
+    $draft = new OperationDraft;
+    $standIn = $draft->response(OperationDraft::UNREAD_STATUS);
+    $standIn->recordStatusPlacement(true);
+    $standIn->setDescription('Any status', Contribution::fallback());
+    $standIn->content('application/json')->set('type', 'object', Contribution::inference());
+
+    foreach (['202', '200'] as $status) {
+        $draft->response($status)->setDescription('Declared', Contribution::fallback());
+        $draft->supersedeUnreadStatus($status, Contribution::attribute());
+    }
+
+    $frozen = $draft->freeze()->responses;
+
+    expect($draft->responseStatuses())->toBe(['200', '202'])
+        ->and($frozen['200']->content['application/json']['schema']['type'] ?? null)->toBe('object')
+        ->and($frozen['202']->content['application/json']['schema']['type'] ?? null)->toBe('object')
+        // Described as itself: the stand-in's words were about the stand-in.
+        ->and($frozen['200']->description)->toBe('Declared')
+        // And read: the declaration names the status, so neither is a stand-in.
+        ->and($draft->response('200')->statusIsUnplaced())->toBeFalse();
+});
+
+it('keeps an unread status beside a status that does not retire it, and hands that nothing', function (string $status): void {
+    // A declared error speaks for a failure path, not for the status the code set, so the stand-in stays
+    // and its body stays its own.
+    $draft = new OperationDraft;
+    $standIn = $draft->response(OperationDraft::UNREAD_STATUS);
+    $standIn->recordStatusPlacement(true);
+    $standIn->content('application/json')->set('type', 'object', Contribution::inference());
+
+    $draft->supersedeUnreadStatus($status, Contribution::attribute());
+
+    expect($draft->responseStatuses())->toBe([OperationDraft::UNREAD_STATUS]);
+})->with(['not found' => ['404'], 'server error' => ['503'], 'a range' => ['2XX'], 'the key itself' => ['default'], 'no code at all' => ['99']]);
+
+it('retires only the stand-in, never a default a producer published as its own', function (Contribution $by): void {
+    // A catch-all `default` an extension writes, or one an author wrote above the declaration, is somebody's
+    // document; it is not the stand-in for a status nothing read, so a declared 201 takes none of it.
+    $draft = new OperationDraft;
+    $draft->response(OperationDraft::UNREAD_STATUS)->setDescription('Error', $by);
+    $draft->response(OperationDraft::UNREAD_STATUS)->content('application/json')->set('type', 'object', $by);
+
+    $draft->supersedeUnreadStatus('201', Contribution::attribute());
+
+    expect($draft->responseStatuses())->toBe([OperationDraft::UNREAD_STATUS])
+        ->and($draft->hasResponse('201'))->toBeFalse();
+})->with(['an extension\'s catch-all' => [Contribution::integration('errors')], 'an overlay' => [Contribution::overlay()]]);
+
+it('hands a bodyless declared status everything of the stand-in but its body', function (string $status): void {
+    // 204, 205 and 304 may not carry a body, so what the stand-in collected reaches them without it.
+    $draft = new OperationDraft;
+    $standIn = $draft->response(OperationDraft::UNREAD_STATUS);
+    $standIn->recordStatusPlacement(true);
+    $standIn->content('application/json')->set('type', 'object', Contribution::inference());
+
+    $draft->supersedeUnreadStatus($status, Contribution::attribute());
+
+    expect($draft->responseStatuses())->toBe([$status])
+        ->and($draft->freeze()->responses[$status]->content)->toBeNull();
+})->with(['no content' => ['204'], 'reset content' => ['205'], 'not modified' => ['304'], 'informational' => ['103']]);
+
+it('states once which declared statuses retire the stand-in', function (string $status, bool $retires): void {
+    expect(OperationDraft::retiresUnreadStatus($status))->toBe($retires);
+})->with([
+    ['100', true], ['200', true], ['204', true], ['399', true],
+    ['400', false], ['503', false], ['99', false], ['0', false], ['2XX', false], ['default', false], ['', false], ['2000', false],
+]);

@@ -6,10 +6,12 @@ namespace Docuccino\Core\Extensions\Context;
 
 use Docuccino\Core\Draft\ResponseDraft;
 use Docuccino\Core\Extensions\Contracts\ErrorResponseFinalizer;
+use Docuccino\Core\Extensions\Contracts\ExceptionTranslator;
 use Docuccino\Core\Extensions\Contracts\Finalization;
 use Docuccino\Core\Extensions\Contracts\OperationExtension;
 use Docuccino\Core\Extensions\Contracts\RouteBindingFieldSchemaResolver;
 use Docuccino\Core\Extensions\Contracts\RouteBindingKeyResolver;
+use Docuccino\Core\Extensions\Contracts\SchemaContext;
 use Docuccino\Core\Extensions\Contracts\TypeSchemaConverter;
 use Docuccino\Core\Extensions\Contracts\ValidationRulesToSchema;
 use Docuccino\Core\Extensions\ResolvedExtensions;
@@ -47,6 +49,8 @@ final class RouteContext
     private ?ActionAnalysis $analysis = null;
 
     private ?TypeSchemaConverter $converter = null;
+
+    private ?TypeSchemaConverter $requestConverter = null;
 
     private ?RepresentationPolicy $representation = null;
 
@@ -136,6 +140,10 @@ final class RouteContext
      * draft — the one home for that chain resolution. Every extension that synthesizes a throw comes
      * through here and then applies the draft under its own producer and source.
      *
+     * The throw is first swapped for whatever the first {@see ExceptionTranslator} answers with, and it is
+     * that exception every mapper renders and every finalizer is handed — a framework that translates an
+     * exception before rendering it sends the translation's response, never the thrown class's.
+     *
      * The rendered draft then passes through every {@see ErrorResponseFinalizer} in order, since that is
      * what the application sends. A finalizer that REPLACES it withdraws what rendering it registered —
      * the components its body hoisted, the notes it left — exactly as a dropped response does
@@ -144,11 +152,16 @@ final class RouteContext
      */
     public function mapThrow(ThrownException $throw): ?MappedResponse
     {
+        $translated = $this->translate($throw);
+        if ($translated !== null) {
+            $throw = $translated;
+        }
+
         $finalizers = $this->extensions->errorResponseFinalizers;
         $components = $finalizers === [] ? null : $this->components->snapshot();
         $notes = $finalizers === [] ? null : $this->notes->snapshot();
 
-        $mapped = $this->render($throw);
+        $mapped = $this->render($throw, $translated);
         if ($mapped === null || $components === null || $notes === null) {
             return $mapped;
         }
@@ -182,13 +195,26 @@ final class RouteContext
             }
 
             $parts = $finalization === Finalization::Extends ? [$rendered, ...$built] : $built;
-            $mapped = new MappedResponse($mapped->mapper, ResponseDraft::eitherOf(...$parts), $finalizer);
+            $mapped = new MappedResponse($mapped->mapper, ResponseDraft::eitherOf(...$parts), $finalizer, $translated);
         }
 
         return $mapped;
     }
 
-    private function render(ThrownException $throw): ?MappedResponse
+    /** What the first translator to answer swaps the throw for, or null where none does. */
+    private function translate(ThrownException $throw): ?ThrownException
+    {
+        foreach ($this->extensions->exceptionTranslators as $translator) {
+            $translated = $translator->translate($throw, $this);
+            if ($translated !== null) {
+                return $translated;
+            }
+        }
+
+        return null;
+    }
+
+    private function render(ThrownException $throw, ?ThrownException $translated): ?MappedResponse
     {
         foreach ($this->extensions->exceptionToResponse as $mapper) {
             if (! $mapper->supports($throw, $this)) {
@@ -197,7 +223,7 @@ final class RouteContext
 
             $draft = $mapper->toResponse($throw, $this, $this->components);
             if ($draft !== null) {
-                return new MappedResponse($mapper, $draft);
+                return new MappedResponse($mapper, $draft, translated: $translated);
             }
         }
 
@@ -441,6 +467,16 @@ final class RouteContext
         // The converter gets this route's dependency bag so mappers recording files via
         // SchemaContext::dependsOn() widen the fragment cache key — see dependencies().
         return $this->converter ??= new SchemaConverter($this->extensions->typeToSchema, $this->engine, $this->components, $this->representation(), $this->dependencies);
+    }
+
+    /**
+     * The same converter for what a client SENDS — a declared request body field or parameter — so a
+     * class whose request shape differs from its response shape is published as its own request
+     * component ({@see SchemaContext::describesRequest()}).
+     */
+    public function requestConverter(): TypeSchemaConverter
+    {
+        return $this->requestConverter ??= new SchemaConverter($this->extensions->typeToSchema, $this->engine, $this->components, $this->representation(), $this->dependencies, request: true);
     }
 
     /** The document's representation policy, resolved once. */

@@ -32,6 +32,14 @@ use stdClass;
 final class EnumDecoration
 {
     /**
+     * Every key {@see apply()} can add beside `enum`. Each is positional over the `enum` it decorates,
+     * so whatever moves the `enum` moves these with it.
+     *
+     * @var list<string>
+     */
+    public const array KEYS = ['x-enum-varnames', 'x-enumNames', 'x-enumDescriptions', 'x-enum-descriptions'];
+
+    /**
      * @param  array<string, mixed>  $schema  an enum-bearing schema fragment
      * @param  string  $naming  the `enums.naming` policy keyword
      * @param  list<string>  $names  identifier-safe member names, parallel to the schema's `enum`
