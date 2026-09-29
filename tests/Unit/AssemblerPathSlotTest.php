@@ -15,9 +15,10 @@ use Docuccino\Core\Pipeline\OperationFragment;
  * a case the document cannot represent. The rule is that the first claimant keeps the slot and the
  * loser is REPORTED — the alternative, an overwrite, deletes a documented endpoint with nothing said.
  *
- * Duplicate operation IDENTITY is the separate, orthogonal report: two fragments can share an identity
- * from different slots (`/users/{user}` and `/users/{id}` normalise to one template), which loses
- * nothing from the document but breaks how a semantic diff pairs them.
+ * Paths that differ only by their parameters' names are one slot: OpenAPI says templated paths with the
+ * same hierarchy but different names MUST NOT exist, as they are identical. Duplicate operation IDENTITY
+ * on two genuinely different slots is the separate report, which loses nothing from the document but
+ * breaks how a semantic diff pairs them.
  */
 beforeEach(function (): void {
     $this->fragment = static function (string $path, string $method, string $signature, string $id): OperationFragment {
@@ -75,8 +76,11 @@ it('reports a shared identity and a taken slot as the two different problems the
 
     expect($codes)->toBe($expected);
 })->with([
+    // One path to OpenAPI, whatever the names: the second is not emitted, and its identity repeats only
+    // because the slot does, so the collision already names it.
+    'renamed path parameter' => ['/api/users/{id}', 'op:v1:aaaaaaaaaaaaaaaa', ['route.operation-collision']],
     // Two slots, one identity: both operations are emitted, but a differ pairs them as one node.
-    'renamed path parameter' => ['/api/users/{id}', 'op:v1:aaaaaaaaaaaaaaaa', ['route.duplicate-operation']],
+    'two slots, one identity' => ['/api/accounts/{user}', 'op:v1:aaaaaaaaaaaaaaaa', ['route.duplicate-operation']],
     // One slot, two identities: the document loses an operation, and nothing about identity is wrong.
     'two hosts on one URI' => ['/api/users/{user}', 'op:v1:bbbbbbbbbbbbbbbb', ['route.operation-collision']],
     // One slot AND one identity is ONE event: the identity repeats because the path and method do, so
@@ -84,6 +88,23 @@ it('reports a shared identity and a taken slot as the two different problems the
     // reported as two.
     'one slot and one identity' => ['/api/users/{user}', 'op:v1:aaaaaaaaaaaaaaaa', ['route.operation-collision']],
 ]);
+
+it('publishes one of two paths differing only by parameter names, and says why the other is missing', function (): void {
+    [$document, $diagnostics] = ($this->assemble)([
+        ($this->fragment)('/api/users/{id}', 'get', 'GET /api/users/{id}', 'op:v1:aaaaaaaaaaaaaaaa'),
+        ($this->fragment)('/api/users/{user}', 'get', 'GET /api/users/{user}', 'op:v1:aaaaaaaaaaaaaaaa'),
+        ($this->fragment)('/api/users/{user}', 'post', 'POST /api/users/{user}', 'op:v1:bbbbbbbbbbbbbbbb'),
+    ]);
+
+    $collisions = array_values(array_filter($diagnostics, fn (Diagnostic $d): bool => $d->code === 'route.operation-collision'));
+
+    // A method the first path does not hold is a slot of its own, so it is published where it was written.
+    expect(array_keys($document['paths']))->toBe(['/api/users/{id}', '/api/users/{user}'])
+        ->and(array_keys($document['paths']['/api/users/{user}']))->toBe(['post'])
+        ->and($collisions)->toHaveCount(1)
+        ->and($collisions[0]->message)->toContain('GET /api/users/{user} is already held by GET /api/users/{id} at /api/users/{id}')
+        ->and($collisions[0]->help)->toBe('Give one of them a path that differs by more than a parameter name.');
+});
 
 it('does not advise a plain duplicate about hosts it does not have', function (): void {
     // The same route registered twice is one signature twice. The host advice is right for two hosts on

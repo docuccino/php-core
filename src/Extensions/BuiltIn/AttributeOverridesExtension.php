@@ -78,7 +78,7 @@ final class AttributeOverridesExtension implements OperationExtension
 
         $operationId = $context->attributes->first(OperationId::class);
         if ($operationId !== null) {
-            $operation->setOperationId($operationId->id, $attribute);
+            $operation->setOperationId(RouteOperationId::forRoute($context->route, $context->httpMethod(), $operationId->id), $attribute);
         }
 
         $tags = $this->tags($context);
@@ -279,13 +279,13 @@ final class AttributeOverridesExtension implements OperationExtension
             $class = $context->actionRef->class;
 
             if ($class !== null) {
-                return Fqcn::short($class).'@'.$context->actionRef->method;
+                return RouteOperationId::forRoute($context->route, $context->httpMethod(), Fqcn::short($class).'@'.$context->actionRef->method);
             }
         } elseif ($context->route->name !== null && $context->route->name !== '') {
-            return $context->route->name;
+            return RouteOperationId::forRoute($context->route, $context->httpMethod(), $context->route->name);
         }
 
-        return RouteOperationId::mint($context->httpMethod(), $context->route->uri);
+        return RouteOperationId::forRoute($context->route, $context->httpMethod(), null);
     }
 
     /**

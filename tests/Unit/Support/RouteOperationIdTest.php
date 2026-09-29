@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Docuccino\Core\Extensions\Context\RouteDescriptor;
 use Docuccino\Core\Lint\OperationIdStyle;
 use Docuccino\Core\Support\RouteOperationId;
 
@@ -200,4 +201,18 @@ it('gives every operation of one document its own name', function (): void {
 it('separates a parameter from a literal segment spelled like it', function (): void {
     expect(RouteOperationId::mint('get', '/api/forms/{form}'))
         ->not->toBe(RouteOperationId::mint('get', '/api/forms/form'));
+});
+
+it('names each short form of a route after the segments it leaves off', function (): void {
+    // Each form is an operation of its own, so the id the forms share has to become one per form — and a
+    // function of which segments are gone, never of the order the forms were met.
+    $form = static fn (string $uri, array $omitted): RouteDescriptor => new RouteDescriptor(['GET'], $uri, omitted: $omitted);
+
+    expect(RouteOperationId::forRoute($form('/posts/{page?}', []), 'get', 'posts.index'))->toBe('posts.index')
+        ->and(RouteOperationId::forRoute($form('/posts', ['page']), 'get', 'posts.index'))->toBe('posts.index.without-page')
+        ->and(RouteOperationId::forRoute($form('/posts', ['year', 'month']), 'get', 'PostController@index'))->toBe('PostController@index.without-year-month')
+        ->and(RouteOperationId::forRoute($form('/posts', ['year', 'month']), 'get', 'posts.index'))->not->toBe(RouteOperationId::forRoute($form('/posts/{year}', ['month']), 'get', 'posts.index'))
+        // Nothing shared: each form's own path mints it, and already tells the forms apart.
+        ->and(RouteOperationId::forRoute($form('/posts', ['page']), 'get', null))->toBe('get.posts')
+        ->and(RouteOperationId::forRoute($form('/posts/{page?}', []), 'get', null))->toBe('get.posts.@page');
 });

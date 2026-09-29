@@ -34,6 +34,11 @@ final readonly class RouteDescriptor
      *                          than an endpoint, so it is reported and omitted rather than published.
      *                          Deliberately absent from {@see cacheSignature()}: a route that never
      *                          reaches a fragment has nothing to key.
+     * @param  list<string>  $omitted  the optional trailing segments this descriptor's form of the route
+     *                                 leaves off, in template order. A route with optional segments
+     *                                 answers one URL per form (`/posts/{page?}` answers `/posts` too),
+     *                                 and each form is an operation of its own; the full form omits
+     *                                 nothing and so keeps the identity the route has always had
      */
     public function __construct(
         public array $methods,
@@ -44,7 +49,29 @@ final readonly class RouteDescriptor
         public array $cacheInputs = [],
         public ?string $domain = null,
         public bool $fallback = false,
+        public array $omitted = [],
     ) {}
+
+    /**
+     * This route as one of its URL forms ({@see $omitted}): everything else it carries, unchanged.
+     *
+     * @param  list<string>  $methods
+     * @param  list<string>  $omitted
+     */
+    public function withForm(string $uri, array $methods, array $omitted): self
+    {
+        return new self(
+            methods: $methods,
+            uri: $uri,
+            name: $this->name,
+            action: $this->action,
+            middleware: $this->middleware,
+            cacheInputs: $this->cacheInputs,
+            domain: $this->domain,
+            fallback: $this->fallback,
+            omitted: $omitted,
+        );
+    }
 
     /** The primary documentable HTTP method (lower-case) — the first non-HEAD method. */
     public function primaryMethod(): string
@@ -117,6 +144,8 @@ final readonly class RouteDescriptor
             implode(',', $middleware),
             implode(',', $this->cacheInputs),
             $this->domain ?? '',
+            // Only a short form carries it, so every full form keeps the key it always had.
+            ...($this->omitted === [] ? [] : ['omitted:'.implode(',', $this->omitted)]),
         ]);
     }
 }

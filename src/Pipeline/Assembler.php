@@ -31,7 +31,7 @@ use Throwable;
  * (or, for a webhook, under its name in `webhooks`), hoists and identifies components, stamps document
  * identity + generator metadata, applies overlays and document transformers, then computes the content
  * hash. Two operations contesting one slot — duplicate identities, or a path and method a fragment
- * already holds — are error diagnostics, and the first claimant keeps the slot; nothing is ever
+ * already holds, where paths differing only by parameter names are one path — are error diagnostics, and the first claimant keeps the slot; nothing is ever
  * silently overwritten. "First" is a content order and not an arrival one, which is what the second
  * obligation of docs/design/uir-and-extensions.md §2 "A contested published slot" requires: the caller
  * hands the fragments over sorted by method, URI and host. A document transformer that throws is an error diagnostic too, never an
@@ -260,59 +260,70 @@ final class Assembler
     {
         $paths = [];
         $seenIds = [];
-        /** @var array<string, array<string, string>> $claimed */
+        /** @var array<string, array<string, array{signature: string, path: string}>> $claimed */
         $claimed = [];
 
         foreach ($fragments as $fragment) {
+            // Paths that differ only by their parameters' names are one path to OpenAPI ("MUST NOT
+            // exist"), so they are one slot here too: `/users/{user}` and `/users/{id}` cannot both be
+            // published, and the second is reported rather than emitted.
+            $slot = $this->identity->normalizePathTemplate($fragment->path);
+            $holder = $claimed[$slot][$fragment->method] ?? null;
+            if ($holder !== null) {
+                $renamed = $holder['path'] !== $fragment->path;
+                $diagnostics[] = new Diagnostic(
+                    severity: Severity::Error,
+                    code: 'route.operation-collision',
+                    message: $renamed
+                        ? sprintf(
+                            'OpenAPI documents one operation per path and method, and a path differing only by its parameters\' names is the same path: %s %s is already held by %s at %s; this route is not in the document.',
+                            strtoupper($fragment->method),
+                            $fragment->path,
+                            $holder['signature'],
+                            $holder['path'],
+                        )
+                        : sprintf(
+                            'OpenAPI documents one operation per path and method, and %s %s is already held by %s; this route is not in the document.',
+                            strtoupper($fragment->method),
+                            $fragment->path,
+                            $holder['signature'],
+                        ),
+                    routeSignature: $fragment->routeSignature,
+                    // Two routes with the SAME signature are one route registered twice, and telling
+                    // that author about hosts is advice about something they do not have.
+                    help: match (true) {
+                        $renamed => 'Give one of them a path that differs by more than a parameter name.',
+                        $holder['signature'] === $fragment->routeSignature => 'The same route is registered twice — remove one of the registrations.',
+                        default => 'Routes that differ only by host are separate APIs to a reader: give each host its own document and filter the routes into it.',
+                    },
+                );
+
+                continue;
+            }
+
+            // Only reached from a slot of its own, so what repeats here is an identity two different
+            // operations were given, which leaves a semantic diff unable to tell them apart.
             $operationId = $fragment->operation->docuccino?->id;
             $sharedWith = $operationId === null ? null : ($seenIds[$operationId] ?? null);
-
-            // Only when the two are genuinely different slots. An identity is a function of the method,
-            // the path SHAPE and the host, so a repeat on one path and method is the slot collision
-            // below said a second time — what reaches here is two paths whose parameters are merely
-            // named differently (`{user}` and `{id}` normalise alike), which loses no operation but
-            // leaves a semantic diff unable to tell the pair apart.
-            if ($sharedWith !== null && $sharedWith !== $fragment->path) {
+            if ($sharedWith !== null) {
                 $diagnostics[] = new Diagnostic(
                     severity: Severity::Error,
                     code: 'route.duplicate-operation',
                     message: sprintf(
-                        'Two routes resolve to the same operation identity (%s): %s and %s. A path parameter\'s name is not part of an identity, so a semantic diff pairs the two as one operation.',
+                        'Two routes resolve to the same operation identity (%s): %s and %s, so a semantic diff pairs the two as one operation.',
                         $operationId,
                         $sharedWith,
                         $fragment->path,
                     ),
                     routeSignature: $fragment->routeSignature,
-                    help: 'Give one of them a path that differs by more than a parameter name.',
+                    help: 'Give each operation an identity of its own.',
                 );
             }
             if ($operationId !== null) {
                 $seenIds[$operationId] ??= $fragment->path;
             }
 
-            $holder = $claimed[$fragment->path][$fragment->method] ?? null;
-            if ($holder !== null) {
-                $diagnostics[] = new Diagnostic(
-                    severity: Severity::Error,
-                    code: 'route.operation-collision',
-                    message: sprintf(
-                        'OpenAPI documents one operation per path and method, and %s %s is already held by %s; this route is not in the document.',
-                        strtoupper($fragment->method),
-                        $fragment->path,
-                        $holder,
-                    ),
-                    routeSignature: $fragment->routeSignature,
-                    // Two routes with the SAME signature are one route registered twice, and telling
-                    // that author about hosts is advice about something they do not have.
-                    help: $holder === $fragment->routeSignature
-                        ? 'The same route is registered twice — remove one of the registrations.'
-                        : 'Routes that differ only by host are separate APIs to a reader: give each host its own document and filter the routes into it.',
-                );
-
-                continue;
-            }
-
-            $claimed[$fragment->path][$fragment->method] = $fragment->routeSignature;
+            $claimed[$slot][$fragment->method] = ['signature' => $fragment->routeSignature, 'path' => $fragment->path];
             $paths[$fragment->path][$fragment->method] = $fragment->operation->toArray();
         }
 

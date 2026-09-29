@@ -64,7 +64,12 @@ final class RouteContext
 
     /**
      * @param  list<string>  $pathParameters  route template parameter names, in template order
-     * @param  list<string>  $optionalPathParameters  the subset declared optional (`{param?}`)
+     * @param  list<string>  $optionalPathParameters  the subset this form of the route could still end
+     *                                                before: its trailing run of `{param?}`s. A shorter
+     *                                                form is an operation of its own
+     *                                                ({@see RouteDescriptor::$omitted}), so each of these
+     *                                                is required HERE; one followed by a required segment
+     *                                                or literal text is required in every form
      * @param  array<string, string>  $routeBindings  path parameter name → bound model FQCN
      * @param  array<string, string>  $routeBindingFields  path parameter name → the column it binds on,
      *                                                     for the subset that names one (`{post:slug}`)
@@ -85,6 +90,19 @@ final class RouteContext
      *                                                           for the subset that declares one. A value
      *                                                           outside it never reaches the action: the
      *                                                           router answers 404
+     * @param  array<string, string>  $hostParameterConstraints  the same, for the segments of the host
+     *                                                           the route is bound to (`{tenant}` in
+     *                                                           `Route::domain()`), which the router
+     *                                                           matches ignoring case
+     * @param  array<string, string>  $pathParameterDefaults  the last of {@see $optionalPathParameters} →
+     *                                                        the value the action receives when a request
+     *                                                        leaves it off, which is exactly the next
+     *                                                        shorter form, spelled as the segment that
+     *                                                        would send it; empty where the route and the
+     *                                                        action settle none the segment could carry.
+     *                                                        Only that segment: leaving off an earlier
+     *                                                        one leaves off every segment after it too,
+     *                                                        which no value sent for it does
      * @param  ?string  $formRequestClass  the FormRequest class type-hinted on the action, if any
      * @param  ?string  $operationId  this operation's stable `x-docuccino.id`, already minted. The
      *                                pipeline stamps it onto the frozen node afterwards, but an
@@ -124,6 +142,8 @@ final class RouteContext
         public readonly bool $deprecated = false,
         public readonly ?string $deprecationReason = null,
         public readonly array $pathParameterConstraints = [],
+        public readonly array $hostParameterConstraints = [],
+        public readonly array $pathParameterDefaults = [],
     ) {
         $this->dependencies = new RouteDependencies;
         $this->notes = new RouteNotes;

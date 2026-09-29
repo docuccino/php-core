@@ -381,6 +381,21 @@ it('classifies a parameter becoming required as breaking', function (): void {
     expect($changes['parameter.became-required']->breaking)->toBeTrue();
 });
 
+it('reads a path parameter as required whatever its flag says, so correcting the flag changes nothing', function (): void {
+    // Every OpenAPI version requires `required: true` of a path parameter: the path holds the segment, so
+    // a document that said `false` never let a client leave it out, and saying `true` narrows nothing.
+    $old = diffBase();
+    $old['paths']['/api/v1/forms/{id}']['get']['parameters'][0]['required'] = false;
+
+    expect(diffOf($old, diffBase())->changes)->toBe([])
+        ->and(diffOf(diffBase(), $old)->changes)->toBe([]);
+
+    // The control: the same flip on a query parameter is the breaking change it always was.
+    $query = diffBase();
+    $query['paths']['/api/v1/forms/{id}']['get']['parameters'][1]['required'] = true;
+    expect(array_keys(changesByCode(diffOf(diffBase(), $query))))->toBe(['parameter.became-required']);
+});
+
 it('classifies an added required parameter as breaking', function (): void {
     $new = diffBase();
     $new['paths']['/api/v1/forms/{id}']['get']['parameters'][] = [
@@ -777,10 +792,11 @@ it('classifies an added operation as non-breaking', function (): void {
 });
 
 it('classifies a parameter becoming optional as non-breaking', function (): void {
-    $new = diffBase();
-    $new['paths']['/api/v1/forms/{id}']['get']['parameters'][0]['required'] = false;
+    // A query parameter: a path parameter is required whatever its flag says, so it never becomes optional.
+    $old = diffBase();
+    $old['paths']['/api/v1/forms/{id}']['get']['parameters'][1]['required'] = true;
 
-    $changes = changesByCode(diffOf(diffBase(), $new));
+    $changes = changesByCode(diffOf($old, diffBase()));
     expect($changes)->toHaveKey('parameter.became-optional');
     expect($changes['parameter.became-optional']->breaking)->toBeFalse();
 });

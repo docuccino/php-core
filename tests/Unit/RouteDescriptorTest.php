@@ -105,3 +105,39 @@ it('folds a resolver\'s scalar cache inputs in, so a binding column busts the fr
     expect($key->signature())->toBe($column->signature())
         ->and($key->cacheSignature())->not->toBe($column->cacheSignature());
 });
+
+it('keys a short form of a route apart from the full one, and leaves the full form\'s key as it was', function (): void {
+    $full = new RouteDescriptor(['GET'], '/posts/{page?}', 'posts.index');
+    $short = new RouteDescriptor(['GET'], '/posts', 'posts.index', omitted: ['page']);
+    $sameUri = new RouteDescriptor(['GET'], '/posts', 'posts.index');
+
+    // The segments a form leaves off name its operationId, so they key the fragment beside the path; a
+    // full form omits nothing, and its key has no member for it.
+    expect($short->cacheSignature())->not->toBe($sameUri->cacheSignature())
+        ->and($full->cacheSignature())->toBe(implode("\0", ['GET', '/posts/{page?}', 'posts.index', '', '', '', '']));
+});
+
+it('carries every field but the form\'s own onto a form of the route', function (): void {
+    // Every constructor parameter given a value no default holds, so a field withForm() forgot comes back
+    // as its default and fails here, rather than silently dropping out of every short form.
+    $values = [
+        'methods' => ['PUT'], 'uri' => '/full/{a?}', 'name' => 'n', 'action' => 'A@b', 'middleware' => ['auth'],
+        'cacheInputs' => ['where:a=x'], 'domain' => 'api.example.com', 'fallback' => true, 'omitted' => ['z'],
+    ];
+    $parameters = array_map(
+        static fn (ReflectionParameter $parameter): string => $parameter->getName(),
+        (new ReflectionMethod(RouteDescriptor::class, '__construct'))->getParameters(),
+    );
+    expect($parameters)->toEqualCanonicalizing(array_keys($values));
+
+    $form = (new RouteDescriptor(...$values))->withForm('/full', ['GET'], ['a']);
+
+    foreach ($values as $field => $value) {
+        expect($form->{$field})->toBe(match ($field) {
+            'uri' => '/full',
+            'methods' => ['GET'],
+            'omitted' => ['a'],
+            default => $value,
+        });
+    }
+});

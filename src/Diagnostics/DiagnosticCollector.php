@@ -69,14 +69,16 @@ final class DiagnosticCollector
     }
 
     /**
+     * What a diagnostic says, whoever said it: everything {@see sorted()} orders by but the route. Two
+     * diagnostics agreeing here are one finding reported against two routes.
+     *
      * @return list<mixed>
      */
-    private static function key(Diagnostic $diagnostic): array
+    public static function finding(Diagnostic $diagnostic): array
     {
         $source = $diagnostic->source ?? new Source('');
 
         return [
-            $diagnostic->routeSignature ?? '',
             -$diagnostic->severity->rank(),
             $diagnostic->code,
             $diagnostic->message,
@@ -85,5 +87,13 @@ final class DiagnosticCollector
             $source->symbol ?? '',
             $diagnostic->help ?? '',
         ];
+    }
+
+    /**
+     * @return list<mixed>
+     */
+    private static function key(Diagnostic $diagnostic): array
+    {
+        return [$diagnostic->routeSignature ?? '', ...self::finding($diagnostic)];
     }
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Support;
 
+use Docuccino\Core\Extensions\Context\RouteDescriptor;
 use Docuccino\Core\Lint\OperationIdStyle;
 
 /**
@@ -62,6 +63,23 @@ final class RouteOperationId
         }
 
         return implode(self::SEPARATOR, $parts);
+    }
+
+    /**
+     * The id of one URL form of a route ({@see RouteDescriptor::$omitted}). Where the full form's id comes
+     * from something every form shares — a route name, a controller method, a declared `#[OperationId]`
+     * — a short form names the segments it leaves off, so each form still names a function of its own:
+     * `posts.index` and `posts.index.without-page`. Where nothing shared one (`null`), the id is minted
+     * from the form's own path, which already tells the forms apart. A function of the form, never of
+     * the order the forms were met; every site that sets a route's operationId goes through here.
+     */
+    public static function forRoute(RouteDescriptor $route, string $method, ?string $shared): string
+    {
+        if ($shared === null) {
+            return self::mint($method, $route->uri);
+        }
+
+        return $route->omitted === [] ? $shared : $shared.'.without-'.implode('-', $route->omitted);
     }
 
     /**

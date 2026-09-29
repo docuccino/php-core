@@ -271,13 +271,23 @@ final class DocumentDiffer
                 $changes[] = new Change(ChangeKind::Removed, ChangeTarget::Parameter, self::nodeId(self::parameterId($param), $opId, $key), $path.' parameters '.self::paramLabel($param), true, 'parameter.removed');
             } elseif (! $inOld) {
                 $param = $newParams[$key];
-                $breaking = $param->required === true;
+                $breaking = self::requires($param);
                 $code = $breaking ? 'parameter.added-required' : 'parameter.added';
                 $changes[] = new Change(ChangeKind::Added, ChangeTarget::Parameter, self::nodeId(self::parameterId($param), $opId, $key), $path.' parameters '.self::paramLabel($param), $breaking, $code);
             } else {
                 $this->diffParameterPair($opId, $path, $key, $oldParams[$key], $newParams[$key], $oldRefs, $newRefs, $changes);
             }
         }
+    }
+
+    /**
+     * Whether a request must send the parameter. A path parameter always must — every OpenAPI version
+     * requires `required: true` of one, since the path holds it — so a document that said `false` of one
+     * never made it optional, and correcting the flag changes nothing a client could send.
+     */
+    private static function requires(Parameter $parameter): bool
+    {
+        return $parameter->in === 'path' || $parameter->required === true;
     }
 
     /**
@@ -288,9 +298,9 @@ final class DocumentDiffer
         $id = self::nodeId(self::parameterId($new), $opId, $key);
         $paramPath = $path.' parameters '.self::paramLabel($new);
 
-        if ($old->required !== true && $new->required === true) {
+        if (! self::requires($old) && self::requires($new)) {
             $changes[] = new Change(ChangeKind::Changed, ChangeTarget::Parameter, $id, $paramPath, true, 'parameter.became-required', [new FieldChange('required', $old->required, $new->required)]);
-        } elseif ($old->required === true && $new->required !== true) {
+        } elseif (self::requires($old) && ! self::requires($new)) {
             $changes[] = new Change(ChangeKind::Changed, ChangeTarget::Parameter, $id, $paramPath, false, 'parameter.became-optional', [new FieldChange('required', $old->required, $new->required)]);
         }
 
