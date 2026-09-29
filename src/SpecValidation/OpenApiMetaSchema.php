@@ -6,6 +6,7 @@ namespace Docuccino\Core\SpecValidation;
 
 use Docuccino\Core\Document\DocumentMembers;
 use Docuccino\Core\Emit\Formats;
+use Docuccino\Core\Support\JsonPointer;
 use Opis\JsonSchema\Validator;
 use RuntimeException;
 use stdClass;
@@ -44,6 +45,7 @@ use stdClass;
  * a document may contain.
  *
  * @phpstan-type VendoredSchema array{file: string, published: string, sha256: string}
+ * @phpstan-type ReferenceMembers array{names: list<string>, patterns: list<string>, referencedPathItems: bool}
  * @phpstan-type KeyGates array{document: list<string>, paths: list<string>, components: list<string>, responses: list<string>}
  */
 final class OpenApiMetaSchema
@@ -112,6 +114,9 @@ final class OpenApiMetaSchema
 
     /** @var list<string>|null */
     private static ?array $schemaMembers30 = null;
+
+    /** @var array<string, ReferenceMembers> */
+    private static array $referenceMembers = [];
 
     /**
      * The vendored file for $format.
@@ -186,29 +191,6 @@ final class OpenApiMetaSchema
     }
 
     /**
-     * The members of $value where it is an object, and none where it is anything else — for the
-     * OPTIONAL positions, which a document may legitimately not carry.
-     *
-     * Keys come back as strings because that is what a member name is; PHP turns a numeric one into an
-     * int on the way into an array, and a `responses` map is keyed by status code.
-     *
-     * @return array<string, mixed>
-     */
-    private static function members(mixed $value): array
-    {
-        if (! $value instanceof stdClass) {
-            return [];
-        }
-
-        $members = [];
-        foreach (get_object_vars($value) as $name => $member) {
-            $members[(string) $name] = $member;
-        }
-
-        return $members;
-    }
-
-    /**
      * Every way $instance fails $format's meta-schema, worst-first, one line each:
      * `<data pointer> <keyword>: <message> (schema <schema pointer>)`. Empty means valid.
      *
@@ -216,7 +198,8 @@ final class OpenApiMetaSchema
      * ({@see EmittedDocument::parseYaml()}). Hand it an associative array and every map in the document
      * reads as a JSON array, which is the blindness this oracle exists to remove.
      *
-     * The whole oracle: the schema itself, the key gates {@see keyGateFindings()} recovers, and the two
+     * The whole oracle: the schema itself, the key gates {@see keyGateFindings()} recovers, the closed
+     * Reference Object {@see referenceSiblingFindings()} recovers, and the two
      * rules JSON Schema cannot state about an instance at all ({@see referenceFindings()},
      * {@see operationIdFindings()}). That is what a test over the corpus wants — a caller reporting to
      * a PERSON wants the halves apart instead, because they address different people.
@@ -247,6 +230,7 @@ final class OpenApiMetaSchema
         return [
             ...self::keyGateFindings($format, $instance),
             ...self::referenceFindings($instance),
+            ...self::referenceSiblingFindings($format, $instance),
             ...SchemaFindings::of(self::validator($format), $instance, 'https://docuccino.test/'.$format.'.json'),
         ];
     }
@@ -329,6 +313,81 @@ final class OpenApiMetaSchema
     }
 
     /**
+     * Every Reference Object carrying a member its version does not define: `summary` and `description`
+     * from 3.1 on, nothing at all in 3.0. Each version's text says a Reference Object "cannot be extended
+     * with additional properties", and a strict reader refuses the whole document over one — but only
+     * the 3.1 meta-schema states it, and there through the `unevaluatedProperties` opis cannot be
+     * trusted with ({@see Validator()}), so no validator here sees it.
+     *
+     * The allowed members are read out of the vendored file's own Reference Object. The positions are
+     * the specification's, walked structurally rather than by spotting a `$ref`: a Schema Object takes
+     * siblings in 3.1 and 3.2, a Path Item states `$ref` as a field of its own — except in 3.1, whose
+     * `webhooks`, `components.pathItems` and callbacks hold a Path Item OR a Reference Object — and a Link
+     * Object's `requestBody` is data.
+     *
+     * @return list<string>
+     */
+    public static function referenceSiblingFindings(string $format, mixed $instance): array
+    {
+        if (! $instance instanceof stdClass) {
+            return [];
+        }
+
+        $allowed = self::referenceMembers($format);
+
+        $findings = [];
+        $check = static function (stdClass $node, string $pointer) use ($allowed, &$findings): bool {
+            if (! is_string($node->{'$ref'} ?? null)) {
+                return false;
+            }
+
+            foreach (ObjectMembers::names($node) as $member) {
+                if (in_array($member, $allowed['names'], true)) {
+                    continue;
+                }
+
+                foreach ($allowed['patterns'] as $pattern) {
+                    if (preg_match('~'.str_replace('~', '\~', $pattern).'~', $member) === 1) {
+                        continue 2;
+                    }
+                }
+
+                $findings[] = sprintf('%s: a Reference Object cannot carry "%s" beside its $ref', JsonPointer::child($pointer, $member), $member);
+            }
+
+            return true;
+        };
+
+        (new ReferencePositions($check, self::isDraft04($format), $allowed['referencedPathItems']))->document($instance);
+
+        sort($findings);
+
+        return $findings;
+    }
+
+    /**
+     * The members $format's Reference Object admits — named outright (3.1, 3.2) or behind a pattern
+     * (3.0's `^\$ref$`) — and whether the version lets a path item be one.
+     *
+     * @return ReferenceMembers
+     */
+    private static function referenceMembers(string $format): array
+    {
+        if (isset(self::$referenceMembers[$format])) {
+            return self::$referenceMembers[$format];
+        }
+
+        $defs = self::definitions($format);
+        $reference = self::member($defs, self::isDraft04($format) ? 'Reference' : 'reference');
+
+        return self::$referenceMembers[$format] = [
+            'names' => ObjectMembers::names($reference->properties ?? null),
+            'patterns' => ObjectMembers::names($reference->patternProperties ?? null),
+            'referencedPathItems' => isset($defs->{'path-item-or-reference'}),
+        ];
+    }
+
+    /**
      * @param  ?string  $inNameMap  the name map $node is, or null where its keys are keywords
      * @param  bool  $isLink  whether $node is a Link Object, whose two data members {@see LINK_LITERALS}
      *                        names are not descended into
@@ -350,7 +409,7 @@ final class OpenApiMetaSchema
 
         foreach (get_object_vars($node) as $name => $value) {
             $key = (string) $name;
-            $at = $pointer.'/'.self::escape($key);
+            $at = JsonPointer::child($pointer, (string) $key);
 
             if ($isLink && in_array($key, self::LINK_LITERALS, true)) {
                 continue;
@@ -484,7 +543,7 @@ final class OpenApiMetaSchema
 
             $findings[] = sprintf(
                 '%s patternProperties: The key "%s" matches none of %s (schema %s)',
-                $pointer.'/'.self::escape((string) $key),
+                JsonPointer::child($pointer, (string) $key),
                 $key,
                 implode(', ', $patterns),
                 $gate === 'document' ? '/properties' : '/$defs/'.$gate,
@@ -519,9 +578,9 @@ final class OpenApiMetaSchema
         // the three maps state theirs with `patternProperties`. Reading both makes one reader answer
         // for all four.
         $patterns = static function (stdClass $node) use ($extensions): array {
-            $found = array_keys(self::members($node->patternProperties ?? null));
+            $found = ObjectMembers::names($node->patternProperties ?? null);
 
-            foreach (array_keys(self::members($node->properties ?? null)) as $literal) {
+            foreach (ObjectMembers::names($node->properties ?? null) as $literal) {
                 $found[] = '^'.preg_quote($literal, '~').'$';
             }
 
@@ -566,7 +625,7 @@ final class OpenApiMetaSchema
 
                 foreach (get_object_vars($container) as $name => $item) {
                     if ($item instanceof stdClass) {
-                        $pathItems[$pointer.'/'.self::escape((string) $name)] = $item;
+                        $pathItems[JsonPointer::child($pointer, (string) $name)] = $item;
                     }
                 }
             }
@@ -585,17 +644,17 @@ final class OpenApiMetaSchema
 
                     // A callback maps a runtime EXPRESSION to a path item, which is the same shape as the
                     // containers above — so each one goes back through the loop and its operations count.
-                    foreach (self::members($operation->callbacks ?? null) as $name => $callback) {
+                    foreach (ObjectMembers::of($operation->callbacks ?? null) as $name => $callback) {
                         if ($callback instanceof stdClass) {
-                            $containers[$pointer.'/'.$method.'/callbacks/'.self::escape((string) $name)] = $callback;
+                            $containers[JsonPointer::child($pointer.'/'.$method.'/callbacks', (string) $name)] = $callback;
                         }
                     }
                 }
 
                 // 3.2 lets a path item carry operations under names of its own choosing.
-                foreach (self::members($item->additionalOperations ?? null) as $method => $operation) {
+                foreach (ObjectMembers::of($item->additionalOperations ?? null) as $method => $operation) {
                     if ($operation instanceof stdClass) {
-                        $operations[$pointer.'/additionalOperations/'.self::escape((string) $method)] = $operation;
+                        $operations[JsonPointer::child($pointer.'/additionalOperations', (string) $method)] = $operation;
                     }
                 }
             }
@@ -604,16 +663,16 @@ final class OpenApiMetaSchema
         return $operations;
     }
 
+    /** The vendored file's definitions: draft-04's `definitions`, 2020-12's `$defs`. */
+    private static function definitions(string $format): stdClass
+    {
+        return self::member(self::decode($format), self::isDraft04($format) ? 'definitions' : '$defs');
+    }
+
     /** Whether $format's vendored file is draft-04 (3.0), which needs no key-gate recovery. */
     private static function isDraft04(string $format): bool
     {
         return str_starts_with(self::publishedId($format), 'https://spec.openapis.org/oas/3.0/');
-    }
-
-    /** A JSON pointer token, escaped. */
-    private static function escape(string $token): string
-    {
-        return str_replace(['~', '/'], ['~0', '~1'], $token);
     }
 
     /** The parsed, cached validator for $format. Parsing a 39KB meta-schema per assertion is the cost. */

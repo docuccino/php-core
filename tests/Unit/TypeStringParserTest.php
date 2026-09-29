@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Docuccino\Core\Inference\DType\ArrayShapeField;
 use Docuccino\Core\Inference\DType\ArrayShapeT;
 use Docuccino\Core\Inference\DType\ClassT;
 use Docuccino\Core\Inference\DType\EnumT;
@@ -447,6 +448,38 @@ it('maps an unkeyed array shape to positional integer keys', function (): void {
     [$first, $second] = $result->fields;
     expect($first->key)->toBe(0)
         ->and($second->key)->toBe(1);
+});
+
+it('reads a keyless array shape as the empty list json_encode writes', function (string $type): void {
+    // `json_encode([])` is `[]`, never `{}`: an array with no keys has no member to make it an object.
+    expect(parseType($type)->toArray())->toBe((new ArrayShapeT([], isList: true))->toArray());
+})->with([
+    'array' => ['array{}'],
+    'list' => ['list{}'],
+]);
+
+it('reads an object shape as a JSON object of its members', function (string $type, array $expected): void {
+    // `object{…}` is an object with those public properties, which json_encode writes as the members —
+    // a numeric name included, so it is never a list — and stdClass beside it declares none to add.
+    expect(parseType($type)->toArray())->toBe($expected);
+})->with(function (): array {
+    $object = static fn (array $fields): array => (new ArrayShapeT($fields, isObject: true))->toArray();
+
+    return [
+        'empty' => ['object{}', $object([])],
+        'keyed, one optional' => ['object{id: int, name?: string}', $object([
+            new ArrayShapeField('id', ScalarT::int()),
+            new ArrayShapeField('name', ScalarT::string(), optional: true),
+        ])],
+        'a quoted numeric name' => ["object{'0': int}", $object([new ArrayShapeField('0', ScalarT::int())])],
+        'nested' => ['object{a: object{}}', $object([new ArrayShapeField('a', new ArrayShapeT([], isObject: true))])],
+        'beside stdClass' => ['object{a: int}&\\stdClass', $object([new ArrayShapeField('a', ScalarT::int())])],
+    ];
+});
+
+it('keeps an intersection that names a class beside no object shape', function (): void {
+    // Only an object shape makes stdClass redundant; on its own it stays a member like any other class.
+    expect(parseType('\\stdClass&Countable'))->toEqual(IntersectionT::of([new ClassT('stdClass'), new ClassT('Countable')]));
 });
 
 it('maps const-expression literal types', function (): void {

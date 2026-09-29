@@ -14,7 +14,7 @@ use Docuccino\Core\SpecValidation\OpenApiMetaSchema;
  * `additionalProperties` — which is why it rejects nearly everything below and the other two do not.
  *
  * `OpenApiMetaSchema::keyGateFindings()` walks the three key gates back on directly, so the first two rows
- * reject everywhere. The rest is the honest remainder, and the rows that PASS are the point: pinned
+ * reject everywhere, and `referenceSiblingFindings()` does the same for the closed Reference Object. The rest is the honest remainder, and the rows that PASS are the point: pinned
  * blindness stops being a surprise, and a future weakening — or a recovery — shows up as a row flipping.
  *
  * Three losses reach this matrix, one row set each: the key gates and the unrecognised-member check
@@ -85,6 +85,8 @@ function unevaluatedScopeMatrix(): array
         'info.contact.email is malformed' => ['passes', 'passes', 'passes'],
         'two querystring parameters' => ['passes', 'rejects', 'rejects'],
         'query parameter beside a querystring one' => ['rejects', 'rejects', 'rejects'],
+        'extension beside a response reference' => ['rejects', 'rejects', 'rejects'],
+        'extension beside a schema reference' => ['passes', 'passes', 'rejects'],
     ];
 }
 
@@ -132,6 +134,17 @@ function unevaluatedScopeMutate(string $mutation, stdClass $document): void
         'query parameter beside a querystring one' => $operation->parameters = json_decode((string) json_encode(
             [['name' => 'page', 'in' => 'query', 'schema' => ['type' => 'integer']], unevaluatedScopeQuerystring('one')],
         ), flags: JSON_THROW_ON_ERROR),
+        // Every version closes a Reference Object; only 3.1's meta-schema says so, through the keyword
+        // that is off, so `referenceSiblingFindings()` is what rejects it — at every version.
+        'extension beside a response reference' => (function () use ($document, $operation): void {
+            $document->components = json_decode('{"responses":{"NotFound":{"description":"Not found."}}}', flags: JSON_THROW_ON_ERROR);
+            $operation->responses->{'404'} = json_decode('{"$ref":"#/components/responses/NotFound","x-id":"a"}', flags: JSON_THROW_ON_ERROR);
+        })(),
+        // A Schema Object is JSON Schema from 3.1 on and takes siblings; 3.0's is a Reference Object.
+        'extension beside a schema reference' => (function () use ($document, $schema): void {
+            $document->components = json_decode('{"schemas":{"Id":{"type":"string"}}}', flags: JSON_THROW_ON_ERROR);
+            $schema->properties->id = json_decode('{"$ref":"#/components/schemas/Id","x-id":"a"}', flags: JSON_THROW_ON_ERROR);
+        })(),
     };
 }
 
@@ -179,9 +192,9 @@ it('records a matrix with something in both columns', function (): void {
 
     $strict = array_filter(unevaluatedScopeMatrix(), static fn (array $row): bool => $row[2] === 'rejects');
 
-    expect(unevaluatedScopeMatrix())->toHaveCount(12)
-        ->and(count(unevaluatedScopeSubjects()))->toBe(36)
+    expect(unevaluatedScopeMatrix())->toHaveCount(14)
+        ->and(count(unevaluatedScopeSubjects()))->toBe(42)
         ->and(array_count_values($outcomes)['passes'] ?? 0)->toBeGreaterThanOrEqual(10)
         ->and(array_count_values($outcomes)['rejects'] ?? 0)->toBeGreaterThanOrEqual(10)
-        ->and($strict)->toHaveCount(11);
+        ->and($strict)->toHaveCount(13);
 });

@@ -81,6 +81,7 @@ it('round-trips class metadata with its properties, summary and dependency files
         properties: [
             new PropertyMetadata('id', ScalarT::int(), 'The invoice id.', '17', new SourceLocation('/app/Data/Invoice.php', 9)),
             new PropertyMetadata('note', ScalarT::string()),
+            new PropertyMetadata('memo', ScalarT::string(), initialised: false),
         ],
         summary: 'An invoice.',
         dependencyFiles: ['/app/Data/Invoice.php', '/app/Data/Invoice.php'],
@@ -96,7 +97,10 @@ it('round-trips class metadata with its properties, summary and dependency files
         ->and($decoded->properties[0]->location?->line)->toBe(9)
         // The optional members stay ABSENT rather than serializing as nulls, so two runs of the same
         // class produce the same bytes.
-        ->and($decoded->properties[1]->toArray())->toBe(['name' => 'note', 'type' => ScalarT::string()->toArray()]);
+        ->and($decoded->properties[1]->toArray())->toBe(['name' => 'note', 'type' => ScalarT::string()->toArray()])
+        // `false` is an answer — a constructor path completes without the property — and not an absence.
+        ->and($decoded->properties[2]->initialised)->toBeFalse()
+        ->and($decoded->properties[1]->initialised)->toBeNull();
 });
 
 it('omits an empty summary and dependency set from class metadata entirely', function (): void {
@@ -122,9 +126,10 @@ it('degrades malformed class metadata around the properties it can still read', 
 });
 
 it('degrades a malformed property type and location to an unknown type and no location', function (): void {
-    $decoded = PropertyMetadata::fromArray(['name' => 'id', 'type' => 'nope', 'location' => 'nope']);
+    $decoded = PropertyMetadata::fromArray(['name' => 'id', 'type' => 'nope', 'location' => 'nope', 'initialised' => 'yes']);
 
     expect($decoded->type)->toBeInstanceOf(UnknownT::class)
+        ->and($decoded->initialised)->toBeNull()
         ->and($decoded->location)->toBeNull()
         ->and($decoded->summary)->toBeNull();
 });

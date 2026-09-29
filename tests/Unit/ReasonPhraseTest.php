@@ -56,3 +56,28 @@ it('calls a key that names no status only a response', function (int|string $key
     // Never "OK": that is a claim about a status the key does not name.
     expect(ReasonPhrase::of($key))->toBe('Response');
 })->with(['default', '6XX', '', '20', '2000', '099', 600, 99, 0, -200]);
+
+it('hands back a registered code\'s own phrase and nothing for any other key', function (int|string $key, ?string $phrase): void {
+    // The class is what an unregistered code is DESCRIBED by, but it is not the code's own phrase: every
+    // unregistered code in a class shares it, so anything named after a phrase must not be handed it.
+    expect(ReasonPhrase::registeredPhrase($key))->toBe($phrase);
+})->with([
+    [404, 'Not Found'],
+    ['501', 'Not Implemented'],
+    ['422', 'Unprocessable Entity'],
+    ['418', null],
+    [499, null],
+    ['599', null],
+    ['4XX', null],
+    ['default', null],
+    ['0404', null],
+]);
+
+it('agrees with of() on every code it registers', function (): void {
+    foreach (ReasonPhrase::registered() as $code => $phrase) {
+        expect(ReasonPhrase::registeredPhrase($code))->toBe($phrase)
+            ->and(ReasonPhrase::registeredPhrase((string) $code))->toBe(ReasonPhrase::of($code));
+    }
+
+    expect(count(ReasonPhrase::registered()))->toBeGreaterThan(60);
+});

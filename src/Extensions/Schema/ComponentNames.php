@@ -121,7 +121,7 @@ final class ComponentNames
      */
     private static function ladder(array $claim): array
     {
-        $stem = self::sanitize($claim['base'].self::facet($claim['base'], $claim['identity']));
+        $stem = self::stem($claim['base'], $claim['identity']);
 
         $rungs = [$stem];
 
@@ -247,10 +247,20 @@ final class ComponentNames
     }
 
     /**
+     * The name a claim asks for before anything contests it — the first rung of its ladder. Public for a
+     * producer minting a name for a PART of a shape, which starts from the name the shape itself asks for.
+     */
+    public static function stem(string $base, ?string $identity): string
+    {
+        return self::sanitize($base.self::facet($base, $identity));
+    }
+
+    /**
      * The qualifier an identity's facet contributes. `App\Data\Article#request` is the shape a client
      * SENDS, and calling it `Article` would leave the class's own shape to fight it for the name — one
      * of them losing to a suffix that says nothing. Empty when the name already says it, so a
-     * `StoreWidgetRequest` never becomes `StoreWidgetRequestRequest`.
+     * `StoreWidgetRequest` never becomes `StoreWidgetRequestRequest`. A part of a faceted shape
+     * (`App\Foo#request/kind=a`) contributes none: its base already starts from the shape's {@see stem()}.
      */
     private static function facet(string $base, ?string $identity): string
     {
@@ -263,7 +273,12 @@ final class ComponentNames
             return '';
         }
 
-        $word = ucfirst(self::clean(substr($identity, $hash + 1)));
+        $facet = substr($identity, $hash + 1);
+        if (str_contains($facet, '/')) {
+            return '';
+        }
+
+        $word = ucfirst(self::clean($facet));
 
         return $word === '' || str_ends_with(strtolower($base), strtolower($word)) ? '' : $word;
     }
@@ -288,7 +303,8 @@ final class ComponentNames
      */
     private static function segments(string $identity): array
     {
-        $parts = explode('\\', trim($identity, '\\'));
+        $hash = strpos($identity, '#');
+        $parts = explode('\\', trim($hash === false ? $identity : substr($identity, 0, $hash), '\\'));
         array_pop($parts);
 
         return $parts;

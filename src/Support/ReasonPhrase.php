@@ -10,7 +10,8 @@ namespace Docuccino\Core\Support;
  * registry does not name gets the name of its class (RFC 9110 §15), never another code's phrase. 422 keeps
  * its RFC 4918 name, "Unprocessable Entity", which every error response is already published under.
  *
- * @internal
+ * Public, not `@internal` — built-in integrations describe and name error responses by it directly, so
+ * no second, partial table of phrases can drift from this one.
  */
 final class ReasonPhrase
 {
@@ -113,6 +114,17 @@ final class ReasonPhrase
         }
 
         return self::UNNAMED;
+    }
+
+    /**
+     * The registry's own phrase for a code, or null for a key it does not register — so a caller naming
+     * something after a phrase never names two unregistered codes after the one class they share.
+     */
+    public static function registeredPhrase(int|string $status): ?string
+    {
+        $key = (string) $status;
+
+        return preg_match('/^[1-5]\d\d$/D', $key) === 1 ? (self::PHRASES[(int) $key] ?? null) : null;
     }
 
     /**

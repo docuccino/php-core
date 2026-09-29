@@ -439,3 +439,35 @@ it('reads an enum-typed tag that is not fixed as open', function (): void {
 
     expect($result['schema'])->toHaveKey('anyOf');
 });
+
+it('keeps an empty object beside the tagged oneOf, as it keeps null', function (array $outside): void {
+    // Every tagged member requires its tag, so none of them admits `{}`: the empty object is a value no
+    // member can reach, exactly as null is, and it stays one level out rather than making the oneOf false.
+    $body = static fn (string $kind): array => ['type' => 'object', 'properties' => ['kind' => ['type' => 'string', 'const' => $kind]], 'required' => ['kind']];
+
+    [$doc] = DiscriminatedUnion::settle([
+        'paths' => ['/x' => ['anyOf' => [['$ref' => '#/components/schemas/Circle'], ['$ref' => '#/components/schemas/Square'], ...$outside]]],
+        'components' => ['schemas' => ['Circle' => $body('circle'), 'Square' => $body('square')]],
+    ]);
+
+    expect($doc['paths']['/x']['anyOf'][0]['discriminator']['propertyName'])->toBe('kind')
+        ->and(array_slice($doc['paths']['/x']['anyOf'], 1))->toBe([DiscriminatedUnion::EMPTY_OBJECT, ...array_slice($outside, 1)]);
+})->with([
+    'the empty object alone' => [[['type' => 'object', 'maxProperties' => 0]]],
+    'written in the other key order' => [[['maxProperties' => 0, 'type' => 'object']]],
+    'the empty object and null' => [[['type' => 'object', 'maxProperties' => 0], ['type' => 'null']]],
+]);
+
+it('discriminates nothing beside an object that is not empty', function (): void {
+    // An object bounded to one member may be a tagged member's own value, so the members are no longer
+    // provably the only way a value is matched; the union stays the anyOf it was.
+    $body = static fn (string $kind): array => ['type' => 'object', 'properties' => ['kind' => ['type' => 'string', 'const' => $kind]], 'required' => ['kind']];
+    $union = ['anyOf' => [['$ref' => '#/components/schemas/Circle'], ['$ref' => '#/components/schemas/Square'], ['type' => 'object', 'maxProperties' => 1]]];
+
+    [$doc] = DiscriminatedUnion::settle([
+        'paths' => ['/x' => $union],
+        'components' => ['schemas' => ['Circle' => $body('circle'), 'Square' => $body('square')]],
+    ]);
+
+    expect($doc['paths']['/x'])->toBe($union);
+});

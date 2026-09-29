@@ -123,9 +123,10 @@ final class ClassTypeToSchema implements TypeToSchema
     }
 
     /**
-     * Whether the key is always there. A response carries what is initialised, nullable or not; a request
-     * may leave out what a default fills in ({@see PropertyPresence}). Where neither can be proved, a
-     * nullable type stands in for "may be absent".
+     * Whether the key is always there. A response carries what is initialised, nullable or not — so a
+     * property the constructor assigns on only some paths is optional; a request may leave out what a
+     * default fills in ({@see PropertyPresence}). Where neither can be proved, a nullable type stands in
+     * for "may be absent".
      */
     private static function required(string $fqcn, PropertyMetadata $property, bool $request): bool
     {
@@ -133,7 +134,7 @@ final class ClassTypeToSchema implements TypeToSchema
 
         return $request
             ? ! $nullable && ! PropertyPresence::defaulted($fqcn, $property->name)
-            : ! $nullable || PropertyPresence::alwaysWritten($fqcn, $property->name);
+            : PropertyPresence::written($fqcn, $property->name, $property->initialised) ?? ! $nullable;
     }
 
     /** Whether any published property is required on one side of the wire and not the other. */

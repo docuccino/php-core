@@ -51,7 +51,13 @@ final readonly class DefaultValidationRulesToSchema implements ValidationRulesTo
         $schema = $builder->build($context->representation());
         $mediaType = $builder->isMultipart() ? 'multipart/form-data' : 'application/json';
 
-        return new ValidationSchema($schema, $mediaType, $diagnostics);
+        if ($rules->variants === []) {
+            return new ValidationSchema($schema, $mediaType, $diagnostics);
+        }
+
+        // The merged reading holds the same rules plus the presence rules the partition states, every one of
+        // them handled, so its diagnostics would restate these and only its schema is kept.
+        return new ValidationSchema($schema, $mediaType, $diagnostics, $rules->variants, $this->convert($rules->merged(), $context)->schema);
     }
 
     private function applyRule(ValidationRule $rule, ValidationField $field, SchemaContext $context, string $path): ?Diagnostic

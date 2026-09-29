@@ -70,6 +70,17 @@ it('publishes a name off what the schema is, not off the slot it landed in', fun
         ['Statement' => claim('Statement', 'App\\Billing\\StatementData'), 'Statement_2' => claim('Statement', 'App\\Support\\StatementData')],
         ['Statement' => 'BillingStatement', 'Statement_2' => 'SupportStatement'],
     ],
+    // A branch of a request's tagged object asks for its whole name, built on the request's own.
+    'a part of a faceted shape adds no facet of its own' => [
+        ['StoreThingRequestPaymentCard' => claim('StoreThingRequestPaymentCard', 'App\\Http\\StoreThingRequest#request/payment.method=card')],
+        [],
+    ],
+    // What a part's identity holds after the `#` is a path and a value, which may hold anything; the
+    // namespace walk reads the class's namespace alone.
+    'two parts of one name climb by their classes\' namespaces, whatever the value holds' => [
+        ['ThingCard' => claim('ThingCard', 'App\\A\\Thing#request/kind=card\\x'), 'ThingCard_2' => claim('ThingCard', 'App\\B\\Thing#request/kind=card\\x')],
+        ['ThingCard' => 'AThingCard', 'ThingCard_2' => 'BThingCard'],
+    ],
     'a survivor left holding a suffix nothing else contests gets the name back' => [
         // What a warm fragment cache hands over once the route that held the plain name is deleted.
         ['SSOConnectionData_2' => claim('SSOConnectionData', 'App\\Data\\SSO\\SSOConnectionData')],
@@ -254,3 +265,12 @@ it('never mints a first-come counter for a numeric name, whatever contests it', 
         ->and(array_values($names))->not->toContain('404_2')
         ->and(array_unique(array_values($names)))->toHaveCount(2);
 });
+
+it('asks for the name a shape\'s first rung is, so a part of it can be named from the shape', function (string $base, ?string $identity, string $stem): void {
+    expect(ComponentNames::stem($base, $identity))->toBe($stem);
+})->with([
+    'a request shape of a class that does not say so' => ['Article', 'App\\Article#request', 'ArticleRequest'],
+    'a request shape of a class that does' => ['StoreWidgetRequest', 'App\\StoreWidgetRequest#request', 'StoreWidgetRequest'],
+    'a class\'s own shape' => ['Article', 'App\\Article', 'Article'],
+    'no identity' => ['Error 404', null, 'Error404'],
+]);

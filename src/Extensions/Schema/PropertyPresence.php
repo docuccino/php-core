@@ -10,30 +10,35 @@ use ReflectionProperty;
 
 /**
  * Whether a plain object's key is present, which is a question of initialisation and never of
- * nullability: `json_encode` writes every initialised public property, `null` included, and a client
- * may leave out whatever a default fills in.
+ * nullability: `json_encode` writes every initialised public property, `null` included, and leaves out a
+ * typed one nothing assigned; a client may leave out whatever a default fills in.
  *
  * @internal
  */
 final class PropertyPresence
 {
     /**
-     * Whether `json_encode` always writes the key: the property is untyped (implicitly `null`), has a
-     * default, or is promoted by the constructor the class runs. Never for a `JsonSerializable`, which
-     * states its own keys, nor for a name that is no declared property (a `@property` tag).
+     * Whether `json_encode` writes the key: always where the property is untyped (implicitly `null`), has a
+     * default, or is promoted by the constructor the class runs; otherwise whatever the engine proved of that
+     * constructor (`$initialised`), and null where nothing says — for a `JsonSerializable` too, which
+     * states its own keys, and for a name that is no declared property (a `@property` tag).
      */
-    public static function alwaysWritten(string $fqcn, string $property): bool
+    public static function written(string $fqcn, string $property, ?bool $initialised = null): ?bool
     {
         if (is_a($fqcn, JsonSerializable::class, true)) {
-            return false;
+            return null;
         }
 
         $reflected = self::reflect($fqcn, $property);
         if ($reflected === null) {
-            return false;
+            return null;
         }
 
-        return $reflected[1]->hasDefaultValue() || self::promotedByTheConstructorThatRuns(...$reflected);
+        if ($reflected[1]->hasDefaultValue() || self::promotedByTheConstructorThatRuns(...$reflected)) {
+            return true;
+        }
+
+        return $initialised;
     }
 
     /**

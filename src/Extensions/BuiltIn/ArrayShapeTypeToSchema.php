@@ -49,7 +49,8 @@ final class ArrayShapeTypeToSchema implements TypeToSchema
             }
         }
 
-        $schema = ['type' => 'object', 'properties' => $properties];
+        // A keyless object is `{}` on the wire, published as `new stdClass` is: a bare object.
+        $schema = $properties === [] ? ['type' => 'object'] : ['type' => 'object', 'properties' => $properties];
         if ($required !== []) {
             $schema['required'] = $required;
         }

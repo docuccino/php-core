@@ -8,6 +8,7 @@ use Docuccino\Core\Canonical\Canonicalizer;
 use Docuccino\Core\Canonical\CanonicalJsonSerializer;
 use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
+use Docuccino\Core\Document\NodeIdentity;
 use Docuccino\Core\Document\UirDocument;
 use Docuccino\Core\Draft\SchemaKeywords;
 use Docuccino\Core\SpecValidation\EmittedSpecCheck;
@@ -883,7 +884,8 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
 
     /**
      * 3.0 ignores anything beside a `$ref`, so siblings move out to an `allOf` wrapper — lossless,
-     * and the shape every 3.0 toolchain reads.
+     * and the shape every 3.0 toolchain reads. An id alone is no reason to wrap: it names the use
+     * site, which the wrapper would invent a schema for, so it goes and the reference stays one.
      *
      * @param  array<string, mixed>  $schema
      * @param  list<Diagnostic>  $diagnostics
@@ -892,6 +894,10 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
     private function hoistRefSiblings(array $schema, string $pointer, array &$diagnostics): array
     {
         $ref = $schema['$ref'] ?? null;
+        if (is_string($ref) && count($schema) === 2 && array_key_exists(NodeIdentity::FLAT_KEY, $schema)) {
+            return ['$ref' => $ref];
+        }
+
         if (! is_string($ref) || count($schema) === 1) {
             return $schema;
         }

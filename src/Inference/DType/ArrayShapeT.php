@@ -10,6 +10,8 @@ namespace Docuccino\Core\Inference\DType;
  * the keys are a `0..n` sequence, which is exactly when PHP renders the array as a JSON array; it is
  * derived from the keys here as well as taken from the caller (PHPStan's list accessory), so a path that
  * only knows the keys can't leave a tuple looking like an object with `"0"`/`"1"` property names.
+ * `isObject` marks an object's shape (`object{…}`, what `(object) [...]` is typed as): a JSON object
+ * whatever its keys, and one Laravel never filters or sends as `[]` when it is empty.
  */
 final readonly class ArrayShapeT extends DType
 {
@@ -20,9 +22,19 @@ final readonly class ArrayShapeT extends DType
     /**
      * @param  list<ArrayShapeField>  $fields
      */
-    public function __construct(public array $fields, bool $isList = false)
+    public function __construct(public array $fields, bool $isList = false, public bool $isObject = false)
     {
-        $this->isList = $isList || self::keysArePositional($fields);
+        $this->isList = ! $isObject && ($isList || self::keysArePositional($fields));
+    }
+
+    /**
+     * A copy holding `$fields` instead, as a list or an object exactly as this one is.
+     *
+     * @param  list<ArrayShapeField>  $fields
+     */
+    public function withFields(array $fields): self
+    {
+        return new self($fields, $this->isList, $this->isObject);
     }
 
     /**
@@ -58,7 +70,7 @@ final readonly class ArrayShapeT extends DType
      */
     public function mapFieldTypes(callable $map): self
     {
-        return new self(
+        return $this->withFields(
             array_map(
                 static fn (ArrayShapeField $field): ArrayShapeField => new ArrayShapeField(
                     $field->key,
@@ -67,17 +79,22 @@ final readonly class ArrayShapeT extends DType
                 ),
                 $this->fields,
             ),
-            $this->isList,
         );
     }
 
     public function toArray(): array
     {
-        return [
+        $data = [
             'kind' => self::KIND,
             'isList' => $this->isList,
             'fields' => array_map(static fn (ArrayShapeField $f): array => $f->toArray(), $this->fields),
         ];
+        // Written only when set, so an array's shape serializes exactly as it always has.
+        if ($this->isObject) {
+            $data['isObject'] = true;
+        }
+
+        return $data;
     }
 
     /**
@@ -97,6 +114,7 @@ final readonly class ArrayShapeT extends DType
                 ))
                 : [],
             (bool) ($data['isList'] ?? false),
+            (bool) ($data['isObject'] ?? false),
         );
     }
 }

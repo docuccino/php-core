@@ -68,6 +68,17 @@ final class RecoveredRequest
     }
 
     /**
+     * Whether a body recovered for this route may publish its tagged objects as unions of components
+     * ({@see TaggedBranches}) — the one case where there is a component for each branch to be named after:
+     * a body verb, a source class, and no operation-level `#[BodyParameter]` patching the body inline.
+     * A recoverer asks before it splits a rule set, so where the answer is no the rules stay as they were.
+     */
+    public static function publishesVariants(RouteContext $context, ?string $sourceClass): bool
+    {
+        return $sourceClass !== null && self::documentsBody($context) && ! self::deviates($context);
+    }
+
+    /**
      * Drain the schema's diagnostics, declare that the operation validates its input, and write the
      * schema as a request body (write verbs) or query parameters (read verbs), attributed to
      * `integration:<producer>`. Pass the single class the body was
@@ -95,7 +106,7 @@ final class RecoveredRequest
         $operation->declareValidatesInput();
 
         if (! self::documentsBody($context)) {
-            $this->applyQueryParameters($operation, $result, $contribution);
+            $this->applyQueryParameters($operation, $result->withoutVariants(), $contribution);
 
             return;
         }
@@ -141,10 +152,34 @@ final class RecoveredRequest
         $context->recordDependencyFiles(DeclarationFiles::of($sourceClass));
         $this->observe($sourceClass, $context);
 
+        [$schema, $declaredRequired, $diagnostics] = $this->declared($result->schema, $context, $sourceClass, $keys);
+
+        foreach ([...$diagnostics, ...$this->unread($sourceClass, $context)] as $diagnostic) {
+            $context->components->addDiagnostic($diagnostic);
+        }
+
+        // The merged reading gets the same declarations, for an object whose variants the body gives up to
+        // read exactly as it would with none proved. Its notes are about the same declarations on the same
+        // keys, so the ones above already said them.
+        $merged = $result->variants === [] ? [] : $this->declared($result->merged, $context, $sourceClass, $keys)[0];
+
+        return [new ValidationSchema($schema, $result->mediaType, variants: $result->variants, merged: $merged), $declaredRequired];
+    }
+
+    /**
+     * One schema with the source class's declarations written onto it ({@see withDeclarations()}), whether
+     * one proved the body required, and the notes the declarations raised.
+     *
+     * @param  array<string, mixed>  $schema
+     * @param  array<string, string>  $keys
+     * @return array{0: array<string, mixed>, 1: bool, 2: list<Diagnostic>}
+     */
+    private function declared(array $schema, RouteContext $context, string $sourceClass, array $keys): array
+    {
         $metadata = $context->engine->classMetadata(new ClassRef($sourceClass));
         $context->recordDependencyFiles($metadata->dependencyFiles);
 
-        $schema = ClassAnnotations::applyTo($context->converter(), $result->schema, $sourceClass);
+        $schema = ClassAnnotations::applyTo($context->converter(), $schema, $sourceClass);
         $schema = DocumentedDescriptions::applyTo($schema, $metadata->properties, $keys);
         $schema = DocumentedExamples::applyTo($context->converter(), $schema, $sourceClass, $metadata->properties, $keys);
 
@@ -158,11 +193,7 @@ final class RecoveredRequest
             ClassNames::publishable($sourceClass),
         );
 
-        foreach ([...$diagnostics, ...$hintDiagnostics, ...$fieldDiagnostics, ...$this->unread($sourceClass, $context)] as $diagnostic) {
-            $context->components->addDiagnostic($diagnostic);
-        }
-
-        return [new ValidationSchema($schema, $result->mediaType), $declaredRequired];
+        return [$schema, $declaredRequired, [...$diagnostics, ...$hintDiagnostics, ...$fieldDiagnostics]];
     }
 
     /**
@@ -257,9 +288,15 @@ final class RecoveredRequest
 
     private function applyRequestBody(OperationDraft $operation, RouteContext $context, ValidationSchema $result, Contribution $contribution, ?string $sourceClass, bool $declaredRequired = false): void
     {
-        $required = $declaredRequired || (is_array($result->schema['required'] ?? null) && $result->schema['required'] !== []);
+        [$schema, $variants] = $this->bodySchema($context, $result, $sourceClass);
 
-        $schema = $this->bodySchema($context, $result, $sourceClass);
+        $required = $declaredRequired
+            || (is_array($schema['required'] ?? null) && $schema['required'] !== [])
+            || self::tagsBody($variants);
+
+        if ($sourceClass !== null && ! self::deviates($context)) {
+            $schema = $this->hoisted($context, $schema, $sourceClass);
+        }
 
         $body = ['content' => [$result->mediaType => ['schema' => $schema]]];
         if ($required) {
@@ -270,26 +307,64 @@ final class RecoveredRequest
     }
 
     /**
-     * A `$ref` to a hoisted component when the body came from a single source class and this operation
-     * doesn't deviate from the class-derived schema; the inline schema otherwise.
+     * The body's schema with its tagged objects published as unions where it names a component for each
+     * branch ({@see TaggedBranches}), and the variants it published; the merged reading and none elsewhere.
      *
-     * @return array<string, mixed>
+     * @return array{0: array<string, mixed>, 1: list<TaggedVariants>}
      */
     private function bodySchema(RouteContext $context, ValidationSchema $result, ?string $sourceClass): array
     {
-        if ($sourceClass === null || $this->deviates($context)) {
-            return $result->schema;
+        if ($sourceClass === null || self::deviates($context) || $result->variants === []) {
+            return [$result->withoutVariants()->schema, []];
         }
 
-        $name = SchemaIdentity::name($sourceClass) ?? Fqcn::short($sourceClass);
+        [$name, $id] = self::component($sourceClass);
 
+        return TaggedBranches::apply($result->schema, $result->merged, $result->variants, $context->components, $name, $id);
+    }
+
+    /**
+     * A `$ref` to the body hoisted as a component, for a body that came from a single source class and an
+     * operation that doesn't deviate from the class-derived schema.
+     *
+     * @param  array<string, mixed>  $schema
+     * @return array<string, mixed>
+     */
+    private function hoisted(RouteContext $context, array $schema, string $sourceClass): array
+    {
+        [$name, $id] = self::component($sourceClass);
+
+        return $context->components->reference($name, $schema, $id);
+    }
+
+    /**
+     * The body component's name and identity.
+     *
+     * @return array{0: string, 1: string}
+     */
+    private static function component(string $sourceClass): array
+    {
         // A request-scoped diff identity, distinct from the response side's `sch:<FQCN>`, so a class used
         // on both sides never dedupes a rules-shape into a property-shape by identity alone —
         // structurally-equal shapes still collapse via the registry's structural dedupe. It honours
         // `#[SchemaId]` like the response side does, so a pinned class stays rename-stable on both.
-        $id = SchemaIdentity::publishedId($sourceClass, 'request');
+        return [SchemaIdentity::name($sourceClass) ?? Fqcn::short($sourceClass), SchemaIdentity::publishedId($sourceClass, 'request')];
+    }
 
-        return $context->components->reference($name, $result->schema, $id);
+    /**
+     * Whether the body itself is tagged, which every request it accepts then sends the tag in.
+     *
+     * @param  list<TaggedVariants>  $variants
+     */
+    private static function tagsBody(array $variants): bool
+    {
+        foreach ($variants as $variant) {
+            if ($variant->path === '' && ! $variant->admitsEmpty) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -298,7 +373,7 @@ final class RecoveredRequest
      * the request type does, so a type-level declaration cannot reach here and does not deviate: it is
      * already in the component every operation `$ref`s.
      */
-    private function deviates(RouteContext $context): bool
+    private static function deviates(RouteContext $context): bool
     {
         return $context->attributes->all(BodyParameter::class) !== [];
     }

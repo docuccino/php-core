@@ -258,6 +258,17 @@ final class Canonicalizer
     }
 
     /**
+     * A Callback Object maps runtime expressions to path items, or is a Reference Object — which read
+     * as an expression map would publish its pointer as an empty path item.
+     */
+    private function canonicalizeCallback(mixed $node): mixed
+    {
+        return is_array($node) && is_string($node['$ref'] ?? null)
+            ? $this->canonicalizeGeneric($node)
+            : $this->sortedMap($node, $this->canonicalizePathItem(...));
+    }
+
+    /**
      * @return array<string, mixed>|stdClass
      */
     private function canonicalizeOperation(mixed $node): array|stdClass
@@ -275,7 +286,7 @@ final class Canonicalizer
             'parameters' => $this->canonicalizeParameterList(...),
             'requestBody' => $this->canonicalizeRequestBody(...),
             'responses' => fn (mixed $v): mixed => $this->sortedMap($v, $this->canonicalizeResponse(...)),
-            'callbacks' => fn (mixed $v): mixed => $this->sortedMap($v, fn (mixed $cb): mixed => $this->sortedMap($cb, $this->canonicalizePathItem(...))),
+            'callbacks' => fn (mixed $v): mixed => $this->sortedMap($v, $this->canonicalizeCallback(...)),
         ]));
     }
 
@@ -464,7 +475,7 @@ final class Canonicalizer
             'mediaTypes' => fn (mixed $v): mixed => $this->sortedMap($v, $this->canonicalizeMediaType(...)),
             'securitySchemes' => fn (mixed $v): mixed => $this->sortedMap($v, $this->canonicalizeGeneric(...)),
             'links' => fn (mixed $v): mixed => $this->sortedMap($v, $this->canonicalizeGeneric(...)),
-            'callbacks' => fn (mixed $v): mixed => $this->sortedMap($v, fn (mixed $cb): mixed => $this->sortedMap($cb, $this->canonicalizePathItem(...))),
+            'callbacks' => fn (mixed $v): mixed => $this->sortedMap($v, $this->canonicalizeCallback(...)),
             'pathItems' => fn (mixed $v): mixed => $this->sortedMap($v, $this->canonicalizePathItem(...)),
             'x-docuccino' => $this->canonicalizeDocuccino(...),
         ]));

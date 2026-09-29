@@ -79,6 +79,12 @@ final class RouteContext
      *                                               that binder matches on is a closure body, so the
      *                                               bound model's route key is no longer the answer and
      *                                               a reader must not publish it as one
+     * @param  array<string, string>  $pathParameterConstraints  path parameter name → the regular
+     *                                                           expression (PCRE, its own anchors removed)
+     *                                                           the router requires that segment to match,
+     *                                                           for the subset that declares one. A value
+     *                                                           outside it never reaches the action: the
+     *                                                           router answers 404
      * @param  ?string  $formRequestClass  the FormRequest class type-hinted on the action, if any
      * @param  ?string  $operationId  this operation's stable `x-docuccino.id`, already minted. The
      *                                pipeline stamps it onto the frozen node afterwards, but an
@@ -117,6 +123,7 @@ final class RouteContext
         public readonly ?string $operationId = null,
         public readonly bool $deprecated = false,
         public readonly ?string $deprecationReason = null,
+        public readonly array $pathParameterConstraints = [],
     ) {
         $this->dependencies = new RouteDependencies;
         $this->notes = new RouteNotes;

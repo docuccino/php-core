@@ -108,9 +108,10 @@ final readonly class ComponentRefs
     }
 
     /**
-     * A parameter's `$ref` lives among its non-modelled members. The referring site rarely carries an
-     * identity of its own — a Reference Object is usually nothing but the pointer — so the component's
-     * stands in, which is the id both a UIR document and its exported artifact publish for that parameter.
+     * A parameter's `$ref` lives among its non-modelled members. Where the referring site carries no
+     * identity of its own the component's stands in — which is every exported one, since a Reference
+     * Object takes no extension to carry it — so an id read here may name the use or the component, and
+     * {@see DocumentDiffer::diffParameters()} does not pair on it alone.
      */
     public function resolveParameter(Parameter $parameter): Parameter
     {

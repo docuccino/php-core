@@ -32,8 +32,10 @@ use PHPStan\PhpDocParser\Ast\Type\GenericTypeNode;
 use PHPStan\PhpDocParser\Ast\Type\IdentifierTypeNode;
 use PHPStan\PhpDocParser\Ast\Type\IntersectionTypeNode;
 use PHPStan\PhpDocParser\Ast\Type\NullableTypeNode;
+use PHPStan\PhpDocParser\Ast\Type\ObjectShapeNode;
 use PHPStan\PhpDocParser\Ast\Type\TypeNode;
 use PHPStan\PhpDocParser\Ast\Type\UnionTypeNode;
+use stdClass;
 
 /**
  * Parses a phpstan/phpdoc-parser type string — as written in `#[Response(type: '…')]` and the parameter
@@ -89,11 +91,12 @@ final class TypeStringParser
         return match (true) {
             $node instanceof NullableTypeNode => UnionT::of([$this->map($node->type, $imports), new NullT]),
             $node instanceof UnionTypeNode => UnionT::of(array_values(array_map(fn (TypeNode $t): DType => $this->map($t, $imports), $node->types))),
-            $node instanceof IntersectionTypeNode => IntersectionT::of(array_values(array_map(fn (TypeNode $t): DType => $this->map($t, $imports), $node->types))),
+            $node instanceof IntersectionTypeNode => $this->mapIntersection($node, $imports),
             // `V[]` is `array<array-key, V>` written short, so it takes the same key rule.
             $node instanceof ArrayTypeNode => ArrayKey::arrayOf(self::arrayKey(), $this->map($node->type, $imports)),
             $node instanceof GenericTypeNode => $this->mapGeneric($node, $imports),
             $node instanceof ArrayShapeNode => $this->mapArrayShape($node, $imports),
+            $node instanceof ObjectShapeNode => $this->mapObjectShape($node, $imports),
             $node instanceof ConstTypeNode => $this->mapConst($node),
             $node instanceof IdentifierTypeNode => $this->mapIdentifier($node->name, $imports),
             default => new UnknownT('unsupported type node'),
@@ -182,7 +185,40 @@ final class TypeStringParser
             $index++;
         }
 
-        return new ArrayShapeT($fields);
+        // A keyless array is `[]` on the wire, which is how the engine reads PHPStan's `array{}` too.
+        return new ArrayShapeT($fields, isList: $fields === []);
+    }
+
+    /** `object{a: int, b?: string}`, read as the engine reads it: a JSON object of those members. */
+    private function mapObjectShape(ObjectShapeNode $node, ?ImportContext $imports): ArrayShapeT
+    {
+        $fields = [];
+        foreach ($node->items as $item) {
+            $fields[] = new ArrayShapeField(
+                key: $item->keyName instanceof ConstExprStringNode ? $item->keyName->value : $item->keyName->name,
+                type: $this->map($item->valueType, $imports),
+                optional: $item->optional,
+            );
+        }
+
+        return new ArrayShapeT($fields, isObject: true);
+    }
+
+    /** `object{…}&stdClass` is the shape alone — stdClass declares no property to add to it. */
+    private function mapIntersection(IntersectionTypeNode $node, ?ImportContext $imports): DType
+    {
+        $shaped = array_filter($node->types, static fn (TypeNode $t): bool => $t instanceof ObjectShapeNode) !== [];
+
+        $members = [];
+        foreach ($node->types as $member) {
+            $type = $this->map($member, $imports);
+            if ($shaped && $type instanceof ClassT && $type->fqcn === stdClass::class) {
+                continue;
+            }
+            $members[] = $type;
+        }
+
+        return IntersectionT::of($members);
     }
 
     private function shapeKey(ArrayShapeItemNode $item, int $index): string|int

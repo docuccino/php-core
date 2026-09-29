@@ -245,13 +245,19 @@ final class DocumentDiffer
     }
 
     /**
+     * Paired by identity, then what that left over by `in` + `name` ({@see IdentityKeys::pairLeftoversByStructure()}),
+     * which OAS makes unique within an operation — so two leftovers spelling one are one parameter. The
+     * identity a shared parameter's use site carries in the UIR does not survive an export, because a
+     * Reference Object takes no extension to carry it: the artifact names the component's instead, and by
+     * identity alone every use of one read as removed and re-added.
+     *
      * @param  OperationEntry  $old
      * @param  OperationEntry  $new
      * @param  list<Change>  $changes
      */
     private function diffParameters(string $opId, string $path, array $old, array $new, ComponentRefs $oldRefs, ComponentRefs $newRefs, array &$changes, Pairing $pairing): void
     {
-        [$oldParams, $newParams] = IdentityKeys::pair(
+        [$oldParams, $newParams] = IdentityKeys::pairLeftoversByStructure(
             $this->parameterEntries($old, $oldRefs, $pairing),
             $this->parameterEntries($new, $newRefs, $pairing),
         );
@@ -398,9 +404,9 @@ final class DocumentDiffer
      * stood for. That is breaking however small the schema was, and it gets its own code — "removed" alone
      * would read as tidying up.
      *
-     * The one kind of node paired through {@see IdentityKeys::pairLeftoversByStructure()}: a hoisted body's
-     * id is minted from the bytes it publishes, so an edit re-mints it and identity pairing alone would
-     * compare the edited component against nothing at all.
+     * Paired through {@see IdentityKeys::pairLeftoversByStructure()}: a hoisted body's id is minted from
+     * the bytes it publishes, so an edit re-mints it and identity pairing alone would compare the edited
+     * component against nothing at all.
      *
      * A schema BOTH documents reach only from writer positions ({@see SchemaDirection}) compares with
      * request semantics — an enum value added there stays non-breaking, a required property added becomes

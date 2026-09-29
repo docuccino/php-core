@@ -23,6 +23,12 @@ final class DiscriminatedUnion
     private const string PREFIX = '#/components/schemas/';
 
     /**
+     * The empty object, as a member written beside tagged ones: every tagged member requires its tag, so
+     * none admits it, and it stays outside the `oneOf` as `null` does.
+     */
+    public const array EMPTY_OBJECT = ['type' => 'object', 'maxProperties' => 0];
+
+    /**
      * The document with every provable union discriminated, plus one info per union written to be tagged
      * that falls short, in member-name order.
      *
@@ -68,7 +74,8 @@ final class DiscriminatedUnion
     }
 
     /**
-     * One `anyOf` node, discriminated when its members prove it; a `null` branch stays outside the `oneOf`.
+     * One `anyOf` node, discriminated when its members prove it; a `null` branch and an empty-object one
+     * stay outside the `oneOf`.
      *
      * @param  array<mixed>  $node
      * @param  array<mixed>  $branches
@@ -81,9 +88,16 @@ final class DiscriminatedUnion
         $names = [];
         $bodies = [];
         $nullable = false;
+        $empty = false;
         foreach ($branches as $branch) {
             if ($branch === ['type' => 'null'] && ! $nullable) {
                 $nullable = true;
+
+                continue;
+            }
+
+            if (self::isEmptyObject($branch) && ! $empty) {
+                $empty = true;
 
                 continue;
             }
@@ -120,8 +134,9 @@ final class DiscriminatedUnion
             'discriminator' => $discriminator,
         ];
 
-        if ($nullable) {
-            $node['anyOf'] = [$tagged, ['type' => 'null']];
+        $outside = [...($empty ? [self::EMPTY_OBJECT] : []), ...($nullable ? [['type' => 'null']] : [])];
+        if ($outside !== []) {
+            $node['anyOf'] = [$tagged, ...$outside];
 
             return $node;
         }
@@ -129,6 +144,13 @@ final class DiscriminatedUnion
         unset($node['anyOf']);
 
         return self::repointProvenance($node + $tagged);
+    }
+
+    /** Whether a member is {@see EMPTY_OBJECT}, in whichever key order a producer wrote it. */
+    private static function isEmptyObject(mixed $branch): bool
+    {
+        return is_array($branch) && count($branch) === 2
+            && ($branch['type'] ?? null) === 'object' && ($branch['maxProperties'] ?? null) === 0;
     }
 
     /**

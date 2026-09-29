@@ -10,6 +10,8 @@ use Docuccino\Core\Inference\DType\UnknownT;
 /**
  * A single property of a {@see ClassMetadata}: its name, resolved type, optional
  * docblock summary prose, an optional `@example` value, and where it is declared.
+ * `initialised` says whether the constructor the class runs assigns it on every path that
+ * completes (false: one completes without it); null where the engine did not look.
  */
 final readonly class PropertyMetadata
 {
@@ -19,6 +21,7 @@ final readonly class PropertyMetadata
         public ?string $summary = null,
         public ?string $example = null,
         public ?SourceLocation $location = null,
+        public ?bool $initialised = null,
     ) {}
 
     /**
@@ -40,6 +43,10 @@ final readonly class PropertyMetadata
             $out['location'] = $this->location->toArray();
         }
 
+        if ($this->initialised !== null) {
+            $out['initialised'] = $this->initialised;
+        }
+
         return $out;
     }
 
@@ -53,6 +60,7 @@ final readonly class PropertyMetadata
         $summary = $data['summary'] ?? null;
         $example = $data['example'] ?? null;
         $location = $data['location'] ?? null;
+        $initialised = $data['initialised'] ?? null;
 
         return new self(
             is_string($name) ? $name : '',
@@ -60,6 +68,7 @@ final readonly class PropertyMetadata
             is_string($summary) ? $summary : null,
             is_string($example) ? $example : null,
             is_array($location) ? SourceLocation::fromArray($location) : null,
+            is_bool($initialised) ? $initialised : null,
         );
     }
 }

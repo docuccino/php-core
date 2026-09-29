@@ -27,6 +27,12 @@ use Docuccino\Core\SpecValidation\EmittedSpecCheck;
  */
 final readonly class OpenApi32Emitter implements ReportingEmitter
 {
+    /**
+     * The members outside a schema that hold one: a parameter's, a header's and a media type's `schema`,
+     * and 3.2's `itemSchema`. `components.schemas` is the name map that holds them.
+     */
+    private const array SCHEMA_MEMBERS = ['schema', 'itemSchema'];
+
     public function __construct(
         private Canonicalizer $canonicalizer = new Canonicalizer,
         private CanonicalJsonSerializer $serializer = new CanonicalJsonSerializer,
@@ -94,16 +100,23 @@ final readonly class OpenApi32Emitter implements ReportingEmitter
      * {@see DocumentMembers}: a header or property NAMED `x-…` is a node like any other, and data — an
      * example, an extension's value — is published as written.
      *
+     * Nothing is projected beside a `$ref` outside a Schema Object. Everywhere else that is a Reference
+     * Object, which every OpenAPI version says "cannot be extended with additional properties" — so an id
+     * there makes the whole document invalid to a strict reader — or a Path Item, which 3.1 reads as a
+     * Reference Object under `webhooks` and `components.pathItems`. A Schema Object is JSON Schema and
+     * takes siblings; the 3.0 downlevel moves them into an `allOf`.
+     *
      * @param  ?string  $inNameMap  the name map $node is, or null where its keys are keywords
+     * @param  bool  $inSchema  whether $node is a Schema Object or sits inside one
      */
-    private function strip(mixed $node, EmitOptions $options, ?string $inNameMap = null): mixed
+    private function strip(mixed $node, EmitOptions $options, ?string $inNameMap = null, bool $inSchema = false): mixed
     {
         if (! is_array($node)) {
             return $node;
         }
 
         if (array_is_list($node)) {
-            return array_map(fn (mixed $item): mixed => $this->strip($item, $options), $node);
+            return array_map(fn (mixed $item): mixed => $this->strip($item, $options, null, $inSchema), $node);
         }
 
         $docuccino = null;
@@ -117,10 +130,15 @@ final readonly class OpenApi32Emitter implements ReportingEmitter
             $key = (string) $key;
             $out[$key] = DocumentMembers::holdsData($key, $value, $inNameMap)
                 ? $value
-                : $this->strip($value, $options, DocumentMembers::nameMap($key, $inNameMap));
+                : $this->strip(
+                    $value,
+                    $options,
+                    DocumentMembers::nameMap($key, $inNameMap),
+                    $inSchema || ($inNameMap === null ? in_array($key, self::SCHEMA_MEMBERS, true) : $inNameMap === 'schemas'),
+                );
         }
 
-        if (is_array($docuccino)) {
+        if (is_array($docuccino) && ($inSchema || ! is_string($out['$ref'] ?? null))) {
             $this->projectDocuccino($out, $docuccino, $options);
         }
 

@@ -335,6 +335,34 @@ it('classifies a removed parameter as breaking', function (): void {
     expect($changes['parameter.removed']->breaking)->toBeTrue();
 });
 
+/*
+ * OAS makes `in` + `name` unique within an operation, so the one parameter each side spells that way under
+ * a paired operation is the same parameter, whatever id either side read for it. An id is not always
+ * carried across an export: a Reference Object takes no extension, so a shared parameter's use site reads
+ * its component's id back instead of its own.
+ */
+it('pairs a parameter whose id moved by its location and name', function (): void {
+    $new = diffBase();
+    $new['paths']['/api/v1/forms/{id}']['get']['parameters'][1]['x-docuccino']['id'] = 'par:v1:eeeeeeeeeeeeeeee';
+
+    expect(diffOf(diffBase(), $new)->changes)->toBe([]);
+
+    // Compared, not waved through: an edit to the parameter is still reported against it.
+    $new['paths']['/api/v1/forms/{id}']['get']['parameters'][1]['required'] = true;
+    expect(array_keys(changesByCode(diffOf(diffBase(), $new))))->toBe(['parameter.became-required']);
+});
+
+it('still reports a parameter renamed under a moved id as removed and added', function (): void {
+    $new = diffBase();
+    $new['paths']['/api/v1/forms/{id}']['get']['parameters'][1]['x-docuccino']['id'] = 'par:v1:eeeeeeeeeeeeeeee';
+    $new['paths']['/api/v1/forms/{id}']['get']['parameters'][1]['name'] = 'state';
+
+    $codes = array_map(static fn (Change $change): string => $change->code, diffOf(diffBase(), $new)->changes);
+    sort($codes);
+
+    expect($codes)->toBe(['parameter.added', 'parameter.removed']);
+});
+
 it('classifies a removed response status as breaking', function (): void {
     $new = diffBase();
     unset($new['paths']['/api/v1/forms/{id}']['get']['responses']['404']);

@@ -54,6 +54,7 @@ function representativeTypes(): array
             new ArrayShapeField('id', ScalarT::int()),
             new ArrayShapeField('name', ScalarT::string(), optional: true),
         ]),
+        new ArrayShapeT([new ArrayShapeField('0', ScalarT::int())], isObject: true),
         UnionT::of([ScalarT::string(), new NullT]),
         IntersectionT::of([new ClassT('A'), new ClassT('B')]),
     ];
