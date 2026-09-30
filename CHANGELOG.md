@@ -7,6 +7,28 @@ User-facing changes to `docuccino/core` — features, fixes, performance work an
 taken from the commit messages scoped `core`. Entries begin after v0.1.2; older history is in
 the [repository](https://github.com/docuccino/docuccino) git log.
 
+## v0.20.4
+
+### Features
+
+- tell tooling a blank string on a nullable field is read as null ([#591](https://github.com/docuccino/docuccino/pull/591))
+- publish a case-insensitive regex, and \s and Unicode properties under /u, as a pattern ([#582](https://github.com/docuccino/docuccino/pull/582))
+
+### Bug fixes
+
+- read a $ref an example states as the value it is, not as a reference ([#608](https://github.com/docuccino/docuccino/pull/608))
+- report an attribute PHP cannot construct where nothing would have read it, once per class ([#593](https://github.com/docuccino/docuccino/pull/593))
+- publish a key the constructor assigns on only some paths as optional ([#577](https://github.com/docuccino/docuccino/pull/577))
+- publish a reference as its pointer alone, and check every Reference Object on every build ([#573](https://github.com/docuccino/docuccino/pull/573))
+
+### Performance
+
+- run a document's lints beside the rest of its build ([#607](https://github.com/docuccino/docuccino/pull/607))
+- write canonical JSON through json_encode wherever the bytes are the same ([#605](https://github.com/docuccino/docuccino/pull/605))
+- canonicalise a document without rebuilding its member handlers at every node ([#604](https://github.com/docuccino/docuccino/pull/604))
+- parse each component schema once for all of a document's checks ([#602](https://github.com/docuccino/docuccino/pull/602))
+- check a payload against the component schemas it can reach, not every one ([#597](https://github.com/docuccino/docuccino/pull/597))
+
 ## v0.20.3
 
 ### Features
