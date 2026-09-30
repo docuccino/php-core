@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Pipeline;
 
+use Closure;
 use Docuccino\Core\Content\CompiledContent;
 use Docuccino\Core\Content\ContentResolver;
 use Docuccino\Core\Diagnostics\Diagnostic;
@@ -17,6 +18,7 @@ use Docuccino\Core\Extensions\Schema\ComponentRegistry;
 use Docuccino\Core\Extensions\Schema\DiscriminatedUnion;
 use Docuccino\Core\Identity\ContentHasher;
 use Docuccino\Core\Identity\IdentityGenerator;
+use Docuccino\Core\Lint\DocumentLint;
 use Docuccino\Core\Overlay\OverlayApplier;
 use Docuccino\Core\Overlay\OverlayDocument;
 use Docuccino\Core\Provenance\ClassNames;
@@ -49,6 +51,8 @@ final class Assembler
 
     private readonly ClassNames $classNames;
 
+    private readonly BuildWorkers $workers;
+
     public function __construct(
         private readonly string $generatorName,
         private readonly IdentityGenerator $identity = new IdentityGenerator,
@@ -56,9 +60,11 @@ final class Assembler
         private readonly OverlayApplier $overlays = new OverlayApplier,
         private readonly ContentResolver $content = new ContentResolver,
         private readonly SourcePathResolver $paths = new RootRelativeSourcePathResolver(''),
+        ?BuildWorkers $workers = null,
     ) {
         $this->messagePaths = new MessagePaths($this->paths);
         $this->classNames = new ClassNames($this->paths);
+        $this->workers = $workers ?? BuildWorkers::none();
     }
 
     /**
@@ -182,7 +188,8 @@ final class Assembler
         $this->reportTagCollisions($fragments, $document, $diagnostics);
 
         $doc = $this->applyOverlays($doc, $overlayDocuments, $diagnostics);
-        $doc = $this->applyTransformers($doc, $document, $documentId, $transformers, $diagnostics);
+        $outstanding = [];
+        $doc = $this->applyTransformers($doc, $document, $documentId, $transformers, $diagnostics, $outstanding);
 
         // Content resolves against the now-final document, so directives and nav refs see overlay
         // and transformer changes — and lands before the hash, so a prose edit or nav move shows up
@@ -208,7 +215,7 @@ final class Assembler
 
         $doc = $this->stampContentHash($doc);
 
-        return new AssemblyResult($doc, $diagnostics, $this->schemaSources($components));
+        return new AssemblyResult($doc, $diagnostics, $this->schemaSources($components), $outstanding);
     }
 
     /**
@@ -670,12 +677,16 @@ final class Assembler
     }
 
     /**
+     * Each transformer in its turn over one draft, and each run of lints ({@see DocumentLint}) beside the build
+     * at its turn, gathered with the rest of the assembly's diagnostics ({@see AssemblyResult::diagnostics()}).
+     *
      * @param  array<string, mixed>  $doc
      * @param  list<DocumentTransformer>  $transformers
      * @param  list<Diagnostic>  $diagnostics
+     * @param  list<Closure(): list<Diagnostic>>  $outstanding
      * @return array<string, mixed>
      */
-    private function applyTransformers(array $doc, DocumentConfig $document, string $documentId, array $transformers, array &$diagnostics): array
+    private function applyTransformers(array $doc, DocumentConfig $document, string $documentId, array $transformers, array &$diagnostics, array &$outstanding): array
     {
         if ($transformers === []) {
             return $doc;
@@ -683,7 +694,20 @@ final class Assembler
 
         $draft = new UirDocumentDraft($doc);
         $context = new DocumentContext($document, $documentId);
+        $lints = [];
         foreach ($transformers as $transformer) {
+            if ($transformer instanceof DocumentLint) {
+                $lints[] = $transformer;
+
+                continue;
+            }
+
+            // Any other transformer may write, so the lints before it read the draft it has not written yet.
+            if ($lints !== []) {
+                $outstanding[] = $this->beside($lints, $draft->toArray(), $document, $documentId);
+                $lints = [];
+            }
+
             try {
                 $transformer->transform($draft, $context);
             } catch (Throwable $failure) {
@@ -691,11 +715,43 @@ final class Assembler
             }
         }
 
+        if ($lints !== []) {
+            $outstanding[] = $this->beside($lints, $draft->toArray(), $document, $documentId);
+        }
+
         foreach ($context->diagnostics->all() as $diagnostic) {
             $diagnostics[] = $diagnostic;
         }
 
         return $draft->toArray();
+    }
+
+    /**
+     * A run of lints over a copy of the draft as it stands at their turn, which is not the draft when their task
+     * runs ({@see BuildWorkers::later()}), and what they report, a failure as {@see applyTransformers()} reports it.
+     *
+     * @param  non-empty-list<DocumentLint>  $lints
+     * @param  array<string, mixed>  $doc
+     * @return Closure(): list<Diagnostic>
+     */
+    private function beside(array $lints, array $doc, DocumentConfig $document, string $documentId): Closure
+    {
+        $answer = $this->workers->later(function () use ($lints, $doc, $document, $documentId): array {
+            $draft = new UirDocumentDraft($doc);
+            $context = new DocumentContext($document, $documentId);
+            $failures = [];
+            foreach ($lints as $lint) {
+                try {
+                    $lint->transform($draft, $context);
+                } catch (Throwable $failure) {
+                    $failures[] = $this->transformerFailed($lint, $failure);
+                }
+            }
+
+            return array_map(static fn (Diagnostic $diagnostic): array => $diagnostic->toArray(), [...$failures, ...$context->diagnostics->all()]);
+        });
+
+        return static fn (): array => array_map(Diagnostic::fromArray(...), $answer());
     }
 
     /**

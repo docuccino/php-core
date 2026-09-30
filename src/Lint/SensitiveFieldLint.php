@@ -8,7 +8,6 @@ use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
 use Docuccino\Core\Document\DocumentMembers;
 use Docuccino\Core\Extensions\Context\DocumentContext;
-use Docuccino\Core\Extensions\Contracts\DocumentTransformer;
 use Docuccino\Core\Extensions\Document\UirDocumentDraft;
 use Docuccino\Core\Extensions\Ordering\ExtensionOrder;
 use Docuccino\Core\Extensions\Ordering\Priorities;
@@ -38,7 +37,7 @@ use Docuccino\Core\Extensions\Ordering\Priorities;
  * @phpstan-type LeakFinding array{name: string, pointer: string, label: string, kind: 'property'|'value'|'parameter', in: string|null}
  */
 #[ExtensionOrder(priority: Priorities::LAST)]
-final class SensitiveFieldLint implements DocumentTransformer
+final class SensitiveFieldLint implements DocumentLint
 {
     /** The members whose contents are published illustrative values rather than structure. */
     private const VALUE_KEYS = ['example', 'examples', 'const', 'enum', 'default'];

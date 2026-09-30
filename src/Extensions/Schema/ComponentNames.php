@@ -4,13 +4,15 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Extensions\Schema;
 
+use Closure;
+use Docuccino\Core\Document\DocumentMembers;
 use Docuccino\Core\Identity\Base32;
 
 /**
- * Decides the name every component is published under, and rewrites the `$ref`s pointing at them. Owns
- * the rule that a published name is a function of the claims contesting it and never of the order they
- * were met — registration slots are first-come, and first-come is route order. The claim ladder and why
- * it has those rungs: design §2 "Component naming".
+ * Decides the name every component is published under, and reads and rewrites the `$ref`s pointing at
+ * them. Owns the rule that a published name is a function of the claims contesting it and never of the
+ * order they were met — registration slots are first-come, and first-come is route order. The claim
+ * ladder and why it has those rungs: design §2 "Component naming".
  *
  * @phpstan-type Claim array{base: string, identity: string|null, content: string}
  *
@@ -354,7 +356,9 @@ final class ComponentNames
 
     /**
      * Rewrite every `#/components/{$kind}/…` reference under `$node` through a rename map — a `$ref`, and
-     * the one reference OpenAPI spells as a plain string, a `discriminator.mapping` value.
+     * the one reference OpenAPI spells as a plain string, a `discriminator.mapping` value. Only where the
+     * document makes one ({@see repoint()}): a pointer an example states is payload, and renaming it
+     * publishes a value the server never sends.
      *
      * @template TKey of array-key
      *
@@ -370,23 +374,78 @@ final class ComponentNames
 
         $prefix = self::PREFIX.$kind.'/';
 
+        return self::repoint($node, static fn (string $ref): string => self::renamed($ref, $prefix, $renames));
+    }
+
+    /**
+     * The names of the `#/components/{$kind}/…` components `$node` refers to, read by the walk
+     * {@see rename()} rewrites them with, in the order it meets them and with repeats kept.
+     *
+     * @param  array<array-key, mixed>  $node
+     * @return list<string>
+     */
+    public static function referenced(array $node, string $kind = 'schemas'): array
+    {
+        $prefix = self::PREFIX.$kind.'/';
+        $names = [];
+
+        self::repoint($node, static function (string $ref) use ($prefix, &$names): string {
+            if (str_starts_with($ref, $prefix)) {
+                $names[] = substr($ref, strlen($prefix));
+            }
+
+            return $ref;
+        });
+
+        return $names;
+    }
+
+    /**
+     * Every reference under `$node` put through `$reference`, members read by {@see DocumentMembers}: a
+     * value the document STATES is left whole, and a property or response only named like one is a node
+     * like any other. Inside an `x-` member every `$ref` is a reference — an extension's vocabulary is
+     * its own, and the provenance this product records names shapes by the components this document
+     * publishes them under.
+     *
+     * @template TKey of array-key
+     *
+     * @param  array<TKey, mixed>  $node
+     * @param  Closure(string): string  $reference
+     * @param  ?string  $inNameMap  the name map $node is, or null where its keys are keywords
+     * @param  bool  $extension  whether $node sits inside an `x-` member
+     * @return array<TKey, mixed>
+     */
+    private static function repoint(array $node, Closure $reference, ?string $inNameMap = null, bool $extension = false): array
+    {
         foreach ($node as $key => $value) {
-            if ($key === '$ref' && is_string($value)) {
-                $node[$key] = self::renamed($value, $prefix, $renames);
+            $member = (string) $key;
+
+            if ($inNameMap === null && $member === '$ref' && is_string($value)) {
+                $node[$key] = $reference($value);
 
                 continue;
             }
 
-            if ($key === 'discriminator' && is_array($value) && is_array($value['mapping'] ?? null)) {
+            if (! is_array($value)) {
+                continue;
+            }
+
+            if (! $extension && DocumentMembers::holdsData($member, $value, $inNameMap)) {
+                if (str_starts_with($member, 'x-')) {
+                    $node[$key] = self::repoint($value, $reference, null, true);
+                }
+
+                continue;
+            }
+
+            if ($inNameMap === null && $member === 'discriminator' && is_array($value['mapping'] ?? null)) {
                 $value['mapping'] = array_map(
-                    static fn (mixed $target): mixed => is_string($target) ? self::renamed($target, $prefix, $renames) : $target,
+                    static fn (mixed $target): mixed => is_string($target) ? $reference($target) : $target,
                     $value['mapping'],
                 );
             }
 
-            if (is_array($value)) {
-                $node[$key] = self::rename($value, $renames, $kind);
-            }
+            $node[$key] = self::repoint($value, $reference, $extension ? null : DocumentMembers::nameMap($member, $inNameMap), $extension);
         }
 
         return $node;

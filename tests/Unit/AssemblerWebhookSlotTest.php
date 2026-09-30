@@ -34,7 +34,7 @@ beforeEach(function (): void {
             '1.0.0',
         );
 
-        return [$result->document, $result->diagnostics];
+        return [$result->document, $result->diagnostics()];
     };
 });
 

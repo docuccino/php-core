@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Canonical;
 
+use Closure;
 use Docuccino\Core\Document\Parameter;
 use Docuccino\Core\Document\PathItem;
 use Docuccino\Core\Draft\SchemaKeywords;
@@ -34,6 +35,20 @@ use stdClass;
 final class Canonicalizer
 {
     /**
+     * Each object type's member handlers, made the first time a node of that type is met rather than for
+     * every node: a document has tens of thousands of schemas, and the map is the same for all of them.
+     * No two types may share a key, or the one met second is canonicalised with the first one's members —
+     * silently, and for as long as this instance lives, which can be many documents. So each key is written
+     * once, as a plain quoted string with `??=`: the one shape `CanonicalizerTest` accepts.
+     *
+     * @var array<string, array<string, callable(mixed): mixed>>
+     */
+    private array $handlers = [];
+
+    /** @var (Closure(string, mixed): mixed)|null */
+    private ?Closure $schemaResidual = null;
+
+    /**
      * Every member an object that is NOT a Schema Object reads as one, and the position it reads it at.
      * The handler maps below are BUILT from this ({@see schemaSlots()}), so the table is the set of outer
      * schema slots rather than a description of one: a slot with no line here is not read as a schema at
@@ -54,7 +69,7 @@ final class Canonicalizer
      */
     public function canonicalize(array $document): array
     {
-        return $this->build($document, [
+        return $this->build($document, $this->handlers['root'] ??= [
             'openapi' => $this->keep(...),
             'jsonSchemaDialect' => $this->keep(...),
             'info' => $this->canonicalizeInfo(...),
@@ -102,11 +117,6 @@ final class Canonicalizer
         return $handlers;
     }
 
-    private function compareKeys(int|string $a, int|string $b): int
-    {
-        return strcmp((string) $a, (string) $b);
-    }
-
     /**
      * `$residual` reads the members no handler names, where the node type still knows something
      * about them — a Schema Object does, from the keyword's position. Without one they are data.
@@ -120,14 +130,12 @@ final class Canonicalizer
     {
         $out = [];
 
-        foreach ($handlers as $key => $handler) {
-            if (array_key_exists($key, $node)) {
-                $out[$key] = $handler($node[$key]);
-            }
+        foreach (array_intersect_key($handlers, $node) as $key => $handler) {
+            $out[$key] = $handler($node[$key]);
         }
 
         $unknown = array_diff_key($node, $handlers);
-        uksort($unknown, $this->compareKeys(...));
+        ksort($unknown, SORT_STRING);
 
         foreach ($unknown as $key => $value) {
             $key = (string) $key;
@@ -143,16 +151,17 @@ final class Canonicalizer
     }
 
     /**
-     * @param  callable(array<mixed, mixed>): array<string, mixed>  $builder
+     * @param  array<string, callable(mixed): mixed>  $handlers
+     * @param  (callable(string, mixed): mixed)|null  $residual
      * @return array<string, mixed>|stdClass
      */
-    private function object(mixed $node, callable $builder): array|stdClass
+    private function object(mixed $node, array $handlers, ?callable $residual = null): array|stdClass
     {
         if (! is_array($node)) {
             return $node instanceof stdClass ? $node : new stdClass;
         }
 
-        return $this->toObject($builder($node));
+        return $this->toObject($this->build($node, $handlers, $residual));
     }
 
     /**
@@ -169,24 +178,24 @@ final class Canonicalizer
      */
     private function canonicalizeInfo(mixed $node): array|stdClass
     {
-        return $this->object($node, fn (array $info) => $this->build($info, [
+        return $this->object($node, $this->handlers['info'] ??= [
             'title' => $this->keep(...),
             'summary' => $this->keep(...),
             'description' => $this->keep(...),
             'termsOfService' => $this->keep(...),
-            'contact' => fn (mixed $v): mixed => $this->object($v, fn (array $c) => $this->build($c, [
+            'contact' => fn (mixed $v): mixed => $this->object($v, $this->handlers['info.contact'] ??= [
                 'name' => $this->keep(...),
                 'url' => $this->keep(...),
                 'email' => $this->keep(...),
-            ])),
-            'license' => fn (mixed $v): mixed => $this->object($v, fn (array $l) => $this->build($l, [
+            ]),
+            'license' => fn (mixed $v): mixed => $this->object($v, $this->handlers['info.license'] ??= [
                 'name' => $this->keep(...),
                 'identifier' => $this->keep(...),
                 'url' => $this->keep(...),
-            ])),
+            ]),
             'version' => $this->keep(...),
             'x-docuccino' => $this->canonicalizeDocuccino(...),
-        ]));
+        ]);
     }
 
     /**
@@ -194,17 +203,17 @@ final class Canonicalizer
      */
     private function canonicalizeServer(mixed $node): array|stdClass
     {
-        return $this->object($node, fn (array $server) => $this->build($server, [
+        return $this->object($node, $this->handlers['server'] ??= [
             'url' => $this->keep(...),
             'description' => $this->keep(...),
             'name' => $this->keep(...),
-            'variables' => fn (mixed $v): mixed => $this->sortedMap($v, fn (mixed $var): mixed => $this->object($var, fn (array $variable) => $this->build($variable, [
+            'variables' => fn (mixed $v): mixed => $this->sortedMap($v, fn (mixed $var): mixed => $this->object($var, $this->handlers['server.variables'] ??= [
                 'enum' => $this->canonicalizeStringList(...),
                 'default' => $this->keep(...),
                 'description' => $this->keep(...),
-            ]))),
+            ])),
             'x-docuccino' => $this->canonicalizeDocuccino(...),
-        ]));
+        ]);
     }
 
     /**
@@ -212,7 +221,7 @@ final class Canonicalizer
      */
     private function canonicalizeTag(mixed $node): array|stdClass
     {
-        return $this->object($node, fn (array $tag) => $this->build($tag, [
+        return $this->object($node, $this->handlers['tag'] ??= [
             'name' => $this->keep(...),
             'summary' => $this->keep(...),
             'description' => $this->keep(...),
@@ -220,7 +229,7 @@ final class Canonicalizer
             'parent' => $this->keep(...),
             'kind' => $this->keep(...),
             'x-docuccino' => $this->canonicalizeDocuccino(...),
-        ]));
+        ]);
     }
 
     /**
@@ -228,10 +237,10 @@ final class Canonicalizer
      */
     private function canonicalizeExternalDocs(mixed $node): array|stdClass
     {
-        return $this->object($node, fn (array $docs) => $this->build($docs, [
+        return $this->object($node, $this->handlers['externalDocs'] ??= [
             'description' => $this->keep(...),
             'url' => $this->keep(...),
-        ]));
+        ]);
     }
 
     /**
@@ -239,22 +248,15 @@ final class Canonicalizer
      */
     private function canonicalizePathItem(mixed $node): array|stdClass
     {
-        return $this->object($node, function (array $item) {
-            $handlers = [
-                'x-docuccino' => $this->canonicalizeDocuccino(...),
-                '$ref' => $this->keep(...),
-                'summary' => $this->keep(...),
-                'description' => $this->keep(...),
-                'servers' => fn (mixed $v): mixed => $this->mapList($v, $this->canonicalizeServer(...)),
-                'parameters' => $this->canonicalizeParameterList(...),
-            ];
-
-            foreach (PathItem::METHODS as $method) {
-                $handlers[$method] = $this->canonicalizeOperation(...);
-            }
-
-            return $this->build($item, $handlers);
-        });
+        return $this->object($node, $this->handlers['pathItem'] ??= [
+            'x-docuccino' => $this->canonicalizeDocuccino(...),
+            '$ref' => $this->keep(...),
+            'summary' => $this->keep(...),
+            'description' => $this->keep(...),
+            'servers' => fn (mixed $v): mixed => $this->mapList($v, $this->canonicalizeServer(...)),
+            'parameters' => $this->canonicalizeParameterList(...),
+            ...array_fill_keys(PathItem::METHODS, $this->canonicalizeOperation(...)),
+        ]);
     }
 
     /**
@@ -273,7 +275,7 @@ final class Canonicalizer
      */
     private function canonicalizeOperation(mixed $node): array|stdClass
     {
-        return $this->object($node, fn (array $operation) => $this->build($operation, [
+        return $this->object($node, $this->handlers['operation'] ??= [
             'x-docuccino' => $this->canonicalizeDocuccino(...),
             'operationId' => $this->keep(...),
             'summary' => $this->keep(...),
@@ -287,7 +289,7 @@ final class Canonicalizer
             'requestBody' => $this->canonicalizeRequestBody(...),
             'responses' => fn (mixed $v): mixed => $this->sortedMap($v, $this->canonicalizeResponse(...)),
             'callbacks' => fn (mixed $v): mixed => $this->sortedMap($v, $this->canonicalizeCallback(...)),
-        ]));
+        ]);
     }
 
     /**
@@ -307,13 +309,15 @@ final class Canonicalizer
         // OperationDraft keys its drafts by exactly that pair, so the build cannot produce two; one
         // an overlay or a transformer writes is published as written, rather than having half the
         // edit silently disappear.
+        //
+        // The bytes are read only for a tie, since reading them costs a walk of the whole parameter.
         $keyed = [];
         foreach ($node as $parameter) {
             $canonical = $this->canonicalizeParameter($parameter);
-            $keyed[] = [[$this->parameterRank($canonical), $this->parameterName($canonical), Json::stable($canonical)], $canonical];
+            $keyed[] = [[$this->parameterRank($canonical), $this->parameterName($canonical)], $canonical];
         }
 
-        usort($keyed, static fn (array $a, array $b): int => $a[0] <=> $b[0]);
+        usort($keyed, static fn (array $a, array $b): int => ($a[0] <=> $b[0]) ?: (Json::stable($a[1]) <=> Json::stable($b[1])));
 
         return array_column($keyed, 1);
     }
@@ -349,7 +353,7 @@ final class Canonicalizer
      */
     private function canonicalizeParameter(mixed $node): array|stdClass
     {
-        return $this->object($node, fn (array $parameter) => $this->build($parameter, [
+        return $this->object($node, $this->handlers['parameter'] ??= [
             'x-docuccino' => $this->canonicalizeDocuccino(...),
             '$ref' => $this->keep(...),
             'name' => $this->keep(...),
@@ -365,7 +369,7 @@ final class Canonicalizer
             'example' => $this->keep(...),
             'examples' => fn (mixed $v): mixed => $this->sortedMap($v, $this->canonicalizeExample(...)),
             'content' => fn (mixed $v): mixed => $this->sortedMap($v, $this->canonicalizeMediaType(...)),
-        ]));
+        ]);
     }
 
     /**
@@ -373,13 +377,13 @@ final class Canonicalizer
      */
     private function canonicalizeRequestBody(mixed $node): array|stdClass
     {
-        return $this->object($node, fn (array $body) => $this->build($body, [
+        return $this->object($node, $this->handlers['requestBody'] ??= [
             'x-docuccino' => $this->canonicalizeDocuccino(...),
             '$ref' => $this->keep(...),
             'description' => $this->keep(...),
             'required' => $this->keep(...),
             'content' => fn (mixed $v): mixed => $this->sortedMap($v, $this->canonicalizeMediaType(...)),
-        ]));
+        ]);
     }
 
     /**
@@ -387,7 +391,7 @@ final class Canonicalizer
      */
     private function canonicalizeResponse(mixed $node): array|stdClass
     {
-        return $this->object($node, fn (array $response) => $this->build($response, [
+        return $this->object($node, $this->handlers['response'] ??= [
             'x-docuccino' => $this->canonicalizeDocuccino(...),
             '$ref' => $this->keep(...),
             'summary' => $this->keep(...),
@@ -395,7 +399,7 @@ final class Canonicalizer
             'headers' => fn (mixed $v): mixed => $this->sortedMap($v, $this->canonicalizeHeader(...)),
             'content' => fn (mixed $v): mixed => $this->sortedMap($v, $this->canonicalizeMediaType(...)),
             'links' => fn (mixed $v): mixed => $this->sortedMap($v, $this->canonicalizeGeneric(...)),
-        ]));
+        ]);
     }
 
     /**
@@ -403,7 +407,7 @@ final class Canonicalizer
      */
     private function canonicalizeHeader(mixed $node): array|stdClass
     {
-        return $this->object($node, fn (array $header) => $this->build($header, [
+        return $this->object($node, $this->handlers['header'] ??= [
             'x-docuccino' => $this->canonicalizeDocuccino(...),
             '$ref' => $this->keep(...),
             'description' => $this->keep(...),
@@ -415,7 +419,7 @@ final class Canonicalizer
             'example' => $this->keep(...),
             'examples' => fn (mixed $v): mixed => $this->sortedMap($v, $this->canonicalizeExample(...)),
             'content' => fn (mixed $v): mixed => $this->sortedMap($v, $this->canonicalizeMediaType(...)),
-        ]));
+        ]);
     }
 
     /**
@@ -430,7 +434,7 @@ final class Canonicalizer
      */
     private function canonicalizeMediaType(mixed $node): array|stdClass
     {
-        return $this->object($node, fn (array $media) => $this->build($media, [
+        return $this->object($node, $this->handlers['mediaType'] ??= [
             'x-docuccino' => $this->canonicalizeDocuccino(...),
             'description' => $this->keep(...),
             ...$this->schemaSlots('mediaType'),
@@ -439,7 +443,7 @@ final class Canonicalizer
             'encoding' => fn (mixed $v): mixed => $this->sortedMap($v, $this->canonicalizeGeneric(...)),
             'prefixEncoding' => fn (mixed $v): mixed => $this->mapList($v, $this->canonicalizeGeneric(...)),
             'itemEncoding' => $this->canonicalizeGeneric(...),
-        ]));
+        ]);
     }
 
     /**
@@ -447,7 +451,7 @@ final class Canonicalizer
      */
     private function canonicalizeExample(mixed $node): array|stdClass
     {
-        return $this->object($node, fn (array $example) => $this->build($example, [
+        return $this->object($node, $this->handlers['example'] ??= [
             'x-docuccino' => $this->canonicalizeDocuccino(...),
             'summary' => $this->keep(...),
             'description' => $this->keep(...),
@@ -457,7 +461,7 @@ final class Canonicalizer
             'serializedValue' => $this->keep(...),
             'value' => $this->canonicalizeGeneric(...),
             'externalValue' => $this->keep(...),
-        ]));
+        ]);
     }
 
     /**
@@ -465,7 +469,7 @@ final class Canonicalizer
      */
     private function canonicalizeComponents(mixed $node): array|stdClass
     {
-        return $this->object($node, fn (array $components) => $this->build($components, [
+        return $this->object($node, $this->handlers['components'] ??= [
             ...$this->schemaSlots('components'),
             'responses' => fn (mixed $v): mixed => $this->sortedMap($v, $this->canonicalizeResponse(...)),
             'parameters' => fn (mixed $v): mixed => $this->sortedMap($v, $this->canonicalizeParameter(...)),
@@ -478,7 +482,7 @@ final class Canonicalizer
             'callbacks' => fn (mixed $v): mixed => $this->sortedMap($v, $this->canonicalizeCallback(...)),
             'pathItems' => fn (mixed $v): mixed => $this->sortedMap($v, $this->canonicalizePathItem(...)),
             'x-docuccino' => $this->canonicalizeDocuccino(...),
-        ]));
+        ]);
     }
 
     /**
@@ -555,33 +559,34 @@ final class Canonicalizer
      */
     private function canonicalizeSchema(mixed $node): array|stdClass
     {
-        $handlers = [];
-        foreach (self::SCHEMA_ORDER as $keyword) {
-            $handlers[$keyword] = fn (mixed $v): mixed => $this->schemaMember($keyword, $v);
-        }
-
-        return $this->object($node, fn (array $schema) => $this->build($schema, $handlers, $this->schemaResidual(...)));
+        return $this->object(
+            $node,
+            $this->handlers['schema'] ??= array_combine(self::SCHEMA_ORDER, array_map($this->schemaMember(...), self::SCHEMA_ORDER)),
+            $this->schemaResidual ??= $this->schemaResidual(...),
+        );
     }
 
     /**
-     * One member {@see SCHEMA_ORDER} names, canonicalised for the position its keyword sits at.
-     * Everything else is data the schema states about instances, or prose about it.
+     * The handler that canonicalises one member {@see SCHEMA_ORDER} names, for the position its keyword
+     * sits at. Everything else is data the schema states about instances, or prose about it.
+     *
+     * @return Closure(mixed): mixed
      */
-    private function schemaMember(string $keyword, mixed $value): mixed
+    private function schemaMember(string $keyword): Closure
     {
         $position = SchemaKeywords::positionOf($keyword);
 
         if ($position !== null) {
-            return $this->subschema($position, $value);
+            return fn (mixed $v): mixed => $this->subschema($position, $v);
         }
 
         return match ($keyword) {
-            'x-docuccino' => $this->canonicalizeDocuccino($value),
-            'externalDocs' => $this->canonicalizeExternalDocs($value),
-            'enum' => $this->canonicalizeValueList($value),
-            'required' => $this->canonicalizeStringList($value),
-            'const', 'default', 'discriminator', 'example', 'examples' => $this->canonicalizeGeneric($value),
-            default => $this->keep($value),
+            'x-docuccino' => $this->canonicalizeDocuccino(...),
+            'externalDocs' => $this->canonicalizeExternalDocs(...),
+            'enum' => $this->canonicalizeValueList(...),
+            'required' => $this->canonicalizeStringList(...),
+            'const', 'default', 'discriminator', 'example', 'examples' => $this->canonicalizeGeneric(...),
+            default => $this->keep(...),
         };
     }
 
@@ -631,31 +636,31 @@ final class Canonicalizer
      */
     private function canonicalizeDocuccino(mixed $node): array|stdClass
     {
-        return $this->object($node, fn (array $xuir) => $this->build($xuir, [
+        return $this->object($node, $this->handlers['docuccino'] ??= [
             'id' => $this->keep(...),
             'provenance' => fn (mixed $v): mixed => $this->mapList($v, $this->canonicalizeProvenanceRecord(...)),
-            'mock' => fn (mixed $v): mixed => $this->object($v, fn (array $mock) => $this->build($mock, [
+            'mock' => fn (mixed $v): mixed => $this->object($v, $this->handlers['docuccino.mock'] ??= [
                 'faker' => $this->keep(...),
                 'seedGroup' => $this->keep(...),
-            ])),
-            'document' => fn (mixed $v): mixed => $this->object($v, fn (array $doc) => $this->build($doc, [
+            ]),
+            'document' => fn (mixed $v): mixed => $this->object($v, $this->handlers['docuccino.document'] ??= [
                 'id' => $this->keep(...),
                 'configHash' => $this->keep(...),
                 'contentHash' => $this->keep(...),
-            ])),
-            'generator' => fn (mixed $v): mixed => $this->object($v, fn (array $gen) => $this->build($gen, [
+            ]),
+            'generator' => fn (mixed $v): mixed => $this->object($v, $this->handlers['docuccino.generator'] ??= [
                 'name' => $this->keep(...),
                 'version' => $this->keep(...),
                 'specVersion' => $this->keep(...),
                 'schema' => $this->keep(...),
-            ])),
-            'content' => fn (mixed $v): mixed => $this->object($v, fn (array $content) => $this->build($content, [
+            ]),
+            'content' => fn (mixed $v): mixed => $this->object($v, $this->handlers['docuccino.content'] ??= [
                 'pages' => fn (mixed $p): mixed => $this->mapList($p, $this->canonicalizePage(...)),
                 'nav' => fn (mixed $n): mixed => $this->mapList($n, $this->canonicalizeNavNode(...)),
-            ])),
+            ]),
             'workflows' => fn (mixed $v): mixed => $this->mapList($v, $this->canonicalizeWorkflow(...)),
             'diagnostics' => fn (mixed $v): mixed => $this->mapList($v, $this->canonicalizeDiagnostic(...)),
-        ]));
+        ]);
     }
 
     /**
@@ -667,14 +672,14 @@ final class Canonicalizer
      */
     private function canonicalizeWorkflow(mixed $node): array|stdClass
     {
-        return $this->object($node, fn (array $workflow) => $this->build($workflow, [
+        return $this->object($node, $this->handlers['workflow'] ??= [
             'id' => $this->keep(...),
             'summary' => $this->keep(...),
             'description' => $this->keep(...),
             'inputs' => fn (mixed $v): mixed => $this->subschema(SchemaKeywords::POSITION_SCHEMA, $v),
             'steps' => fn (mixed $v): mixed => $this->mapList($v, $this->canonicalizeWorkflowStep(...)),
             'outputs' => fn (mixed $v): mixed => $this->sortedMap($v, $this->keep(...)),
-        ]));
+        ]);
     }
 
     /**
@@ -685,21 +690,21 @@ final class Canonicalizer
      */
     private function canonicalizeWorkflowStep(mixed $node): array|stdClass
     {
-        return $this->object($node, fn (array $step) => $this->build($step, [
+        return $this->object($node, $this->handlers['workflowStep'] ??= [
             'id' => $this->keep(...),
             'operation' => $this->keep(...),
             'description' => $this->keep(...),
-            'parameters' => fn (mixed $v): mixed => $this->mapList($v, fn (mixed $parameter): mixed => $this->object($parameter, fn (array $p) => $this->build($p, [
+            'parameters' => fn (mixed $v): mixed => $this->mapList($v, fn (mixed $parameter): mixed => $this->object($parameter, $this->handlers['workflowStep.parameters'] ??= [
                 'name' => $this->keep(...),
                 'in' => $this->keep(...),
                 'value' => $this->canonicalizeGeneric(...),
-            ]))),
-            'body' => fn (mixed $v): mixed => $this->object($v, fn (array $body) => $this->build($body, [
+            ])),
+            'body' => fn (mixed $v): mixed => $this->object($v, $this->handlers['workflowStep.body'] ??= [
                 'contentType' => $this->keep(...),
                 'payload' => $this->canonicalizeGeneric(...),
-            ])),
+            ]),
             'outputs' => fn (mixed $v): mixed => $this->sortedMap($v, $this->keep(...)),
-        ]));
+        ]);
     }
 
     /**
@@ -707,18 +712,18 @@ final class Canonicalizer
      */
     private function canonicalizeProvenanceRecord(mixed $node): array|stdClass
     {
-        return $this->object($node, fn (array $record) => $this->build($record, [
+        return $this->object($node, $this->handlers['provenance'] ??= [
             'producer' => $this->keep(...),
             'layer' => $this->keep(...),
             'fields' => $this->canonicalizeStringList(...),
             'source' => $this->canonicalizeSource(...),
             'confidence' => $this->keep(...),
-            'overrode' => fn (mixed $v): mixed => $this->mapList($v, fn (mixed $entry): mixed => $this->object($entry, fn (array $e) => $this->build($e, [
+            'overrode' => fn (mixed $v): mixed => $this->mapList($v, fn (mixed $entry): mixed => $this->object($entry, $this->handlers['provenance.overrode'] ??= [
                 'field' => $this->keep(...),
                 'value' => $this->canonicalizeGeneric(...),
                 'producer' => $this->keep(...),
-            ]))),
-        ]));
+            ])),
+        ]);
     }
 
     /**
@@ -726,11 +731,11 @@ final class Canonicalizer
      */
     private function canonicalizeSource(mixed $node): array|stdClass
     {
-        return $this->object($node, fn (array $source) => $this->build($source, [
+        return $this->object($node, $this->handlers['source'] ??= [
             'file' => $this->keep(...),
             'line' => $this->keep(...),
             'symbol' => $this->keep(...),
-        ]));
+        ]);
     }
 
     /**
@@ -738,14 +743,14 @@ final class Canonicalizer
      */
     private function canonicalizeDiagnostic(mixed $node): array|stdClass
     {
-        return $this->object($node, fn (array $diagnostic) => $this->build($diagnostic, [
+        return $this->object($node, $this->handlers['diagnostic'] ??= [
             'severity' => $this->keep(...),
             'code' => $this->keep(...),
             'message' => $this->keep(...),
             'source' => $this->canonicalizeSource(...),
             'routeSignature' => $this->keep(...),
             'help' => $this->keep(...),
-        ]));
+        ]);
     }
 
     /**
@@ -753,7 +758,7 @@ final class Canonicalizer
      */
     private function canonicalizePage(mixed $node): array|stdClass
     {
-        return $this->object($node, fn (array $page) => $this->build($page, [
+        return $this->object($node, $this->handlers['page'] ??= [
             'id' => $this->keep(...),
             'slug' => $this->keep(...),
             'title' => $this->keep(...),
@@ -762,7 +767,7 @@ final class Canonicalizer
             'tags' => $this->canonicalizeStringList(...),
             'content' => $this->keep(...),
             'provenance' => fn (mixed $v): mixed => $this->mapList($v, $this->canonicalizeProvenanceRecord(...)),
-        ]));
+        ]);
     }
 
     /**
@@ -773,12 +778,12 @@ final class Canonicalizer
      */
     private function canonicalizeNavNode(mixed $node): array|stdClass
     {
-        return $this->object($node, fn (array $navNode) => $this->build($navNode, [
+        return $this->object($node, $this->handlers['navNode'] ??= [
             'type' => $this->keep(...),
             'ref' => $this->keep(...),
             'title' => $this->keep(...),
             'children' => fn (mixed $v): mixed => $this->mapList($v, $this->canonicalizeNavNode(...)),
-        ]));
+        ]);
     }
 
     /**
@@ -799,7 +804,7 @@ final class Canonicalizer
             }
 
             $canonical = $requirement;
-            uksort($canonical, $this->compareKeys(...));
+            ksort($canonical, SORT_STRING);
 
             $key = json_encode($canonical);
             $key = is_string($key) ? $key : '';
@@ -881,7 +886,7 @@ final class Canonicalizer
             return new stdClass;
         }
 
-        uksort($node, $this->compareKeys(...));
+        ksort($node, SORT_STRING);
 
         $out = [];
         $index = 0;
@@ -908,7 +913,7 @@ final class Canonicalizer
             return array_map($this->canonicalizeGeneric(...), $node);
         }
 
-        uksort($node, $this->compareKeys(...));
+        ksort($node, SORT_STRING);
 
         $out = [];
         foreach ($node as $key => $value) {
@@ -999,7 +1004,7 @@ final class Canonicalizer
         }
 
         $sorted = array_keys($names);
-        usort($sorted, $this->compareKeys(...));
+        sort($sorted, SORT_STRING);
 
         return $sorted;
     }

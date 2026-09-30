@@ -103,6 +103,23 @@ final class ConfigValues
     }
 
     /**
+     * A whole number, refused when the value is anything else — a quoted numeral included — and then read as
+     * `$refused`, the built-in default where that is null. Null when nothing is written, whatever `$refused` is.
+     */
+    public function wholeNumber(string $path, ?int $refused = null): ?int
+    {
+        $value = $this->find($path);
+
+        if ($value === null || is_int($value)) {
+            return $value;
+        }
+
+        $this->refuse($path, ConfiguredValue::described($value), 'a whole number', self::fallback($refused), 'Write it unquoted, as a whole number: `4`, not `\'4\'` or `4.0`.');
+
+        return $refused;
+    }
+
+    /**
      * A list, refused when the value is not one. The ENTRIES are the caller's to read: a `servers` entry
      * is an OAS Server Object and an `exclude` entry is a glob, and there is no one reading of both.
      *
@@ -259,7 +276,7 @@ final class ConfigValues
      * typed reads say it and a second phrasing that disagreed with the first is exactly the drift this
      * wording exists to prevent.
      */
-    private static function fallback(?string $default): string
+    private static function fallback(string|int|null $default): string
     {
         return $default === null ? 'the built-in default' : ConfiguredValue::rendered($default);
     }

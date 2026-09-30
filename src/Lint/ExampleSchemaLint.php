@@ -11,7 +11,6 @@ use Docuccino\Core\Contract\Examples\ExampleFinding;
 use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
 use Docuccino\Core\Extensions\Context\DocumentContext;
-use Docuccino\Core\Extensions\Contracts\DocumentTransformer;
 use Docuccino\Core\Extensions\Document\UirDocumentDraft;
 use Docuccino\Core\Extensions\Ordering\ExtensionOrder;
 use Docuccino\Core\Extensions\Ordering\Priorities;
@@ -39,7 +38,7 @@ use Docuccino\Core\Extensions\Ordering\Priorities;
  * example, and the one the author must fix first, since everything under that node went unread.
  */
 #[ExtensionOrder(priority: Priorities::LAST)]
-final class ExampleSchemaLint implements DocumentTransformer
+final class ExampleSchemaLint implements DocumentLint
 {
     /** Past this the message stops being a diagnostic and starts being a report. */
     private const int REASONS = 3;

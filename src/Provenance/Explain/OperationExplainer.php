@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Docuccino\Core\Provenance\Explain;
 
 use Docuccino\Core\Contract\Pointer;
+use Docuccino\Core\Document\DocumentMembers;
 use Docuccino\Core\Patch\Contribution;
 use Docuccino\Core\Patch\Layer;
 use Docuccino\Core\Provenance\OverrodeEntry;
@@ -78,17 +79,22 @@ final class OperationExplainer
     }
 
     /**
+     * Members are read by {@see DocumentMembers}: the extension member is metadata about this node rather
+     * than a node of its own, and a pointer a value states is payload rather than a component this
+     * operation is built from, so it is not followed.
+     *
      * @param  array<string, mixed>  $document
      * @param  array<string, mixed>  $node
      * @param  string  $childPrefix  what a child's label is built on — empty under the operation, so
      *                               the labels read as `responses.201` rather than `operation.responses.201`
      * @param  list<ExplainedNode>  $nodes
      * @param  list<string>  $refs
+     * @param  ?string  $inNameMap  the name map $node is, or null where its keys are keywords
      */
-    private function walk(array $document, array $node, string $label, string $childPrefix, string $pointer, array &$nodes, array &$refs): void
+    private function walk(array $document, array $node, string $label, string $childPrefix, string $pointer, array &$nodes, array &$refs, ?string $inNameMap = null): void
     {
-        $ref = self::refOf($node);
-        $trails = $this->trails($document, $node, $ref);
+        $ref = $inNameMap === null ? self::refOf($node) : null;
+        $trails = $inNameMap === null ? $this->trails($document, $node, $ref) : [];
 
         if ($trails !== []) {
             $nodes[] = new ExplainedNode($label, $pointer, $trails, $ref, self::factsOf($node));
@@ -99,12 +105,11 @@ final class OperationExplainer
         }
 
         foreach ($node as $key => $value) {
-            // The extension member is metadata about this node, not a node of its own.
-            if ($key === 'x-docuccino' || ! is_array($value)) {
+            $key = (string) $key;
+
+            if (! is_array($value) || DocumentMembers::holdsData($key, $value, $inNameMap)) {
                 continue;
             }
-
-            $key = (string) $key;
 
             if (array_is_list($value)) {
                 foreach ($value as $index => $child) {
@@ -121,7 +126,7 @@ final class OperationExplainer
             }
 
             /** @var array<string, mixed> $value */
-            $this->walk($document, $value, self::join($childPrefix, $key), self::join($childPrefix, $key), Pointer::append($pointer, $key), $nodes, $refs);
+            $this->walk($document, $value, self::join($childPrefix, $key), self::join($childPrefix, $key), Pointer::append($pointer, $key), $nodes, $refs, DocumentMembers::nameMap($key, $inNameMap));
         }
     }
 

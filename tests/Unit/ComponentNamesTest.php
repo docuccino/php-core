@@ -221,6 +221,85 @@ it('rewrites references through a rename map, and only in the bucket named', fun
         ->and(ComponentNames::rename($node, []))->toBe($node);
 });
 
+/*
+ * A `$ref` is a reference only where the document makes one. Inside a value the document STATES — an
+ * example, a default, a `const`, an `enum` member, an Example Object's `value` — it is part of the
+ * payload, as an API serving schema documents sends it, and a client comparing a response with the
+ * example gets back the pointer the server wrote. Rewriting it there publishes an example the server
+ * never sends, and names whichever class registered first under the contested name.
+ */
+$pointer = ['$ref' => '#/components/schemas/Old'];
+
+it('leaves a pointer a stated value carries exactly as the value states it', function (array $node): void {
+    expect(ComponentNames::rename($node, ['Old' => 'New']))->toBe($node)
+        ->and(ComponentNames::referenced($node))->toBe([]);
+})->with([
+    'a schema\'s example' => [['type' => 'object', 'example' => ['name' => 'user', 'schema' => $pointer]]],
+    'a schema\'s default' => [['type' => 'object', 'default' => $pointer]],
+    'a schema\'s const' => [['const' => $pointer]],
+    'an enum member' => [['enum' => [$pointer]]],
+    'a schema\'s examples' => [['examples' => [$pointer]]],
+    'a media type\'s example' => [['content' => ['application/json' => ['schema' => ['type' => 'object'], 'example' => $pointer]]]],
+    'an Example Object\'s value' => [['content' => ['application/json' => ['examples' => ['stored' => ['value' => $pointer]]]]]],
+    'an Example Object\'s dataValue' => [['content' => ['application/json' => ['examples' => ['stored' => ['dataValue' => $pointer]]]]]],
+    'a parameter\'s example' => [['parameters' => [['name' => 'shape', 'in' => 'query', 'schema' => ['type' => 'object'], 'example' => $pointer]]]],
+    'a header\'s example' => [['headers' => ['X-Shape' => ['schema' => ['type' => 'object'], 'example' => $pointer]]]],
+    'a shared Example Object' => [['components' => ['examples' => ['Stored' => ['value' => ['fields' => [$pointer]]]]]]],
+]);
+
+/*
+ * And a member only SPELLED like one of those is a node like any other: a property called `example`,
+ * the `default` response. A pointer there is a reference, and it follows the component it names — as
+ * does one in the provenance a node records, which states a shape this document published under the
+ * name it has now, and one in an extension, whose vocabulary is its own to define.
+ */
+it('renames a pointer behind a member only spelled like a stated value', function (array $node, array $renamed): void {
+    expect(ComponentNames::rename($node, ['Old' => 'New']))->toBe($renamed)
+        ->and(array_values(array_unique(ComponentNames::referenced($node))))->toBe(['Old']);
+})->with([
+    'a property named example' => [
+        ['properties' => ['example' => $pointer]],
+        ['properties' => ['example' => ['$ref' => '#/components/schemas/New']]],
+    ],
+    'properties named after every other stated value' => [
+        ['properties' => ['default' => $pointer, 'const' => $pointer, 'enum' => $pointer, 'examples' => $pointer, 'value' => $pointer, 'dataValue' => $pointer]],
+        ['properties' => array_fill_keys(['default', 'const', 'enum', 'examples', 'value', 'dataValue'], ['$ref' => '#/components/schemas/New'])],
+    ],
+    'the default response' => [
+        ['responses' => ['default' => ['content' => ['application/json' => ['schema' => $pointer]]]]],
+        ['responses' => ['default' => ['content' => ['application/json' => ['schema' => ['$ref' => '#/components/schemas/New']]]]]],
+    ],
+    'a component named example' => [
+        ['components' => ['schemas' => ['example' => ['items' => $pointer]]]],
+        ['components' => ['schemas' => ['example' => ['items' => ['$ref' => '#/components/schemas/New']]]]],
+    ],
+    'a discriminator mapping' => [
+        ['oneOf' => [$pointer], 'discriminator' => ['propertyName' => 'kind', 'mapping' => ['old' => '#/components/schemas/Old']]],
+        ['oneOf' => [['$ref' => '#/components/schemas/New']], 'discriminator' => ['propertyName' => 'kind', 'mapping' => ['old' => '#/components/schemas/New']]],
+    ],
+    'the provenance a node records' => [
+        ['type' => 'object', 'x-docuccino' => ['provenance' => [['producer' => 'integration:pagination', 'layer' => 'integration', 'fields' => ['properties'], 'overrode' => [['field' => 'properties', 'value' => ['data' => $pointer], 'producer' => 'inference']]]]]],
+        ['type' => 'object', 'x-docuccino' => ['provenance' => [['producer' => 'integration:pagination', 'layer' => 'integration', 'fields' => ['properties'], 'overrode' => [['field' => 'properties', 'value' => ['data' => ['$ref' => '#/components/schemas/New']], 'producer' => 'inference']]]]]],
+    ],
+    'an extension' => [
+        ['x-webhooks' => ['ping' => ['post' => ['requestBody' => ['content' => ['application/json' => ['schema' => $pointer]]]]]]],
+        ['x-webhooks' => ['ping' => ['post' => ['requestBody' => ['content' => ['application/json' => ['schema' => ['$ref' => '#/components/schemas/New']]]]]]]],
+    ],
+]);
+
+it('reads the references a node makes by the walk that renames them', function (): void {
+    $node = [
+        'properties' => ['a' => ['$ref' => '#/components/schemas/A'], 'b' => ['items' => ['$ref' => '#/components/schemas/B']]],
+        'example' => ['a' => ['$ref' => '#/components/schemas/C']],
+        'x-docuccino' => ['provenance' => [['overrode' => [['field' => 'items', 'value' => ['$ref' => '#/components/schemas/D']]]]]],
+        'allOf' => [['$ref' => '#/components/responses/E'], ['$ref' => '#/components/schemas/A']],
+    ];
+
+    // In the order the walk meets them, repeats kept: a caller queueing them keeps its own visited set.
+    expect(ComponentNames::referenced($node))->toBe(['A', 'B', 'D', 'A'])
+        ->and(ComponentNames::referenced($node, 'responses'))->toBe(['E']);
+});
+
 it('rekeys a bucket through a rename map, leaving unnamed entries where they are', function (): void {
     expect(ComponentNames::rekey(['Old' => 1, 'Kept' => 2], ['Old' => 'New']))->toBe(['New' => 1, 'Kept' => 2])
         ->and(ComponentNames::rekey(['Old' => 1], []))->toBe(['Old' => 1]);

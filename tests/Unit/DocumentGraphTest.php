@@ -43,3 +43,55 @@ it('is safe to call twice', function (): void {
 
     expect(DocumentGraph::without($once, ['paths', '/a', 'get']))->toBe($once);
 });
+
+/*
+ * Whether a node reaches an identity is a question about what it PUBLISHES. A pointer a value states —
+ * an example, a default, a schema document an API serves — publishes nothing, and neither does the
+ * provenance a node records about a shape a higher layer displaced. Reading either as reach makes a
+ * scoped version change fork operations that never carried the shape, and expand a pointer an example
+ * states into the shape it spells.
+ */
+$reachable = [
+    'components' => ['schemas' => [
+        'Tree' => ['x-docuccino' => ['id' => 'sch:v1:treetreetreetree'], 'type' => 'object'],
+    ]],
+];
+
+it('reaches an identity through what a node publishes', function (array $node) use ($reachable): void {
+    $reaches = DocumentGraph::componentsReaching($reachable, 'sch:v1:treetreetreetree');
+
+    expect(DocumentGraph::nodeReaches($node, 'sch:v1:treetreetreetree', $reaches))->toBeTrue();
+})->with([
+    'a pointer at the component' => [['schema' => ['$ref' => '#/components/schemas/Tree']]],
+    'a property named example' => [['schema' => ['properties' => ['example' => ['$ref' => '#/components/schemas/Tree']]]]],
+    'the default response' => [['responses' => ['default' => ['content' => ['application/json' => ['schema' => ['$ref' => '#/components/schemas/Tree']]]]]]],
+    'the identity itself' => [['schema' => ['x-docuccino' => ['id' => 'sch:v1:treetreetreetree'], 'type' => 'object']]],
+]);
+
+it('reaches nothing through a value a node states, or through the provenance it records', function (array $node) use ($reachable): void {
+    $reaches = DocumentGraph::componentsReaching($reachable, 'sch:v1:treetreetreetree');
+
+    expect(DocumentGraph::nodeReaches($node, 'sch:v1:treetreetreetree', $reaches))->toBeFalse();
+})->with([
+    'a media type\'s example' => [['content' => ['application/json' => ['schema' => ['type' => 'object'], 'example' => ['schema' => ['$ref' => '#/components/schemas/Tree']]]]]],
+    'an Example Object\'s value' => [['content' => ['application/json' => ['examples' => ['one' => ['value' => ['$ref' => '#/components/schemas/Tree']]]]]]],
+    'a schema\'s default' => [['schema' => ['type' => 'object', 'default' => ['$ref' => '#/components/schemas/Tree']]]],
+    'an enum member' => [['schema' => ['enum' => [['$ref' => '#/components/schemas/Tree']]]]],
+    'a displaced shape the provenance records' => [['schema' => ['type' => 'object', 'x-docuccino' => ['provenance' => [['producer' => 'attribute', 'layer' => 'attribute', 'fields' => ['properties'], 'overrode' => [['field' => 'properties', 'value' => ['tree' => ['$ref' => '#/components/schemas/Tree']], 'producer' => 'inference']]]]]]]],
+]);
+
+it('closes component reach over the pointers components publish, not the values they state', function (): void {
+    $doc = [
+        'components' => ['schemas' => [
+            'Tree' => ['x-docuccino' => ['id' => 'sch:v1:treetreetreetree'], 'type' => 'object'],
+            'Forest' => ['type' => 'object', 'properties' => ['trees' => ['type' => 'array', 'items' => ['$ref' => '#/components/schemas/Tree']]]],
+            'Catalogue' => ['type' => 'object', 'default' => ['schema' => ['$ref' => '#/components/schemas/Tree']]],
+        ]],
+    ];
+
+    expect(DocumentGraph::componentsReaching($doc, 'sch:v1:treetreetreetree'))->toBe([
+        '#/components/schemas/Tree' => true,
+        '#/components/schemas/Forest' => true,
+        '#/components/schemas/Catalogue' => false,
+    ]);
+});

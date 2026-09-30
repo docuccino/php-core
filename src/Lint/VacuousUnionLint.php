@@ -8,7 +8,6 @@ use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
 use Docuccino\Core\Document\DocumentMembers;
 use Docuccino\Core\Extensions\Context\DocumentContext;
-use Docuccino\Core\Extensions\Contracts\DocumentTransformer;
 use Docuccino\Core\Extensions\Document\UirDocumentDraft;
 use Docuccino\Core\Extensions\Ordering\ExtensionOrder;
 use Docuccino\Core\Extensions\Ordering\Priorities;
@@ -24,7 +23,7 @@ use Docuccino\Core\Extensions\Ordering\Priorities;
  * @phpstan-type VacuousUnion array{pointer: string, allEmpty: bool}
  */
 #[ExtensionOrder(priority: Priorities::LAST)]
-final class VacuousUnionLint implements DocumentTransformer
+final class VacuousUnionLint implements DocumentLint
 {
     public function __construct(
         private readonly LintRuleOptions $options = new LintRuleOptions,

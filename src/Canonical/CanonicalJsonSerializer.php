@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Canonical;
 
+use Closure;
 use Docuccino\Core\Support\Json;
 use Docuccino\Core\Support\JsonValue;
 use JsonException;
@@ -34,9 +35,75 @@ final class CanonicalJsonSerializer
 
     private const int ENCODE_FLAGS = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR;
 
+    /**
+     * `json_encode` escapes every newline inside a string, so each one it writes starts a line of indent,
+     * four spaces a level, and nothing else in its output does. `(*LF)` holds PCRE to reading only that as
+     * a newline, whatever it was built to read: one built to read any would find NEL in the second byte of `Å`.
+     */
+    private const string REINDENT = '/(*LF)(?:^|\G) {4}/m';
+
     public function serialize(mixed $value): string
     {
-        return $this->encode($value, 0)."\n";
+        return $this->native($value) ?? $this->encode($value, 0)."\n";
+    }
+
+    /**
+     * The same bytes from `json_encode`, which writes them in C rather than a call per node, for a value
+     * {@see plain()} admits; null for anything else, which {@see encode()} then writes or refuses.
+     */
+    private function native(mixed $value): ?string
+    {
+        if (! $this->plain($value, 0)) {
+            return null;
+        }
+
+        try {
+            $encoded = $this->shortestFloats(
+                static fn (): string => json_encode($value, self::ENCODE_FLAGS | JSON_PRETTY_PRINT, self::MAX_DEPTH),
+            );
+        } catch (JsonException) {
+            // A float or a string with no JSON form, which the walk refuses in its own words.
+            return null;
+        }
+
+        $indented = preg_replace(self::REINDENT, self::INDENT, $encoded);
+
+        return $indented === null ? null : $indented."\n";
+    }
+
+    /**
+     * Whether `json_encode` reads the value as {@see encode()} does: arrays, scalars, and `stdClass` itself
+     * with no member named from NUL, which it drops, within {@see MAX_DEPTH}. Like the walk it asks each
+     * node its type and nothing more, so an object it declines is never called into or looked inside; the
+     * type tests are qualified so each compiles to the check it names, not a lookup per node.
+     */
+    private function plain(mixed $value, int $depth): bool
+    {
+        if (! \is_array($value)) {
+            if (! \is_object($value) || $value::class !== stdClass::class) {
+                return \is_scalar($value) || $value === null;
+            }
+
+            $value = (array) $value;
+
+            foreach (array_keys($value) as $name) {
+                if (str_starts_with((string) $name, "\0")) {
+                    return false;
+                }
+            }
+        }
+
+        if ($depth >= self::MAX_DEPTH) {
+            return false;
+        }
+
+        foreach ($value as $member) {
+            if (! \is_scalar($member) && ! $this->plain($member, $depth + 1)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
@@ -75,12 +142,8 @@ final class CanonicalJsonSerializer
     }
 
     /**
-     * `json_encode`'s float formatting follows the ambient `serialize_precision`, so we pin it to
-     * `-1` (shortest round-trip) for the encode and restore it — the bytes come out the same
-     * whatever the host is configured with.
-     *
-     * Side effect: an integer-valued float loses its decimal point (`10.0` → `10`), so it's
-     * byte-identical to the int `10`. The canonical form doesn't distinguish the two.
+     * An integer-valued float loses its decimal point (`10.0` → `10`), so it's byte-identical to the
+     * int `10`. The canonical form doesn't distinguish the two.
      */
     private function encodeFloat(float $value): string
     {
@@ -88,19 +151,31 @@ final class CanonicalJsonSerializer
             throw new RuntimeException('Non-finite floats cannot be serialised to JSON.');
         }
 
+        try {
+            return $this->shortestFloats(static fn (): string => json_encode($value, self::ENCODE_FLAGS));
+        } catch (JsonException $e) {
+            throw new RuntimeException('Failed to encode float.', previous: $e);
+        }
+    }
+
+    /**
+     * `json_encode`'s float formatting follows the ambient `serialize_precision`, so both writers run it
+     * pinned to `-1` (shortest round-trip) and restore it — the bytes come out the same whatever the host
+     * is configured with.
+     *
+     * @param  Closure(): string  $encode
+     */
+    private function shortestFloats(Closure $encode): string
+    {
         $previous = ini_set('serialize_precision', '-1');
 
         try {
-            $encoded = json_encode($value, self::ENCODE_FLAGS);
-        } catch (JsonException $e) {
-            throw new RuntimeException('Failed to encode float.', previous: $e);
+            return $encode();
         } finally {
             if (is_string($previous)) {
                 ini_set('serialize_precision', $previous);
             }
         }
-
-        return $encoded;
     }
 
     private function encodeString(string $value): string

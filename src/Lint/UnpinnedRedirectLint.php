@@ -8,7 +8,6 @@ use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
 use Docuccino\Core\Draft\OperationDraft;
 use Docuccino\Core\Extensions\Context\DocumentContext;
-use Docuccino\Core\Extensions\Contracts\DocumentTransformer;
 use Docuccino\Core\Extensions\Document\UirDocumentDraft;
 use Docuccino\Core\Extensions\Ordering\ExtensionOrder;
 use Docuccino\Core\Extensions\Ordering\Priorities;
@@ -29,7 +28,7 @@ use Docuccino\Core\Extensions\Ordering\Priorities;
  * Diagnostics only, and pinned to run last so what it reads is what will be emitted.
  */
 #[ExtensionOrder(priority: Priorities::LAST)]
-final class UnpinnedRedirectLint implements DocumentTransformer
+final class UnpinnedRedirectLint implements DocumentLint
 {
     private const string RANGE = OperationDraft::REDIRECT_RANGE;
 

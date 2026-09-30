@@ -20,6 +20,7 @@ it('refuses a wrong type and answers the default it names', function (string $ya
 
     $answer = match ($type) {
         'string' => $values->string('setting', $default),
+        'number' => $values->wholeNumber('setting', $default),
         default => $values->entries('setting'),
     };
 
@@ -56,6 +57,17 @@ it('refuses a wrong type and answers the default it names', function (string $ya
     'text where a list belongs' => ["setting: app\n", 'entries', null, null, 'the text "app"', 'a list'],
     'a number where a list belongs' => ["setting: 5\n", 'entries', null, null, 'the whole number 5', 'a list'],
     'a boolean where a list belongs' => ["setting: true\n", 'entries', null, null, 'the boolean true', 'a list'],
+
+    // A count read as the absent value the caller then works out, so a quoted numeral is refused rather
+    // than read — a `'4'` the author meant would otherwise vanish into a default without a word.
+    'a quoted numeral where a whole number belongs' => ["setting: '4'\n", 'number', null, null, 'the text "4"', 'a whole number'],
+    'a fraction where a whole number belongs' => ["setting: 2.5\n", 'number', null, null, 'the decimal number 2.5', 'a whole number'],
+    'a word where a whole number belongs' => ["setting: auto\n", 'number', null, null, 'the text "auto"', 'a whole number'],
+    'a list where a whole number belongs' => ["setting: [4]\n", 'number', null, null, 'a list', 'a whole number'],
+    // A caller whose refused value is NOT its built-in default names what it reads instead, so the line
+    // an author is sent to agrees with what the build did: a worker count it cannot read builds in one.
+    'a quoted count read as one' => ["setting: '4'\n", 'number', 1, 1, 'the text "4"', 'a whole number'],
+    'a boolean count read as one' => ["setting: false\n", 'number', 1, 1, 'the boolean false', 'a whole number'],
 ]);
 
 it('takes a value of the right type without a word', function (string $yaml, string $type, mixed $expected): void {
@@ -63,6 +75,7 @@ it('takes a value of the right type without a word', function (string $yaml, str
 
     $answer = match ($type) {
         'string' => $values->string('setting', 'fallback'),
+        'number' => $values->wholeNumber('setting'),
         default => $values->entries('setting'),
     };
 
@@ -78,6 +91,8 @@ it('takes a value of the right type without a word', function (string $yaml, str
     'a list of mixed entries' => ["setting:\n  - app\n  - 5\n", 'entries', ['app', 5]],
     // An empty map arrives from YAML as an empty list, so there is nothing left to refuse it by.
     'an empty list' => ["setting: []\n", 'entries', []],
+    'a whole number' => ["setting: 4\n", 'number', 4],
+    'nothing written' => ["other: 1\n", 'number', null],
 ]);
 
 it('answers the default for a setting nobody wrote, saying nothing', function (): void {
@@ -85,6 +100,9 @@ it('answers the default for a setting nobody wrote, saying nothing', function ()
 
     expect($values->string('setting', 'API'))->toBe('API')
         ->and($values->entries('setting'))->toBeNull()
+        // What a refused count is read as is a refusal's answer, not an absent one's: a count nobody wrote
+        // is still the caller's to work out.
+        ->and($values->wholeNumber('setting', 1))->toBeNull()
         ->and($values->diagnostics())->toBe([]);
 });
 

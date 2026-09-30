@@ -132,6 +132,30 @@ it('follows a $ref into the component it names', function (): void {
         ->and($nodes[3]->fields[0]->winner()?->layer)->toBe(Layer::Config);
 });
 
+/*
+ * A pointer the operation only STATES — in an example of a body that is itself a schema document — is
+ * part of the payload, not a component the operation is built from, so its provenance is no part of
+ * how this operation came to say what it says.
+ */
+it('follows no pointer a value the operation states happens to carry', function (): void {
+    $document = $this->document;
+    $document['paths']['/api/invoices']['post']['requestBody'] = ['content' => ['application/json' => [
+        'schema' => ['type' => 'object', 'properties' => ['template' => ['type' => 'object']]],
+        'example' => ['template' => ['$ref' => '#/components/schemas/Invoice']],
+    ]]];
+    $document['components']['schemas']['Invoice'] = [
+        'x-docuccino' => ['provenance' => [['producer' => 'inference', 'layer' => 'inference', 'fields' => ['type']]]],
+        'type' => 'object',
+    ];
+
+    $labels = array_map(
+        static fn (ExplainedNode $node): string => $node->label,
+        (new OperationExplainer)->explain($document, '/api/invoices', 'post'),
+    );
+
+    expect($labels)->toBe(['operation', 'parameters.query:status', 'responses.201', '#/components/responses/Created']);
+});
+
 it('reads nothing from a component that records nothing', function (): void {
     $document = $this->document;
     unset($document['components']['responses']['Created']['x-docuccino']);

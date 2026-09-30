@@ -285,6 +285,23 @@ it('treats every subschema keyword it does not read as undecidable', function ()
         ->and(ChangedFieldExamples::undecidable())->toEqualCanonicalizing(array_values(array_diff($positioned, $read)));
 });
 
+/*
+ * One undecidable keyword holds no schema at all: `dependentRequired`, whose members are lists of
+ * property names (JSON Schema Validation 2020-12 §6.5.4). Nothing under it can be the renamed schema,
+ * and a `$ref` written in it is a property NAME rather than a pointer, so it stands over nothing and
+ * drops nothing. The keywords that do hold a schema are held to the drop, the string-list maps to
+ * leaving the example alone, and the two halves are held to being every undecidable keyword between
+ * them.
+ */
+$holdingSchemas = array_values(array_diff(ChangedFieldExamples::undecidable(), SchemaKeywords::at(SchemaKeywords::POSITION_STRING_LIST_MAP)));
+$holdingNames = array_values(array_intersect(ChangedFieldExamples::undecidable(), SchemaKeywords::at(SchemaKeywords::POSITION_STRING_LIST_MAP)));
+
+it('divides the undecidable keywords into the ones holding a schema and the ones holding names', function () use ($holdingSchemas, $holdingNames): void {
+    expect($holdingNames)->not->toBe([])
+        ->and($holdingSchemas)->not->toBe([])
+        ->and([...$holdingSchemas, ...$holdingNames])->toEqualCanonicalizing(ChangedFieldExamples::undecidable());
+});
+
 it('drops an example where an undecidable keyword stands over the renamed schema', function (string $keyword): void {
     $reaching = ['$ref' => '#/components/schemas/Form'];
 
@@ -303,4 +320,33 @@ it('drops an example where an undecidable keyword stands over the renamed schema
 
     expect($doc['paths']['/forms']['get']['responses']['200']['content']['application/json'])->not->toHaveKey('example')
         ->and($dropped)->toHaveCount(1);
-})->with(ChangedFieldExamples::undecidable());
+})->with($holdingSchemas);
+
+it('leaves the example beside an undecidable keyword that holds only names', function (string $keyword): void {
+    [$doc, $dropped] = renameFields(renamedDocument([
+        'paths' => ['/forms' => ['get' => ['responses' => ['200' => ['content' => ['application/json' => [
+            'schema' => ['type' => 'object', 'properties' => ['id' => ['type' => 'integer']], $keyword => ['$ref' => '#/components/schemas/Form']],
+            'example' => ['id' => 1, 'title' => 'Onboarding'],
+        ]]]]]]],
+    ]));
+
+    expect($doc['paths']['/forms']['get']['responses']['200']['content']['application/json']['example'] ?? null)->toBe(['id' => 1, 'title' => 'Onboarding'])
+        ->and($dropped)->toBe([]);
+})->with($holdingNames);
+
+/*
+ * A map of subschemas holds them under property names, and a name is whatever the application called
+ * the property — `example` included. Read as keywords, the entry below is a stated value standing over
+ * nothing, and the walk goes on to rename a `title` that `dependentSchemas` may still govern.
+ */
+it('reads the names an undecidable map holds its subschemas under as names', function (string $keyword): void {
+    [$doc, $dropped] = renameFields(renamedDocument([
+        'paths' => ['/forms' => ['get' => ['responses' => ['200' => ['content' => ['application/json' => [
+            'schema' => ['type' => 'object', 'properties' => ['id' => ['type' => 'integer']], $keyword => ['example' => ['$ref' => '#/components/schemas/Form']]],
+            'example' => ['id' => 1, 'title' => 'Onboarding'],
+        ]]]]]]],
+    ]));
+
+    expect($doc['paths']['/forms']['get']['responses']['200']['content']['application/json'])->not->toHaveKey('example')
+        ->and($dropped)->toHaveCount(1);
+})->with(array_values(array_intersect(ChangedFieldExamples::undecidable(), SchemaKeywords::at(SchemaKeywords::POSITION_SCHEMA_MAP))));

@@ -182,6 +182,15 @@ final readonly class FragmentCache
     }
 
     /**
+     * This cache's keys, stored under `$path` and enabled whatever this one is: somewhere the workers of one
+     * build can leave fragments for it to read back, even where the configured store keeps none.
+     */
+    public function writingTo(string $path): self
+    {
+        return new self(true, $path, $this->toolVersion, $this->specVersion, $this->identityVersion);
+    }
+
+    /**
      * @param  list<string>  $dependencyFiles  the ActionAnalysis dependency files for this route
      */
     public function put(string $key, OperationFragment $fragment, array $dependencyFiles): void

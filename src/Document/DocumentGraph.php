@@ -126,25 +126,31 @@ final class DocumentGraph
     }
 
     /**
-     * Whether a node carries the identity itself, or a `$ref` to a component that does.
+     * Whether a node carries the identity itself, or a `$ref` to a component that does — read off what it
+     * PUBLISHES ({@see DocumentMembers}), so neither a pointer a value states nor a displaced shape its
+     * provenance records reaches anything.
      *
      * @param  array<array-key, mixed>  $node
      * @param  array<string, bool>  $reaches  from {@see componentsReaching()}
+     * @param  ?string  $inNameMap  the name map $node is — {@see DocumentMembers::nameMap()} of the member
+     *                              holding it — or null where its keys are keywords
      */
-    public static function nodeReaches(array $node, string $id, array $reaches): bool
+    public static function nodeReaches(array $node, string $id, array $reaches, ?string $inNameMap = null): bool
     {
-        $docuccino = $node['x-docuccino'] ?? null;
+        $docuccino = $inNameMap === null ? ($node['x-docuccino'] ?? null) : null;
         if (is_array($docuccino) && ($docuccino['id'] ?? null) === $id) {
             return true;
         }
 
-        $ref = self::componentRef($node);
+        $ref = $inNameMap === null ? self::componentRef($node) : null;
         if ($ref !== null && ($reaches[$ref] ?? false)) {
             return true;
         }
 
-        foreach ($node as $value) {
-            if (is_array($value) && self::nodeReaches($value, $id, $reaches)) {
+        foreach ($node as $key => $value) {
+            if (is_array($value)
+                && ! DocumentMembers::holdsData((string) $key, $value, $inNameMap)
+                && self::nodeReaches($value, $id, $reaches, DocumentMembers::nameMap((string) $key, $inNameMap))) {
                 return true;
             }
         }
@@ -340,23 +346,25 @@ final class DocumentGraph
     }
 
     /**
-     * Every component a node points at, at any depth, as canonical pointers.
+     * Every component a node points at, at any depth, as canonical pointers — read off what it publishes,
+     * as {@see nodeReaches()} reads it.
      *
      * @param  array<array-key, mixed>  $node
+     * @param  ?string  $inNameMap  the name map $node is, or null where its keys are keywords
      * @return list<string>
      */
-    private static function refsIn(array $node): array
+    private static function refsIn(array $node, ?string $inNameMap = null): array
     {
         $refs = [];
 
-        $ref = self::componentRef($node);
+        $ref = $inNameMap === null ? self::componentRef($node) : null;
         if ($ref !== null) {
             $refs[] = $ref;
         }
 
-        foreach ($node as $value) {
-            if (is_array($value)) {
-                $refs = [...$refs, ...self::refsIn($value)];
+        foreach ($node as $key => $value) {
+            if (is_array($value) && ! DocumentMembers::holdsData((string) $key, $value, $inNameMap)) {
+                $refs = [...$refs, ...self::refsIn($value, DocumentMembers::nameMap((string) $key, $inNameMap))];
             }
         }
 

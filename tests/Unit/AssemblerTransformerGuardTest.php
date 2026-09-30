@@ -68,7 +68,7 @@ it('turns a throwing transformer into an error diagnostic and still assembles th
     $result = assembleWithTransformers([throwingTransformer('Everything is on fire')]);
 
     $failed = array_values(array_filter(
-        $result->diagnostics,
+        $result->diagnostics(),
         static fn (Diagnostic $d): bool => $d->code === 'document.transformer-failed',
     ));
 
@@ -97,7 +97,7 @@ it('runs the transformers after the one that threw', function (): void {
         reportingTransformer('demo.after'),
     ]);
 
-    expect(array_column($result->diagnostics, 'code'))
+    expect(array_column($result->diagnostics(), 'code'))
         ->toContain('demo.before', 'document.transformer-failed', 'demo.after');
 });
 
@@ -112,7 +112,7 @@ it('publishes no machine path in the message a failed transformer leaves behind'
     )]);
 
     $failed = array_values(array_filter(
-        $result->diagnostics,
+        $result->diagnostics(),
         static fn (Diagnostic $d): bool => $d->code === 'document.transformer-failed',
     ));
 
@@ -126,7 +126,7 @@ it('names an exception that says nothing by its class', function (): void {
     $result = assembleWithTransformers([throwingTransformer('')]);
 
     $failed = array_values(array_filter(
-        $result->diagnostics,
+        $result->diagnostics(),
         static fn (Diagnostic $d): bool => $d->code === 'document.transformer-failed',
     ));
 

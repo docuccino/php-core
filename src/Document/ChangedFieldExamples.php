@@ -634,7 +634,8 @@ final class ChangedFieldExamples
         foreach (self::undecidable() as $keyword) {
             $branch = $schema[$keyword] ?? null;
 
-            if (is_array($branch) && DocumentGraph::nodeReaches($branch, $this->id, $this->reaches)) {
+            // Read as the member it is: `dependentSchemas` holds a subschema per property NAME.
+            if (is_array($branch) && DocumentGraph::nodeReaches($branch, $this->id, $this->reaches, DocumentMembers::nameMap($keyword, null))) {
                 return false;
             }
         }

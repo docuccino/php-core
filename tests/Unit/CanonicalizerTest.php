@@ -447,3 +447,52 @@ it('cannot see the widening from the spec validator, because the hop that hides 
         ->and((new Validator)->validate($legitimate)->errors)->toBe([])
         ->and($withoutTheHop($legitimate))->toHaveKey('/components/schemas/X/properties');
 });
+
+/*
+ * {@see Canonicalizer::$handlers} states the rule, and this reads it off the source. It finds every use of the
+ * cache however it is written, so a use it cannot read a key from fails the test rather than going unseen.
+ */
+it('keeps every object type its member order under a name no other type uses', function (): void {
+    $guard = static function (string $source): array {
+        $code = array_values(array_filter(PhpToken::tokenize($source), static fn (PhpToken $token): bool => ! $token->isIgnorable()));
+        $keys = [];
+        $unreadable = [];
+
+        foreach ($code as $at => $token) {
+            if ($token->text !== 'handlers' || ! $code[$at - 1]->is([T_OBJECT_OPERATOR, T_NULLSAFE_OBJECT_OPERATOR])) {
+                continue;
+            }
+
+            $use = array_slice($code, $at + 1, 4);
+            $shape = implode(' ', array_map(static fn (PhpToken $part): string => (string) $part->getTokenName(), $use));
+            $literal = $use[1]->text ?? '';
+
+            // A quoted key with no escape in it is the string it spells, whichever quotes it is in.
+            if ($shape === '[ T_CONSTANT_ENCAPSED_STRING ] T_COALESCE_EQUAL' && in_array($literal[0], ["'", '"'], true) && ! str_contains($literal, '\\')) {
+                $keys[] = substr($literal, 1, -1);
+            } else {
+                $unreadable[] = $token->line;
+            }
+        }
+
+        return [
+            'keys' => count($keys),
+            'shared' => array_keys(array_filter(array_count_values($keys), static fn (int $uses): bool => $uses > 1)),
+            'unreadable' => $unreadable,
+        ];
+    };
+
+    $found = $guard((string) file_get_contents((string) (new ReflectionClass(Canonicalizer::class))->getFileName()));
+
+    // Over thirty object types have maps today; finding none would mean the cache moved, not that they went.
+    expect($found['keys'])->toBeGreaterThanOrEqual(30)
+        ->and($found['shared'])->toBe([])
+        ->and($found['unreadable'])->toBe([]);
+
+    // And run on what it has to refuse: one key in both quotes, then a constant key, an escaped one, an isset and a
+    // plain read.
+    expect($guard("<?php \$this->handlers['tag'] ??= []; \$this->handlers[\"tag\"] ??= [];"))
+        ->toBe(['keys' => 2, 'shared' => ['tag'], 'unreadable' => []])
+        ->and($guard("<?php\n\$this->handlers[self::TAG] ??= [];\n\$this->handlers[\"t\\x61g\"] ??= [];\nisset(\$this->handlers['tag']);\nreturn \$this->handlers['tag'];"))
+        ->toBe(['keys' => 0, 'shared' => [], 'unreadable' => [2, 3, 4, 5]]);
+});
