@@ -61,7 +61,10 @@ final class EnumComponent
             $descriptions,
         );
 
-        $description = self::stated($fqcn, $context, $unreadable);
+        // Inline, nothing reads the name or the identity it would be registered under.
+        $unminted = self::hoists($fqcn, $context) ? [] : SchemaIdentity::unreadable($fqcn);
+
+        $description = self::stated($fqcn, $context, [...$unreadable, ...$unminted]);
         if ($description !== null) {
             $schema['description'] = $description;
         }
@@ -83,7 +86,7 @@ final class EnumComponent
      */
     public static function description(string $fqcn, SchemaContext $context): ?string
     {
-        return self::stated($fqcn, $context, EnumReflection::descriptions($fqcn)[1]);
+        return self::stated($fqcn, $context, [...EnumReflection::descriptions($fqcn)[1], ...SchemaIdentity::unreadable($fqcn)]);
     }
 
     /**
@@ -95,8 +98,9 @@ final class EnumComponent
     {
         $context->dependsOn(...DeclarationFiles::of($fqcn));
 
-        // Here for the same reason: a `#[CaseDescription]` PHP cannot build is reported by every producer
-        // that asks about the enum at all, rather than by whichever remembered to.
+        // Here for the same reason: a `#[CaseDescription]` PHP cannot build — or, inline, a `#[SchemaName]`
+        // or `#[SchemaId]` ({@see SchemaIdentity::unreadable()}) — is reported by every producer that asks
+        // about the enum at all, rather than by whichever remembered to.
         foreach ($unreadable as $diagnostic) {
             $context->diagnostic($diagnostic);
         }

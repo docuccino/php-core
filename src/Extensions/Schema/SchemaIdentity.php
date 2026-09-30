@@ -172,6 +172,24 @@ final class SchemaIdentity
         return $facet === '' ? $id : $id.'#'.$facet;
     }
 
+    /**
+     * A report for each `#[SchemaName]`/`#[SchemaId]` PHP cannot construct, for a caller that reaches
+     * the class and mints no component for it. {@see name()} and {@see id()} are read only where one is
+     * minted, and there a broken one fails the build of it; everywhere else nothing reads them, and a
+     * declaration the author wrote would vanish without a word. The first of each, as those two read.
+     *
+     * @return list<Diagnostic>
+     */
+    public static function unreadable(string $fqcn): array
+    {
+        // Only the reports are read, so nothing here publishes on the reader's silence and the shared reader
+        // serves. Neither attribute repeats, so a second declaration fails exactly as the first does.
+        return [
+            ...array_slice(ClassDeclarations::of($fqcn, SchemaName::class)[1], 0, 1),
+            ...array_slice(ClassDeclarations::of($fqcn, SchemaId::class)[1], 0, 1),
+        ];
+    }
+
     /** The `#[SchemaId]` identity, else null (caller defaults to the FQCN). */
     public static function id(string $fqcn): ?string
     {

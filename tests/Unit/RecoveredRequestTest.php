@@ -22,6 +22,7 @@ use Docuccino\Core\Patch\Contribution;
 use Docuccino\Core\Tests\Fixtures\ExampledRequestClass;
 use Docuccino\Core\Tests\Fixtures\MockedRequestClass;
 use Docuccino\Core\Tests\Fixtures\PinnedRequestClass;
+use Docuccino\Core\Tests\Fixtures\UnreadableIdentityRequestClass;
 use Docuccino\Core\Tests\Fixtures\UnreadableRequestClass;
 
 /**
@@ -390,6 +391,95 @@ it('reports a type-level declaration whose arguments its constructor rejects, an
             'The #[BodyParameter] on '.UnreadableRequestClass::class.' could not be instantiated and was ignored.',
             'Its constructor threw TypeError. Check the arguments at that declaration against the attribute\'s constructor.',
         ]]);
+});
+
+/**
+ * At a read verb the rules become query parameters and the type's declarations about a body reach
+ * nothing — but a declaration PHP cannot construct is broken whatever the verb, and the author can fix
+ * it from here. Silence at the read verb left the one type bound only to reads as the one place it was
+ * never said. The healthy declaration beside it is still not written: there is no body to write it to.
+ */
+it('reports a type-level declaration PHP cannot construct at a read verb too, and writes no body', function (string $method): void {
+    $components = new ComponentRegistry;
+    $operation = new OperationDraft;
+
+    (new RecoveredRequest)->apply(
+        $operation,
+        requestContext($components, method: $method),
+        objectSchema(['nickname' => ['type' => 'string']]),
+        'form-request',
+        UnreadableRequestClass::class,
+    );
+
+    expect($operation->resolvedField('requestBody'))->toBeNull()
+        ->and($operation->hasParameter('query', 'nickname'))->toBeTrue()
+        ->and(array_map(static fn ($d): array => [$d->code, $d->message], $components->diagnostics()))->toBe([[
+            'attribute.unreadable',
+            'The #[BodyParameter] on '.UnreadableRequestClass::class.' could not be instantiated and was ignored.',
+        ]]);
+})->with(['GET', 'HEAD']);
+
+it('keeps the type\'s declarations out of what a read verb declares, and its reports with them', function (): void {
+    [$declared, $unreadable] = RecoveredRequest::declaredOn(UnreadableRequestClass::class, requestContext(new ComponentRegistry, method: 'GET'));
+
+    // The report is the class's; the declarations are a body's, and a read verb writes none.
+    expect($declared)->toBe([])
+        ->and(array_map(static fn ($d): string => $d->code, $unreadable))->toBe(['attribute.unreadable']);
+});
+
+/**
+ * A component's name and identity are read where one is minted, and a broken one fails that route
+ * loudly. Where no component is minted — a read verb, or an operation whose own `#[BodyParameter]`
+ * inlines the body — nothing reads them, so without a report here the declaration would vanish.
+ */
+it('reports a component name or identity PHP cannot construct where no component is minted', function (string $method, array $attributes): void {
+    $components = new ComponentRegistry;
+
+    (new RecoveredRequest)->apply(
+        new OperationDraft,
+        requestContext($components, $attributes, $method),
+        objectSchema(['nickname' => ['type' => 'string']]),
+        'form-request',
+        UnreadableIdentityRequestClass::class,
+    );
+
+    expect($components->schemas())->toBe([])
+        ->and(array_map(static fn ($d): array => [$d->code, $d->message], $components->diagnostics()))->toBe([
+            ['attribute.unreadable', 'The #[SchemaName] on '.UnreadableIdentityRequestClass::class.' could not be instantiated and was ignored.'],
+            ['attribute.unreadable', 'The #[SchemaId] on '.UnreadableIdentityRequestClass::class.' could not be instantiated and was ignored.'],
+        ]);
+})->with([
+    'a read verb' => ['GET', []],
+    'an operation-level declaration inlining the body' => ['POST', [new BodyParameter(name: 'extra', type: 'string')]],
+]);
+
+it('still refuses to mint a component under a name PHP cannot construct', function (): void {
+    // The loud half, pinned so the report above never stands in for it: a component published under a
+    // guessed name or identity is one a diff reads as a different schema.
+    (new RecoveredRequest)->apply(
+        new OperationDraft,
+        requestContext(new ComponentRegistry),
+        objectSchema(['nickname' => ['type' => 'string']]),
+        'form-request',
+        UnreadableIdentityRequestClass::class,
+    );
+})->throws(TypeError::class);
+
+it('stands down for a source class that is the route\'s action, whose attribute bag reports it', function (): void {
+    $components = new ComponentRegistry;
+    $context = new RouteContext(
+        route: new RouteDescriptor(['GET'], 'api/things'),
+        actionRef: new ActionRef('', UnreadableRequestClass::class, 'handle'),
+        attributes: new AttributeSet([]),
+        engine: new NullTypeEngine,
+        document: new DocumentConfig('default', []),
+        extensions: new ResolvedExtensions(typeToSchema: DefaultTypeMappers::all()),
+        components: $components,
+    );
+
+    (new RecoveredRequest)->apply(new OperationDraft, $context, objectSchema(['nickname' => ['type' => 'string']]), 'actions', UnreadableRequestClass::class);
+
+    expect($components->diagnostics())->toBe([]);
 });
 
 it('publishes tagged objects only where each branch has a component to be named after', function (string $method, ?string $class, array $attributes, bool $publishes): void {

@@ -19,6 +19,7 @@ use Docuccino\Core\Tests\Fixtures\OverdescribedStatus;
 use Docuccino\Core\Tests\Fixtures\RequestScopedStatus;
 use Docuccino\Core\Tests\Fixtures\SampleStatus;
 use Docuccino\Core\Tests\Fixtures\UnreadableCaseStatus;
+use Docuccino\Core\Tests\Fixtures\UnreadableIdentityStatus;
 
 /**
  * What an ENUM publishes about itself. An enum is a class, so PHP accepts a class-target
@@ -148,3 +149,33 @@ it('reports a case description PHP cannot construct, and lets the case docblock 
             'The #[CaseDescription] on '.UnreadableCaseStatus::class.'::Draft could not be instantiated and was ignored.',
         ]]);
 });
+
+/**
+ * An enum's `#[SchemaName]`/`#[SchemaId]` are read only where it hoists, and there a broken one fails the
+ * build of the component rather than publish it under a guessed name. Inline — the policy off, or a
+ * producer publishing the set in place — nothing reads them, so the author is told there instead.
+ */
+it('reports a component name or identity PHP cannot construct on an enum published inline', function () use ($convert): void {
+    $components = new ComponentRegistry;
+    $schema = $convert(UnreadableIdentityStatus::class, $components, enumComponents: false);
+
+    expect($schema['enum'])->toBe(['draft', 'live'])
+        ->and(array_map(static fn (Diagnostic $d): array => [$d->code, $d->message], $components->diagnostics()))->toBe([
+            ['attribute.unreadable', 'The #[SchemaName] on '.UnreadableIdentityStatus::class.' could not be instantiated and was ignored.'],
+            ['attribute.unreadable', 'The #[SchemaId] on '.UnreadableIdentityStatus::class.' could not be instantiated and was ignored.'],
+        ]);
+});
+
+it('reports it to a producer asking for the inline sentence alone', function (): void {
+    $components = new ComponentRegistry;
+    $converter = new SchemaConverter(DefaultTypeMappers::all(), new NullTypeEngine, $components, new RepresentationPolicy);
+
+    EnumComponent::description(UnreadableIdentityStatus::class, $converter);
+
+    expect(array_map(static fn (Diagnostic $d): string => $d->code, $components->diagnostics()))
+        ->toBe(['attribute.unreadable', 'attribute.unreadable']);
+});
+
+it('still refuses to hoist an enum under a name PHP cannot construct', function () use ($convert): void {
+    $convert(UnreadableIdentityStatus::class, new ComponentRegistry);
+})->throws(TypeError::class);

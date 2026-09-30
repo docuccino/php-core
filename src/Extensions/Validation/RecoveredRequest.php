@@ -75,7 +75,18 @@ final class RecoveredRequest
      */
     public static function publishesVariants(RouteContext $context, ?string $sourceClass): bool
     {
-        return $sourceClass !== null && self::documentsBody($context) && ! self::deviates($context);
+        return self::hoistedClass($context, $sourceClass) !== null;
+    }
+
+    /**
+     * The class this route's body is lifted to a component for, or null where it stays inline: a body
+     * verb, a source class, and no operation-level `#[BodyParameter]` patching it ({@see deviates()}).
+     * The one reading of that decision — the hoist, the tagged branches named after it, and the reports
+     * owed where it is NOT made all ask here, so none can disagree with the component actually minted.
+     */
+    private static function hoistedClass(RouteContext $context, ?string $sourceClass): ?string
+    {
+        return self::documentsBody($context) && ! self::deviates($context) ? $sourceClass : null;
     }
 
     /**
@@ -206,28 +217,28 @@ final class RecoveredRequest
      *
      * - no class, so there is no type anything could be declared about;
      * - a read verb, where the same rules become QUERY parameters ({@see documentsBody()}) and a
-     *   declaration about a body reaches nothing;
+     *   declaration about a body reaches nothing — which {@see UnusableBodyDeclarations} reports;
      * - the source class IS the route's action, where ONE declaration site serves both roles and the
      *   route attribute bag already reads it. The defect this reads for is a declaration on a class the
      *   bag never sees, which is exactly a source class that is not the action.
      *
      * What it reads on the class is {@see ClassDeclarations}'s: the class's own declarations, and one
      * whose constructor rejects its arguments read as absent and handed back as a report — which the one
-     * caller that writes the declarations, {@see declared()}, raises.
+     * caller that writes the declarations, {@see declared()}, raises. The report stands at a read verb
+     * too: a declaration PHP cannot build is broken at every verb, and a type bound only to read routes
+     * is otherwise the one place it is never said.
      *
      * @return array{0: list<BodyParameter>, 1: list<Diagnostic>}
      */
     public static function declaredOn(?string $sourceClass, RouteContext $context): array
     {
-        if ($sourceClass === null || ! self::documentsBody($context)) {
+        if ($sourceClass === null || $sourceClass === $context->actionRef->class) {
             return [[], []];
         }
 
-        if ($sourceClass === $context->actionRef->class) {
-            return [[], []];
-        }
+        [$declared, $unreadable] = ClassDeclarations::of($sourceClass, BodyParameter::class);
 
-        return ClassDeclarations::of($sourceClass, BodyParameter::class);
+        return [self::documentsBody($context) ? $declared : [], $unreadable];
     }
 
     /**
@@ -259,16 +270,24 @@ final class RecoveredRequest
     }
 
     /**
-     * What the source class declares that nothing reads on a type ({@see SchemaClassAttributes}) —
-     * reported here because this is the one place a class is known to be a request TYPE and not the
-     * action, which is the whole difference between a declaration the route bag reads and one it never
-     * sees.
+     * What the source class declares that nothing reads on a type ({@see SchemaClassAttributes}), and
+     * a `#[SchemaName]`/`#[SchemaId]` PHP cannot construct on a body that mints no component — reported
+     * here because this is the one place a class is known to be a request TYPE and not the action, which
+     * is the whole difference between a declaration the route bag reads and one it never sees.
      *
      * @return list<Diagnostic>
      */
     private function unread(string $sourceClass, RouteContext $context): array
     {
-        return $sourceClass === $context->actionRef->class ? [] : SchemaClassAttributes::unread($sourceClass);
+        if ($sourceClass === $context->actionRef->class) {
+            return [];
+        }
+
+        // Where the body is not hoisted the component's name and identity are never read, so one PHP
+        // cannot construct is said here or nowhere; where it is, reading it fails the build loudly.
+        $unminted = self::hoistedClass($context, $sourceClass) === null ? SchemaIdentity::unreadable($sourceClass) : [];
+
+        return [...SchemaClassAttributes::unread($sourceClass), ...$unminted];
     }
 
     /**
@@ -296,8 +315,9 @@ final class RecoveredRequest
             || (is_array($schema['required'] ?? null) && $schema['required'] !== [])
             || self::tagsBody($variants);
 
-        if ($sourceClass !== null && ! self::deviates($context)) {
-            $schema = $this->hoisted($context, $schema, $sourceClass);
+        $class = self::hoistedClass($context, $sourceClass);
+        if ($class !== null) {
+            $schema = $this->hoisted($context, $schema, $class);
         }
 
         $body = ['content' => [$result->mediaType => ['schema' => $schema]]];
@@ -316,11 +336,12 @@ final class RecoveredRequest
      */
     private function bodySchema(RouteContext $context, ValidationSchema $result, ?string $sourceClass): array
     {
-        if ($sourceClass === null || self::deviates($context) || $result->variants === []) {
+        $class = self::hoistedClass($context, $sourceClass);
+        if ($class === null || $result->variants === []) {
             return [$result->withoutVariants()->schema, []];
         }
 
-        [$name, $id] = self::component($sourceClass);
+        [$name, $id] = self::component($class);
 
         return TaggedBranches::apply($result->schema, $result->merged, $result->variants, $context->components, $name, $id);
     }

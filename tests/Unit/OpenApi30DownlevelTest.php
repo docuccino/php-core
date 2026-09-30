@@ -456,6 +456,29 @@ describe('schema dialect conversions', function (): void {
             ['anyOf' => [['type' => 'string'], ['type' => 'integer']], 'nullable' => true],
             ['downlevel.multi-type'],
         ],
+        // 3.0.3: `items` MUST be present beside `type: array`, and a keyword about one type says nothing beside
+        // another — so each typed keyword goes into its own type's branch and nowhere else.
+        'multi type moves each typed keyword into its branch' => [
+            ['type' => ['array', 'object'], 'items' => ['type' => 'string'], 'minItems' => 1, 'additionalProperties' => ['type' => 'string'], 'required' => ['a'], 'description' => 'x'],
+            ['description' => 'x', 'anyOf' => [
+                ['type' => 'array', 'items' => ['type' => 'string'], 'minItems' => 1],
+                ['type' => 'object', 'required' => ['a'], 'additionalProperties' => ['type' => 'string']],
+            ]],
+            ['downlevel.multi-type'],
+        ],
+        'multi type shares a keyword two branches speak about, and drops one neither does' => [
+            ['type' => ['integer', 'number', 'null'], 'minimum' => 0, 'maxLength' => 3, 'enum' => [1, 2.5, null]],
+            ['enum' => [1, 2.5, null], 'anyOf' => [['type' => 'integer', 'minimum' => 0], ['type' => 'number', 'minimum' => 0]], 'nullable' => true],
+            ['downlevel.multi-type'],
+        ],
+        'multi type recurses into what it moved' => [
+            ['type' => ['array', 'object'], 'items' => ['type' => ['string', 'null']], 'additionalProperties' => ['type' => ['string', 'null']]],
+            ['anyOf' => [
+                ['type' => 'array', 'items' => ['type' => 'string', 'nullable' => true]],
+                ['type' => 'object', 'additionalProperties' => ['type' => 'string', 'nullable' => true]],
+            ]],
+            ['downlevel.multi-type'],
+        ],
         'multi type beside a composition is dropped' => [
             ['type' => ['string', 'integer'], 'oneOf' => [['type' => 'string'], ['type' => 'integer']]],
             ['oneOf' => [['type' => 'string'], ['type' => 'integer']]],

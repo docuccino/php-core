@@ -58,6 +58,7 @@ final class DiagnosticDocs
         'server' => 'servers',
         'spatie-data' => 'package-integrations',
         'tags' => 'routes-operations-and-names',
+        'timacdonald-json-api' => 'package-integrations',
         'workflow' => 'workflows',
         'validation' => 'responses-recovered-from-your-code',
         'versioning' => 'api-versions',

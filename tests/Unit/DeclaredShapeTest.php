@@ -228,6 +228,30 @@ it('answers for every keyword it classifies', function (string $keyword, string 
     }
 });
 
+it('names the instance types each keyword speaks about, and none for one that speaks about every type', function (string $keyword): void {
+    // Stated from JSON Schema 2020-12's vocabularies rather than asked of the table: the array and object
+    // applicators and validators apply to their one type, the string and numeric validators to theirs, and
+    // everything else — `type`, `$ref`, the composition keywords, `enum`, `const` — whatever the type.
+    $array = ['items', 'prefixItems', 'additionalItems', 'contains', 'unevaluatedItems', 'maxItems', 'minItems', 'uniqueItems', 'maxContains', 'minContains'];
+    $object = ['properties', 'required', 'additionalProperties', 'patternProperties', 'propertyNames', 'unevaluatedProperties', 'dependentRequired', 'dependentSchemas', 'maxProperties', 'minProperties'];
+    $string = ['maxLength', 'minLength', 'pattern', 'contentEncoding', 'contentMediaType', 'contentSchema'];
+    $numeric = ['multipleOf', 'maximum', 'exclusiveMaximum', 'minimum', 'exclusiveMinimum'];
+
+    expect(SchemaKeywords::typesOf($keyword))->toBe(match (true) {
+        in_array($keyword, $array, true) => ['array'],
+        in_array($keyword, $object, true) => ['object'],
+        in_array($keyword, $string, true) => ['string'],
+        in_array($keyword, $numeric, true) => ['integer', 'number'],
+        // OpenAPI's formats name strings, integers and numbers alike.
+        $keyword === 'format' => ['string', 'integer', 'number'],
+        default => null,
+    });
+})->with(function () {
+    foreach (array_keys(SchemaKeywords::classification()) as $keyword) {
+        yield $keyword => [$keyword];
+    }
+});
+
 it('leaves a keyword it cannot read exactly where it found it', function (string $keyword): void {
     // We do not retract what we cannot read: an unknown keyword survives a declared shape rather than
     // being dropped on a guess about what it meant.

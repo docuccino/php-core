@@ -143,6 +143,28 @@ final class SchemaKeywords
     ];
 
     /**
+     * The shape keywords that speak about one instance type and are ignored beside any other — an `items`
+     * says nothing about an object. Every shape keyword not named here applies whatever the type.
+     *
+     * @var array<string, list<string>>
+     */
+    private const array TYPED_SHAPE = [
+        'items' => ['array'],
+        'prefixItems' => ['array'],
+        'additionalItems' => ['array'],
+        'contains' => ['array'],
+        'unevaluatedItems' => ['array'],
+        'properties' => ['object'],
+        'required' => ['object'],
+        'additionalProperties' => ['object'],
+        'patternProperties' => ['object'],
+        'propertyNames' => ['object'],
+        'unevaluatedProperties' => ['object'],
+        'dependentRequired' => ['object'],
+        'dependentSchemas' => ['object'],
+    ];
+
+    /**
      * Documentation and identity, true of the value whatever shape it turns out to have. A declared
      * body never retracts these: the description a docblock wrote, or an example an author pinned,
      * is about the field rather than about the shape that field used to have.
@@ -244,6 +266,20 @@ final class SchemaKeywords
     public static function isRefinement(string $keyword): bool
     {
         return array_key_exists($keyword, self::REFINEMENTS);
+    }
+
+    /**
+     * The instance types `$keyword` speaks about where it speaks about some types and not others — a
+     * refinement's, or a typed shape keyword's. Null for a keyword that applies whatever the type, and for
+     * one this does not know.
+     *
+     * @return non-empty-list<string>|null
+     */
+    public static function typesOf(string $keyword): ?array
+    {
+        $types = self::TYPED_SHAPE[$keyword] ?? self::REFINEMENTS[$keyword] ?? [];
+
+        return $types === [] ? null : $types;
     }
 
     /**

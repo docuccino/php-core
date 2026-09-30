@@ -961,8 +961,10 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
 
     /**
      * More than one non-null type has no 3.0 spelling. An `anyOf` of single-type branches says the
-     * same thing where the schema composes nothing yet; otherwise the type constraint is dropped —
-     * the loosest sound reading.
+     * same thing where the schema composes nothing yet, with each keyword that speaks about one type
+     * moved into that type's branch — 3.0 requires `items` beside `type: array`, and a generator reads
+     * an array's items from nowhere else. Otherwise the type constraint is dropped, the loosest sound
+     * reading.
      *
      * @param  array<string, mixed>  $schema
      * @param  non-empty-list<mixed>  $members
@@ -974,7 +976,21 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
         $composes = isset($schema['anyOf']) || isset($schema['oneOf']);
 
         if (! $composes) {
-            $schema['anyOf'] = array_map(static fn (mixed $type): array => ['type' => $type], $members);
+            $branches = array_map(static fn (mixed $type): array => ['type' => $type], $members);
+            foreach ($schema as $keyword => $value) {
+                $types = SchemaKeywords::typesOf($keyword);
+                if ($types === null) {
+                    continue;
+                }
+                // Beside a type it does not speak about a keyword asserts nothing, so it goes nowhere.
+                unset($schema[$keyword]);
+                foreach ($branches as $i => $branch) {
+                    if (in_array($branch['type'], $types, true)) {
+                        $branches[$i][$keyword] = $value;
+                    }
+                }
+            }
+            $schema['anyOf'] = $branches;
         }
 
         $diagnostics[] = new Diagnostic(
