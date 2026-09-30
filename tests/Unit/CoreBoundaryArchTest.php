@@ -392,6 +392,9 @@ it('freezes the rule-transformer field façade at the methods it means to promis
     sort($public);
 
     expect($public)->toBe([
+        // Which blank strings a framework reads as a field's null is the adapter's to state, and in any
+        // rule order: a third-party presence rule owes the same two answers ours gives.
+        'admitBlank',
         'get',
         'has',
         'isRequired',
@@ -403,6 +406,7 @@ it('freezes the rule-transformer field façade at the methods it means to promis
         'mayClaim',
         'path',
         'proposeExample',
+        'refuseBlank',
         'remove',
         'set',
         // The counterpart of the converter's own `reference()`, which is already public: without it a

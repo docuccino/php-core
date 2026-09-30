@@ -8,11 +8,11 @@ use Docuccino\Attributes\Description;
 use Docuccino\Attributes\Example;
 use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
+use Docuccino\Core\Diagnostics\UnreadableAttribute;
 use Docuccino\Core\Extensions\Contracts\SchemaContext;
 use Docuccino\Core\Provenance\ClassNames;
 use ReflectionClass;
 use ReflectionProperty;
-use Throwable;
 
 /**
  * Reads the property-target prose attributes — `#[Description]` and `#[Example]` — off a class and
@@ -129,7 +129,7 @@ final class PropertyAnnotations
     private static function describedText(ReflectionProperty $property, string $site, array &$diagnostics): ?string
     {
         $found = null;
-        foreach (self::all($property, Description::class) as $description) {
+        foreach (self::all($property, Description::class, $site, $diagnostics) as $description) {
             $text = DescribedText::of($description, $site, "a property's description", $diagnostics);
             $found ??= $text;
         }
@@ -152,7 +152,7 @@ final class PropertyAnnotations
     private static function exampleValue(ReflectionProperty $property, string $site, array &$diagnostics): ?array
     {
         $found = null;
-        foreach (self::all($property, Example::class) as $example) {
+        foreach (self::all($property, Example::class, $site, $diagnostics) as $example) {
             $sources = (int) ($example->value !== null)
                 + (int) ($example->file !== null)
                 + (int) ($example->externalValue !== null);
@@ -234,18 +234,13 @@ final class PropertyAnnotations
      * @template T of object
      *
      * @param  class-string<T>  $attribute
+     * @param  list<Diagnostic>  $diagnostics
      * @return list<T>
      */
-    private static function all(ReflectionProperty $property, string $attribute): array
+    private static function all(ReflectionProperty $property, string $attribute, string $site, array &$diagnostics): array
     {
-        $instances = [];
-        foreach ($property->getAttributes($attribute) as $declaration) {
-            try {
-                $instances[] = $declaration->newInstance();
-            } catch (Throwable) {
-                // Says nothing, for the reason {@see ClassDeclarations} gives.
-            }
-        }
+        [$instances, $unreadable] = UnreadableAttribute::instantiate($property->getAttributes($attribute), $site);
+        array_push($diagnostics, ...$unreadable);
 
         return $instances;
     }

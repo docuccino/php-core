@@ -68,7 +68,8 @@ final class DeclaredFields
         $paths = [];
 
         foreach ($declarations as $each) {
-            $path = FieldPath::queryNameAsPath($each->name);
+            // A nameless one answers for no field: the name is optional only where a filter class supplies it.
+            $path = $each->name === null ? null : FieldPath::queryNameAsPath($each->name);
             if ($path !== null) {
                 $paths[] = ['path' => $path, 'type' => $each->type];
             }

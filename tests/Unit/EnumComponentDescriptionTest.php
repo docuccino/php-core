@@ -18,6 +18,7 @@ use Docuccino\Core\Tests\Fixtures\FiledStatus;
 use Docuccino\Core\Tests\Fixtures\OverdescribedStatus;
 use Docuccino\Core\Tests\Fixtures\RequestScopedStatus;
 use Docuccino\Core\Tests\Fixtures\SampleStatus;
+use Docuccino\Core\Tests\Fixtures\UnreadableCaseStatus;
 
 /**
  * What an ENUM publishes about itself. An enum is a class, so PHP accepts a class-target
@@ -130,3 +131,20 @@ it('records the enum\'s declaration for whichever producer asked what it says', 
 
     expect($dependencies->files())->toBe([(string) (new ReflectionEnum(DescribedStatus::class))->getFileName()]);
 })->with(['body', 'description']);
+
+it('reports a case description PHP cannot construct, and lets the case docblock answer', function () use ($convert): void {
+    // The author wrote a sentence for the case and it cannot be built, so they are told — by the case it
+    // sits on and the class of what was thrown, never the `TypeError`'s message with its absolute file.
+    // Read as absent, the case says what an undeclared case says: its docblock summary.
+    $components = new ComponentRegistry;
+    $convert(UnreadableCaseStatus::class, $components);
+
+    $reports = array_map(static fn (Diagnostic $d): array => [$d->code, $d->message], $components->diagnostics());
+
+    expect($components->schemas()['UnreadableCaseStatus']['x-enumDescriptions'] ?? null)
+        ->toBe(['draft' => 'Still being written.', 'live' => 'Visible to everyone.'])
+        ->and($reports)->toBe([[
+            'attribute.unreadable',
+            'The #[CaseDescription] on '.UnreadableCaseStatus::class.'::Draft could not be instantiated and was ignored.',
+        ]]);
+});

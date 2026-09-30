@@ -112,6 +112,31 @@ it('names an anonymous class by where it stands, not by where the build machine 
         ->and($message)->not->toMatch('/\$[0-9a-f]+::/');
 });
 
+it('reports a property declaration PHP cannot construct, and reads the one beside it', function (): void {
+    // The author wrote it and it took no effect, so they are told — naming where it stands and the class
+    // of what was thrown, never the `TypeError`'s message, which carries the absolute file. Read as
+    // absent, so the healthy declaration after it is the one published.
+    $subject = new class
+    {
+        /** @phpstan-ignore argument.type */
+        #[Description(5)]
+        #[Description('The tenant it belongs to.')]
+        public string $tenant = '';
+    };
+
+    [$object, $diagnostics] = PropertyAnnotations::apply(
+        ['type' => 'object', 'properties' => ['tenant' => ['type' => 'string']]],
+        $subject::class,
+    );
+
+    expect($object['properties']['tenant'])->toBe(['type' => 'string', 'description' => 'The tenant it belongs to.'])
+        ->and(array_map(static fn (Diagnostic $d): string => $d->code, $diagnostics))->toBe(['attribute.unreadable'])
+        ->and($diagnostics[0]->message)->toContain('The #[Description] on class@anonymous declared in tests/Unit/PropertyAnnotationsTest.php:')
+        ->and($diagnostics[0]->message)->toContain('::$tenant could not be instantiated and was ignored.')
+        ->and($diagnostics[0]->help)->toContain('threw TypeError.')
+        ->and(json_encode($diagnostics[0]->toArray()))->not->toContain(dirname(__DIR__, 3));
+});
+
 it('says nothing about a property the schema does not publish', function (): void {
     // `unpublished` carries a good #[Description] and a reportable #[Example], and the schema hides it.
     // There is no member to write and nothing the reader could do, so neither the write nor the

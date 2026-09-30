@@ -51,20 +51,20 @@ it('is minted fresh, so no writer can reach another position through it', functi
     // carry any of these into every `{}` in the document, and on through `FragmentCache` to disk.
     $writes = [
         'by-ref acquisition' => static function (object $o): void {
-            /** @phpstan-ignore-next-line property.notFound (that it succeeds is the point) */
+            // That it succeeds is the point.
             $r = &$o->x;
             $r = 1;
         },
         'array append' => static function (object $o): void {
-            /** @phpstan-ignore-next-line property.notFound */
+            /** @phpstan-ignore property.notFound, offsetAccess.nonOffsetAccessible */
             $o->list[] = 1;
         },
         'preg_match out-param' => static function (object $o): void {
-            /** @phpstan-ignore-next-line property.notFound */
+            /** @phpstan-ignore property.notFound */
             preg_match('/a/', 'a', $o->m);
         },
         'parse_str out-param' => static function (object $o): void {
-            /** @phpstan-ignore-next-line property.notFound */
+            /** @phpstan-ignore property.notFound */
             parse_str('a=1', $o->p);
         },
     ];

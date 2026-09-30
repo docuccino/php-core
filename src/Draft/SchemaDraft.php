@@ -43,6 +43,14 @@ final class SchemaDraft
      */
     private ?array $mock = null;
 
+    /**
+     * Additive semantic facts recorded under this schema's `x-docuccino.facts`, as a parameter's are
+     * ({@see ParameterDraft::setDocuccinoFact()}): nothing contests them, so they skip the guard.
+     *
+     * @var array<string, mixed>
+     */
+    private array $facts = [];
+
     public function __construct()
     {
         $this->guard = new PatchGuard;
@@ -192,6 +200,19 @@ final class SchemaDraft
     }
 
     /**
+     * Record an additive `x-docuccino` semantic fact on this schema.
+     *
+     * @internal Core-only: a fact a field's schema states reaches a parameter through the pipeline that
+     * moved the schema there, and nothing an extension builds needs one.
+     */
+    public function setDocuccinoFact(string $key, mixed $value): self
+    {
+        $this->facts[$key] = $value;
+
+        return $this;
+    }
+
+    /**
      * Take over another schema's keywords and properties, each at the contribution that wrote it — the
      * nested half of {@see ResponseDraft::absorb()}.
      *
@@ -315,6 +336,7 @@ final class SchemaDraft
             id: $this->id,
             provenance: $this->guard->provenance(array_filter($also), $except),
             mock: $this->mock,
+            rest: $this->facts === [] ? [] : ['facts' => $this->facts],
         );
 
         if (! $docuccino->isEmpty()) {

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Contract;
 
+use Docuccino\Core\Document\BlankAsNull;
 use Docuccino\Core\Draft\SchemaKeywords;
 use stdClass;
 
@@ -24,9 +25,13 @@ use stdClass;
  * downlevel emitter rewrites a multi-type `type` as one and hoists `$ref` siblings into an `allOf`,
  * and an enum-backed allow-list publishes `items: {$ref: …}`.
  *
+ * A request's query and body are also read the way the server reads them before validating: a blank string
+ * where the contract states the server reads one as null ({@see BlankAsNull}) is that null. A path, a
+ * header, a cookie and anything a response carries are no such reading, so the caller says which it holds.
+ *
  * @internal
  *
- * @phpstan-type Flattened array{types: list<string>, items: array<string, mixed>|null, properties: array<string, array<string, mixed>>, path: list<string>}
+ * @phpstan-type Flattened array{types: list<string>, items: array<string, mixed>|null, properties: array<string, array<string, mixed>>, blank: string|null, path: list<string>}
  */
 final class ParameterValue
 {
@@ -49,12 +54,14 @@ final class ParameterValue
      * @param  array<string, mixed>  $document  the whole contract, so a local `$ref` resolves; the
      *                                          empty default resolves nothing, which is the same
      *                                          well-defined answer as a reference nothing defines
+     * @param  bool  $blanks  whether the value is a request's query value, which the server reads a blank
+     *                        in as the contract states
      */
-    public static function coerce(mixed $value, ?array $schema, array $document = []): mixed
+    public static function coerce(mixed $value, ?array $schema, array $document = [], bool $blanks = false): mixed
     {
         $memo = [];
 
-        return self::read($value, $schema, $document, 0, [], $memo, true);
+        return self::read($value, $schema, $document, 0, [], $memo, true, $blanks);
     }
 
     /**
@@ -74,7 +81,60 @@ final class ParameterValue
     {
         $memo = [];
 
-        return self::asObject($fields, self::flatten($schema, $document, 0, [], $memo), $document, 0, [], $memo, false);
+        return self::asObject($fields, self::flatten($schema, $document, 0, [], $memo), $document, 0, [], $memo, false, true);
+    }
+
+    /**
+     * A decoded JSON request body with every blank the contract says the server reads as null read as it —
+     * nothing else changes, since JSON already carries its own types.
+     *
+     * @param  array<string, mixed>|null  $schema
+     * @param  array<string, mixed>  $document
+     */
+    public static function readBlanks(mixed $data, ?array $schema, array $document = []): mixed
+    {
+        $memo = [];
+
+        return self::blanks($data, $schema, $document, 0, [], $memo);
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $schema
+     * @param  array<string, mixed>  $document
+     * @param  list<string>  $seen
+     * @param  array<string, Flattened>  $memo
+     */
+    private static function blanks(mixed $data, ?array $schema, array $document, int $depth, array $seen, array &$memo): mixed
+    {
+        $flat = self::flatten($schema, $document, $depth, $seen, $memo);
+
+        if (is_string($data)) {
+            return self::isBlank($data, $flat) ? null : $data;
+        }
+
+        if ($data instanceof stdClass) {
+            $object = new stdClass;
+            foreach (get_object_vars($data) as $key => $member) {
+                $object->{$key} = self::blanks($member, $flat['properties'][(string) $key] ?? null, $document, $depth + 1, $seen, $memo);
+            }
+
+            return $object;
+        }
+
+        if (is_array($data)) {
+            return array_map(
+                static fn (mixed $item): mixed => self::blanks($item, $flat['items'], $document, $depth + 1, $seen, $memo),
+                $data,
+            );
+        }
+
+        return $data;
+    }
+
+    /** @param  Flattened  $flat */
+    private static function isBlank(string $value, array $flat): bool
+    {
+        return $flat['blank'] !== null && BlankAsNull::matches($flat['blank'], $value);
     }
 
     /**
@@ -95,17 +155,24 @@ final class ParameterValue
      * @param  array<string, Flattened>  $memo
      * @param  bool  $commaLists  whether a string here may be a comma list, which is a QUERY
      *                            representation and not a form one ({@see coerceForm()})
+     * @param  bool  $blanks  whether a blank here is read as the contract says the server reads it
      */
-    private static function read(mixed $value, ?array $schema, array $document, int $depth, array $seen, array &$memo, bool $commaLists): mixed
+    private static function read(mixed $value, ?array $schema, array $document, int $depth, array $seen, array &$memo, bool $commaLists, bool $blanks): mixed
     {
         $flat = self::flatten($schema, $document, $depth, $seen, $memo);
 
+        // Ahead of every other reading: the server never sees the string, so neither a list nor a number
+        // may be read out of it.
+        if (is_string($value) && $blanks && self::isBlank($value, $flat)) {
+            return null;
+        }
+
         if (is_string($value)) {
-            return self::fromString($value, $flat, $document, $depth, $memo, $commaLists);
+            return self::fromString($value, $flat, $document, $depth, $memo, $commaLists, $blanks);
         }
 
         if (is_array($value)) {
-            return self::fromArray($value, $flat, $document, $depth, $seen, $memo, $commaLists);
+            return self::fromArray($value, $flat, $document, $depth, $seen, $memo, $commaLists, $blanks);
         }
 
         return $value;
@@ -116,7 +183,7 @@ final class ParameterValue
      * @param  array<string, mixed>  $document
      * @param  array<string, Flattened>  $memo
      */
-    private static function fromString(string $value, array $flat, array $document, int $depth, array &$memo, bool $commaLists): mixed
+    private static function fromString(string $value, array $flat, array $document, int $depth, array &$memo, bool $commaLists, bool $blanks): mixed
     {
         $types = $flat['types'];
 
@@ -127,7 +194,7 @@ final class ParameterValue
         // leaves `items` — the allow-list the document publishes — checking nothing at all.
         if ($commaLists && in_array('array', $types, true)) {
             return array_map(
-                static fn (string $item): mixed => self::read($item, $flat['items'], $document, $depth + 1, $flat['path'], $memo, true),
+                static fn (string $item): mixed => self::read($item, $flat['items'], $document, $depth + 1, $flat['path'], $memo, true, $blanks),
                 explode(',', $value),
             );
         }
@@ -162,17 +229,17 @@ final class ParameterValue
      * @param  list<string>  $seen
      * @param  array<string, Flattened>  $memo
      */
-    private static function fromArray(array $value, array $flat, array $document, int $depth, array $seen, array &$memo, bool $commaLists): mixed
+    private static function fromArray(array $value, array $flat, array $document, int $depth, array $seen, array &$memo, bool $commaLists, bool $blanks): mixed
     {
         if (array_is_list($value)) {
             return array_map(
-                static fn (mixed $item): mixed => self::read($item, $flat['items'], $document, $depth + 1, $seen, $memo, $commaLists),
+                static fn (mixed $item): mixed => self::read($item, $flat['items'], $document, $depth + 1, $seen, $memo, $commaLists, $blanks),
                 $value,
             );
         }
 
         // A bracketed query parameter (`filter[status]=paid`) arrives as a map: an object to JSON Schema.
-        $object = self::asObject($value, $flat, $document, $depth, $seen, $memo, $commaLists);
+        $object = self::asObject($value, $flat, $document, $depth, $seen, $memo, $commaLists, $blanks);
 
         // The brackets have already said which of the two this is, so where the contract permits both
         // the value decides: a map is an object. Reading it as a list instead throws the keys away, and
@@ -191,7 +258,7 @@ final class ParameterValue
      * @param  list<string>  $seen
      * @param  array<string, Flattened>  $memo
      */
-    private static function asObject(array $value, array $flat, array $document, int $depth, array $seen, array &$memo, bool $commaLists): stdClass
+    private static function asObject(array $value, array $flat, array $document, int $depth, array $seen, array &$memo, bool $commaLists, bool $blanks): stdClass
     {
         $object = new stdClass;
 
@@ -204,6 +271,7 @@ final class ParameterValue
                 $seen,
                 $memo,
                 $commaLists,
+                $blanks,
             );
         }
 
@@ -246,7 +314,7 @@ final class ParameterValue
      */
     private static function flatten(?array $schema, array $document, int $depth, array $seen, array &$memo): array
     {
-        $empty = ['types' => [], 'items' => null, 'properties' => [], 'path' => $seen];
+        $empty = ['types' => [], 'items' => null, 'properties' => [], 'blank' => null, 'path' => $seen];
 
         if ($schema === null || $depth > self::MAX_DEPTH) {
             return $empty;
@@ -292,6 +360,7 @@ final class ParameterValue
 
         $items = self::member($node, 'items');
         $properties = self::propertyMap($node);
+        $blank = BlankAsNull::of($node);
 
         foreach (self::compositions() as $keyword) {
             $branches = $node[$keyword] ?? null;
@@ -312,6 +381,7 @@ final class ParameterValue
                 // The first branch that names one wins, exactly as the node's own does over a branch's.
                 $items ??= $inner['items'];
                 $properties += $inner['properties'];
+                $blank ??= $inner['blank'];
             }
         }
 
@@ -319,6 +389,7 @@ final class ParameterValue
             'types' => array_values(array_unique($types)),
             'items' => $items,
             'properties' => $properties,
+            'blank' => $blank,
             'path' => $seen,
         ];
 

@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace Docuccino\Core\Extensions\Schema;
 
 use Docuccino\Attributes\CaseDescription;
+use Docuccino\Core\Diagnostics\Diagnostic;
+use Docuccino\Core\Diagnostics\UnreadableAttribute;
 use Docuccino\Core\Extensions\BuiltIn\EnumSchema;
 use Docuccino\Core\Inference\DType\EnumT;
+use Docuccino\Core\Provenance\ClassNames;
 use ReflectionEnum;
 use ReflectionEnumBackedCase;
 use ReflectionEnumUnitCase;
@@ -48,13 +51,18 @@ final class EnumReflection
      * with the schema's `enum` member for `x-enumDescriptions`. A case with no attribute falls back to
      * its docblock summary (the attribute wins where both exist); a case with neither is omitted.
      *
-     * @return array<string, string>
+     * A `#[CaseDescription]` PHP cannot construct is read as absent — the docblock answers — and its
+     * report handed back beside the map, so a caller publishing the prose cannot drop it by not asking.
+     *
+     * @return array{0: array<string, string>, 1: list<Diagnostic>}
      */
     public static function descriptions(string $fqcn): array
     {
         $out = [];
+        $diagnostics = [];
         foreach (self::cases($fqcn) as $case) {
-            $description = self::caseDescription($case);
+            [$description, $unreadable] = self::caseDescription($case, ClassNames::publishable($fqcn).'::'.$case->getName());
+            array_push($diagnostics, ...$unreadable);
             if ($description === null) {
                 continue;
             }
@@ -62,21 +70,18 @@ final class EnumReflection
             $out[(string) self::caseValue($case)] = $description;
         }
 
-        return $out;
+        return [$out, $diagnostics];
     }
 
-    private static function caseDescription(ReflectionEnumUnitCase $case): ?string
+    /**
+     * @return array{0: ?string, 1: list<Diagnostic>}
+     */
+    private static function caseDescription(ReflectionEnumUnitCase $case, string $site): array
     {
-        $attributes = $case->getAttributes(CaseDescription::class);
-        if ($attributes !== []) {
-            try {
-                return $attributes[0]->newInstance()->description;
-            } catch (Throwable) {
-                return null;
-            }
-        }
+        // The first only: the attribute does not repeat.
+        [$declared, $diagnostics] = UnreadableAttribute::instantiate(array_slice($case->getAttributes(CaseDescription::class), 0, 1), $site);
 
-        return DocSummary::of($case->getDocComment());
+        return [$declared !== [] ? $declared[0]->description : DocSummary::of($case->getDocComment()), $diagnostics];
     }
 
     /**

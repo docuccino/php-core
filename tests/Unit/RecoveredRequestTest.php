@@ -18,6 +18,7 @@ use Docuccino\Core\Extensions\Validation\TaggedVariants;
 use Docuccino\Core\Extensions\Validation\ValidationSchema;
 use Docuccino\Core\Inference\ActionRef;
 use Docuccino\Core\Inference\NullTypeEngine;
+use Docuccino\Core\Patch\Contribution;
 use Docuccino\Core\Tests\Fixtures\ExampledRequestClass;
 use Docuccino\Core\Tests\Fixtures\MockedRequestClass;
 use Docuccino\Core\Tests\Fixtures\PinnedRequestClass;
@@ -318,6 +319,28 @@ it('carries a hint onto the query parameter a validated field flattens to', func
         ->and($parameter['schema']['x-docuccino'])->toHaveKey('provenance');
 });
 
+it('carries a blank reading onto the query parameter, or the container member, a validated field lands on', function (): void {
+    // A fact is an x-docuccino member too, so it travels on the draft the way a hint does — onto the
+    // parameter a leaf flattens to, and onto the member of a deepObject container another producer owns.
+    $fact = ['facts' => ['blankAsNull' => '^ *$']];
+    $schema = new ValidationSchema(['type' => 'object', 'properties' => [
+        'status' => ['type' => ['string', 'null'], 'x-docuccino' => $fact],
+        'filter' => ['type' => 'object', 'properties' => ['state' => ['type' => ['string', 'null'], 'x-docuccino' => $fact]]],
+    ]]);
+
+    $op = new OperationDraft;
+    $by = Contribution::integration('query-builder');
+    $container = $op->parameter('query', 'filter');
+    $container->set('style', 'deepObject', $by);
+    $container->set('explode', true, $by);
+    $container->schema()->set('type', 'object', $by);
+
+    (new RecoveredRequest)->apply($op, requestContext(new ComponentRegistry, method: 'GET'), $schema, 'form-request');
+
+    expect($op->parameter('query', 'status')->freeze()->toArray()['schema']['x-docuccino']['facts'])->toBe($fact['facts'])
+        ->and($container->freeze()->toArray()['schema']['properties']['state']['x-docuccino']['facts'])->toBe($fact['facts']);
+});
+
 it('reports a source class\'s unusable #[Mock] against the build', function (): void {
     // The field the attribute names is not one the rules recovered, so the hint has nowhere to go.
     $components = new ComponentRegistry;
@@ -346,9 +369,10 @@ it('publishes the example a type-level declaration gives its field', function ()
         ->toBe(['type' => 'string', 'example' => 'Ada']);
 });
 
-it('says nothing about a type-level declaration whose arguments its constructor rejects', function (): void {
-    // No route bag collected it, so there is nothing to report it against: it documents no field, the
-    // healthy declaration beside it still does, and the build carries on.
+it('reports a type-level declaration whose arguments its constructor rejects, and reads it as absent', function (): void {
+    // It documents no field, the healthy declaration beside it still does, and the build carries on. The
+    // author wrote it and it took no effect, so they are told where: the class it sits on, and the class
+    // of what was thrown — never the thrown message, which names the absolute file.
     $components = new ComponentRegistry;
 
     (new RecoveredRequest)->apply(
@@ -361,7 +385,11 @@ it('says nothing about a type-level declaration whose arguments its constructor 
 
     expect($components->schemas()['UnreadableRequestClass']['properties'])
         ->toBe(['nickname' => ['type' => 'string'], 'note' => ['type' => 'string']])
-        ->and($components->diagnostics())->toBe([]);
+        ->and(array_map(static fn ($d): array => [$d->code, $d->message, $d->help], $components->diagnostics()))->toBe([[
+            'attribute.unreadable',
+            'The #[BodyParameter] on '.UnreadableRequestClass::class.' could not be instantiated and was ignored.',
+            'Its constructor threw TypeError. Check the arguments at that declaration against the attribute\'s constructor.',
+        ]]);
 });
 
 it('publishes tagged objects only where each branch has a component to be named after', function (string $method, ?string $class, array $attributes, bool $publishes): void {

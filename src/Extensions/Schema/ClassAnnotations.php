@@ -78,8 +78,8 @@ final class ClassAnnotations
      * this one and drifting from it.
      *
      * Nothing here trusts application input with a constructor it can break: {@see ClassDeclarations}
-     * swallows a declaration PHP cannot build, so a `#[Description(5)]` is no declaration rather than a
-     * `TypeError` printing the machine's absolute paths into the document.
+     * reads a declaration PHP cannot build as absent and reports it, so a `#[Description(5)]` is no
+     * declaration rather than a `TypeError` printing the machine's absolute paths into the document.
      *
      * @param  list<Diagnostic>  $diagnostics
      */
@@ -87,8 +87,11 @@ final class ClassAnnotations
     {
         $site = ClassNames::publishable($fqcn);
 
+        [$descriptions, $unreadable] = ClassDeclarations::of($fqcn, Description::class);
+        array_push($diagnostics, ...$unreadable);
+
         $text = null;
-        foreach (ClassDeclarations::of($fqcn, Description::class) as $description) {
+        foreach ($descriptions as $description) {
             $candidate = DescribedText::of($description, $site, "a schema's description", $diagnostics);
             $text ??= $candidate;
         }

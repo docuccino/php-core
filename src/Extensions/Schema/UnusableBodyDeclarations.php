@@ -75,12 +75,15 @@ final class UnusableBodyDeclarations implements DocumentTransformer, RouteNoteCo
      * Silence for a type that declares none — there is nothing to be unusable — and the reading of
      * "declares one" is {@see RecoveredRequest::declaredOn()}'s, so the observation cannot recognise a
      * different set from the write it stands in for. A declaration whose constructor rejects its
-     * arguments is not one of them: nothing writes it at any verb, and `attribute.unreadable` is where
-     * that is already said.
+     * arguments is not one of them: nothing writes it at any verb, and `attribute.unreadable`, raised
+     * where a write verb writes the declarations ({@see RecoveredRequest::declaredOn()}), is where that
+     * is said.
      */
     public static function observe(RouteContext $context, string $sourceClass, bool $documentsBody): void
     {
-        if (ClassDeclarations::of($sourceClass, self::ATTRIBUTE) === []) {
+        // Only whether any exist: the unreadable ones are reported where a write verb writes them.
+        [$declared] = ClassDeclarations::of($sourceClass, self::ATTRIBUTE);
+        if ($declared === []) {
             return;
         }
 

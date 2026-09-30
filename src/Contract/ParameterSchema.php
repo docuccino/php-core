@@ -71,9 +71,10 @@ final readonly class ParameterSchema
      * rather than `'2'` where the contract published `type: integer` ({@see ParameterValue}).
      *
      * @param  array<string, mixed>  $document  the whole contract, so a local `$ref` resolves
+     * @param  bool  $blanks  whether a blank is read as the server reads one ({@see ParameterValue})
      */
-    public function read(mixed $value, array $document): mixed
+    public function read(mixed $value, array $document, bool $blanks = false): mixed
     {
-        return ParameterValue::coerce($value, $this->node, $document);
+        return ParameterValue::coerce($value, $this->node, $document, $blanks);
     }
 }

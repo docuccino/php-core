@@ -314,9 +314,11 @@ it('refuses a second repeat beside a widened atom, which a consumer could split 
 
 it('publishes no pattern a backtracking consumer is slower on than the server', function (): void {
     // The consumer's engine is modelled by PCRE itself with every optimisation that skips a search off, the
-    // work counted as the backtrack limit it needs. Over expressions built from the subset, every published
-    // pattern must grow at most quadratically on values of non-ASCII characters the server's atoms refuse,
-    // alone or pumped with separators, unless the server works as hard on the same value.
+    // work counted as the backtrack limit it needs, which PCRE spends afresh at each start offset. Over
+    // expressions built from the subset, every published pattern must grow linearly from one offset on
+    // values of non-ASCII characters the server's atoms refuse, alone or pumped with separators, unless the
+    // server works as hard on the same value. An unanchored search also restarts at every offset, in an
+    // ECMA-262 engine even where PCRE skips ahead: that factor is the verbatim ASCII pattern's too.
     $cap = 1_000_000;
     $verbs = '(*NO_JIT)(*NO_AUTO_POSSESS)(*NO_START_OPT)(*NO_DOTSTAR_ANCHOR)';
     $steps = static function (string $regex, string $subject) use ($cap): int {
@@ -396,7 +398,8 @@ it('publishes no pattern a backtracking consumer is slower on than the server', 
                 foreach ($attacks as $name => $attack) {
                     $short = $steps('/'.$verbs.'(*UTF)'.$pattern.'/D', $attack(20));
                     $long = $steps('/'.$verbs.'(*UTF)'.$pattern.'/D', $attack(40));
-                    if ($long < $cap && ($long <= 4000 || $long <= 4.5 * $short)) {
+                    // Linear doubles the work with the length, bounded counts adding a little; quadratic quadruples it.
+                    if ($long < $cap && $long <= 2.25 * $short) {
                         continue;
                     }
                     $server = $steps('/'.$verbs.$source.'/uD', $attack(40));

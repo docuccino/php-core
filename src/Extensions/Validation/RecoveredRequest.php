@@ -186,14 +186,15 @@ final class RecoveredRequest
         [$schema, $diagnostics] = PropertyAnnotations::apply($schema, $sourceClass, $keys);
         [$schema, $hintDiagnostics] = MockHints::apply($schema, $sourceClass, $keys);
 
+        [$declarations, $unreadable] = self::declaredOn($sourceClass, $context);
         [$schema, $declaredRequired, $fieldDiagnostics] = $this->fields->apply(
             $schema,
-            self::declaredOn($sourceClass, $context),
+            $declarations,
             $context->requestConverter(),
             ClassNames::publishable($sourceClass),
         );
 
-        return [$schema, $declaredRequired, [...$diagnostics, ...$hintDiagnostics, ...$fieldDiagnostics]];
+        return [$schema, $declaredRequired, [...$diagnostics, ...$hintDiagnostics, ...$unreadable, ...$fieldDiagnostics]];
     }
 
     /**
@@ -210,19 +211,20 @@ final class RecoveredRequest
      *   route attribute bag already reads it. The defect this reads for is a declaration on a class the
      *   bag never sees, which is exactly a source class that is not the action.
      *
-     * What it reads on the class is {@see ClassDeclarations}'s: the class's own declarations, and
-     * silence for one whose constructor rejects its arguments.
+     * What it reads on the class is {@see ClassDeclarations}'s: the class's own declarations, and one
+     * whose constructor rejects its arguments read as absent and handed back as a report — which the one
+     * caller that writes the declarations, {@see declared()}, raises.
      *
-     * @return list<BodyParameter>
+     * @return array{0: list<BodyParameter>, 1: list<Diagnostic>}
      */
     public static function declaredOn(?string $sourceClass, RouteContext $context): array
     {
         if ($sourceClass === null || ! self::documentsBody($context)) {
-            return [];
+            return [[], []];
         }
 
         if ($sourceClass === $context->actionRef->class) {
-            return [];
+            return [[], []];
         }
 
         return ClassDeclarations::of($sourceClass, BodyParameter::class);
@@ -240,10 +242,10 @@ final class RecoveredRequest
             return DeclaredFields::inQuery($context->attributes->all(QueryParameter::class));
         }
 
-        return DeclaredFields::inBody([
-            ...$context->attributes->all(BodyParameter::class),
-            ...self::declaredOn($sourceClass, $context),
-        ]);
+        // The unreadable ones are {@see declared()}'s to report, where they are written.
+        [$declared] = self::declaredOn($sourceClass, $context);
+
+        return DeclaredFields::inBody([...$context->attributes->all(BodyParameter::class), ...$declared]);
     }
 
     /**
@@ -383,12 +385,13 @@ final class RecoveredRequest
         $members = new DeepObjectMembers($operation);
 
         foreach (self::queryLeaves($result->schema, []) as [$name, $schema, $required]) {
-            // A hint is an x-docuccino member, not a schema keyword — it travels on the draft rather
-            // than through the guard, which would publish it as a keyword of that name.
+            // A hint or a fact is an x-docuccino member, not a schema keyword — it travels on the draft
+            // rather than through the guard, which would publish it as a keyword of that name.
             $docuccino = $schema['x-docuccino'] ?? null;
             unset($schema['x-docuccino']);
             /** @var array<string, mixed>|null $mock */
             $mock = is_array($docuccino) && is_array($docuccino['mock'] ?? null) ? $docuccino['mock'] : null;
+            $facts = is_array($docuccino) && is_array($docuccino['facts'] ?? null) ? $docuccino['facts'] : [];
 
             $member = $members->schemaFor($name);
             if ($member !== null) {
@@ -398,6 +401,9 @@ final class RecoveredRequest
                 $members->stateRequired($name, $required ? true : null);
                 if ($mock !== null) {
                     $member->assignMock($mock);
+                }
+                foreach ($facts as $key => $fact) {
+                    $member->setDocuccinoFact((string) $key, $fact);
                 }
 
                 foreach ($schema as $keyword => $value) {
@@ -411,6 +417,9 @@ final class RecoveredRequest
             $parameter->setRequired($required, $contribution);
             if ($mock !== null) {
                 $parameter->schema()->assignMock($mock);
+            }
+            foreach ($facts as $key => $fact) {
+                $parameter->schema()->setDocuccinoFact((string) $key, $fact);
             }
 
             $description = $schema['description'] ?? null;

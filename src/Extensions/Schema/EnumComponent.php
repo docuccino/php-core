@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Extensions\Schema;
 
+use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Extensions\Contracts\SchemaContext;
 use Docuccino\Core\Support\Fqcn;
 
@@ -48,6 +49,7 @@ final class EnumComponent
         }
 
         $allInt = $values === array_filter($values, 'is_int');
+        [$descriptions, $unreadable] = EnumReflection::descriptions($fqcn);
 
         $schema = EnumDecoration::apply(
             [
@@ -56,10 +58,10 @@ final class EnumComponent
             ],
             $context->representation()->enumNaming,
             EnumReflection::names($fqcn),
-            EnumReflection::descriptions($fqcn),
+            $descriptions,
         );
 
-        $description = self::description($fqcn, $context);
+        $description = self::stated($fqcn, $context, $unreadable);
         if ($description !== null) {
             $schema['description'] = $description;
         }
@@ -76,11 +78,28 @@ final class EnumComponent
      *
      * Asking is also what records the enum's declaration files, here rather than at each producer: adding
      * or removing a `#[Description]`, a case or a `#[CaseDescription]` has to retire the fragment that
-     * published without it, and a producer added later gets that for free by asking at all.
+     * published without it, and a producer added later gets that for free by asking at all. The same
+     * holds for reporting a declaration on the enum that PHP cannot construct.
      */
     public static function description(string $fqcn, SchemaContext $context): ?string
     {
+        return self::stated($fqcn, $context, EnumReflection::descriptions($fqcn)[1]);
+    }
+
+    /**
+     * {@see description()}, handed the case reports by a caller that has already walked the cases.
+     *
+     * @param  list<Diagnostic>  $unreadable
+     */
+    private static function stated(string $fqcn, SchemaContext $context, array $unreadable): ?string
+    {
         $context->dependsOn(...DeclarationFiles::of($fqcn));
+
+        // Here for the same reason: a `#[CaseDescription]` PHP cannot build is reported by every producer
+        // that asks about the enum at all, rather than by whichever remembered to.
+        foreach ($unreadable as $diagnostic) {
+            $context->diagnostic($diagnostic);
+        }
 
         $description = ClassAnnotations::applyTo($context, [], $fqcn)['description'] ?? null;
 

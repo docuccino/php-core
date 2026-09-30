@@ -73,7 +73,8 @@ final class EnumSchema implements TypeToSchema
             ],
             $context->representation()->enumNaming,
             $type->cases,
-            EnumReflection::descriptions($type->fqcn),
+            // Not reflectable, so no case of it holds a declaration to report.
+            EnumReflection::descriptions($type->fqcn)[0],
         );
 
         // Only a reflectable enum hoists — an un-autoloadable one has no honest name or identity to

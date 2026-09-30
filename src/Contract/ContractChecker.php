@@ -186,9 +186,11 @@ final class ContractChecker
      *                               header more than once
      * @param  string|null  $absent  what to say when nothing was sent, or null where absence is not a
      *                               violation
+     * @param  bool  $blanks  whether the server reads a blank here as the contract states — a query value,
+     *                        which the framework rewrites before validating; never a path, a header or a cookie
      * @return array{0: list<Violation>, 1: string|null}
      */
-    private function checkParameter(ContractParameter $parameter, array $values, ?string $absent): array
+    private function checkParameter(ContractParameter $parameter, array $values, ?string $absent, bool $blanks = false): array
     {
         // A `$ref` at a name the document does not define leaves nothing to read `required` or `schema`
         // off — so a required header behind one would check as optional-and-unschema'd and report a
@@ -221,7 +223,7 @@ final class ContractChecker
         $schema = $parameter->schema();
 
         return match ($schema->kind) {
-            ParameterSchemaKind::Schema => [$this->checkValues($parameter, $schema, $values), null],
+            ParameterSchemaKind::Schema => [$this->checkValues($parameter, $schema, $values, $blanks), null],
             ParameterSchemaKind::Content => [[], sprintf('%s is documented as a content object, which the check does not decode', $parameter->label())],
             ParameterSchemaKind::Malformed => [[], sprintf('%s is documented with a declaration this check cannot read', $parameter->label())],
             ParameterSchemaKind::Absent => [[], sprintf('the contract documents no schema for %s', $parameter->label())],
@@ -236,14 +238,14 @@ final class ContractChecker
      * @param  list<mixed>  $values
      * @return list<Violation>
      */
-    private function checkValues(ContractParameter $parameter, ParameterSchema $schema, array $values): array
+    private function checkValues(ContractParameter $parameter, ParameterSchema $schema, array $values, bool $blanks): array
     {
         $violations = [];
         foreach ($values as $index => $value) {
             $label = count($values) === 1 ? $parameter->label() : sprintf('%s (value %d)', $parameter->label(), $index + 1);
 
             foreach ($this->validate(
-                $schema->read($value, $this->index->document()),
+                $schema->read($value, $this->index->document(), $blanks),
                 $parameter->schemaSegments(),
                 $label,
             ) as $violation) {
@@ -339,6 +341,7 @@ final class ContractChecker
                 $parameter->required && $parameter->in !== 'path'
                     ? 'is documented as required, but the request did not send it'
                     : null,
+                $parameter->in === 'query',
             );
 
             foreach ($found as $violation) {
@@ -466,6 +469,7 @@ final class ContractChecker
             'the request body',
             'the request',
             $exchange->ambiguousEmptyRequestBody,
+            true,
         );
     }
 
@@ -531,8 +535,10 @@ final class ContractChecker
      * @param  list<string>  $schemaSegments
      * @param  bool  $ambiguousEmpty  whether a `[]` in these bytes could as easily have been `{}`
      *                                ({@see Exchange::__construct()}), which only the producer knows
+     * @param  bool  $blanks  whether these bytes are a request the server reads blanks in as the contract
+     *                        states ({@see ParameterValue::readBlanks()}); a response is read as sent
      */
-    private function body(string $raw, mixed $media, array $schemaSegments, string $mediaType, string $location, string $half, bool $ambiguousEmpty = false): Outcome
+    private function body(string $raw, mixed $media, array $schemaSegments, string $mediaType, string $location, string $half, bool $ambiguousEmpty = false, bool $blanks = false): Outcome
     {
         if (! MediaType::isJson($mediaType)) {
             return Outcome::passed(sprintf('%s is %s, which JSON Schema cannot check', $location, $mediaType));
@@ -556,8 +562,11 @@ final class ContractChecker
             return Outcome::failed([Violation::ofExchange(sprintf('%s is not valid JSON: %s', $location, $exception->getMessage()), $half)]);
         }
 
+        $data = $ambiguousEmpty ? $this->readEmpty($data, $schemaSegments) : $data;
+        $schema = self::mediaSchema($media);
+
         return Outcome::failedOrPassed($this->validate(
-            $ambiguousEmpty ? $this->readEmpty($data, $schemaSegments) : $data,
+            $blanks && is_array($schema) ? ParameterValue::readBlanks($data, $schema, $this->index->document()) : $data,
             $schemaSegments,
             $location,
         ));

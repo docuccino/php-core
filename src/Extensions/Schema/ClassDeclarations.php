@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Extensions\Schema;
 
+use Docuccino\Core\Diagnostics\Diagnostic;
+use Docuccino\Core\Diagnostics\UnreadableAttribute;
+use Docuccino\Core\Provenance\ClassNames;
 use ReflectionClass;
-use Throwable;
 
 /**
  * Reads the attribute declarations a class writes about ITSELF, instantiated — the one reader the
@@ -13,9 +15,9 @@ use Throwable;
  *
  * The class's OWN declarations only: PHP does not inherit class attributes, and a base DTO's
  * declaration describes the base, so carrying it down would put one statement on every shape under it.
- * And a declaration whose constructor rejects its arguments says nothing — that is the adapter's
- * `attribute.unreadable` story on an action, and a type has no route bag that collected it, so there is
- * nothing here to name it with.
+ * A declaration whose constructor rejects its arguments is read as absent and handed back beside the
+ * rest as `attribute.unreadable` ({@see UnreadableAttribute}). The reader that APPLIES the declarations
+ * reports it; one only asking whether any exist discards it where it says so, so one mistake is one report.
  *
  * Which is why a reader whose silence would PUBLISH something does not come through here:
  * {@see SchemaIdentity} instantiates its own, so a `#[Hidden]` PHP cannot construct never quietly
@@ -25,28 +27,20 @@ use Throwable;
 final class ClassDeclarations
 {
     /**
-     * The class's own `$attribute` declarations, in source order — none for a class that does not exist.
+     * The class's own `$attribute` declarations, in source order — none for a class that does not exist —
+     * and the reports for those PHP could not construct.
      *
      * @template T of object
      *
      * @param  class-string<T>  $attribute
-     * @return list<T>
+     * @return array{0: list<T>, 1: list<Diagnostic>}
      */
     public static function of(string $fqcn, string $attribute): array
     {
         if (! class_exists($fqcn)) {
-            return [];
+            return [[], []];
         }
 
-        $declarations = [];
-        foreach ((new ReflectionClass($fqcn))->getAttributes($attribute) as $declaration) {
-            try {
-                $declarations[] = $declaration->newInstance();
-            } catch (Throwable) {
-                // Says nothing: see the class header for why there is nothing to report it against.
-            }
-        }
-
-        return $declarations;
+        return UnreadableAttribute::instantiate((new ReflectionClass($fqcn))->getAttributes($attribute), ClassNames::publishable($fqcn));
     }
 }

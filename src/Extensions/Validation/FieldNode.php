@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Extensions\Validation;
 
+use Docuccino\Core\Document\BlankAsNull;
 use Docuccino\Core\Extensions\Context\RepresentationPolicy;
 use Docuccino\Core\Extensions\Schema\EnumDecoration;
 use Docuccino\Core\Extensions\Schema\SchemaUnion;
@@ -39,6 +40,15 @@ final class FieldNode
     public bool $presenceOptional = false;
 
     public bool $nullable = false;
+
+    /**
+     * The blank strings the server reads as this field's null, as a pattern, where it does
+     * ({@see ValidationField::admitBlank()}); null where it does not.
+     */
+    public ?string $blankPattern = null;
+
+    /** A rule refuses a blank outright, whatever admitted one. Final once set. */
+    public bool $blankRefused = false;
 
     /**
      * A value a rule pinned that the schema cannot carry, wrapped so a falsy one is distinguishable
@@ -156,7 +166,11 @@ final class FieldNode
             }
         }
 
-        return $this->nullable ? self::applyNullable($schema, $policy) : $schema;
+        $schema = $this->nullable ? self::applyNullable($schema, $policy) : $schema;
+
+        // A fact beside the schema rather than a change to it: the schema already takes the null the blank
+        // is read as, so what it takes stays exactly what a client is told.
+        return $this->blankPattern !== null && ! $this->blankRefused ? BlankAsNull::onto($schema, $this->blankPattern) : $schema;
     }
 
     /**

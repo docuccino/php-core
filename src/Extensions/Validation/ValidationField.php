@@ -169,6 +169,23 @@ final readonly class ValidationField
         $this->node->nullable = true;
     }
 
+    /**
+     * The server reads a blank string on this field as the null the field accepts — a request pipeline
+     * that turns one into null before any rule runs. `$pattern` matches every string it counts as blank,
+     * and is stated beside the schema as `x-docuccino.facts.blankAsNull` rather than widening it.
+     * {@see refuseBlank()} outranks it, in any order.
+     */
+    public function admitBlank(string $pattern): void
+    {
+        $this->node->blankPattern = $pattern;
+    }
+
+    /** A rule holds the null a blank becomes to account — a `required` refusing one — so no blank is taken. */
+    public function refuseBlank(): void
+    {
+        $this->node->blankRefused = true;
+    }
+
     /** Flag the whole request as multipart (a `file`/`image` rule was seen). */
     public function markMultipart(): void
     {
