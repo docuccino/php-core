@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\SpecValidation;
 
+use Docuccino\Core\Contract\Pointer;
 use Docuccino\Core\Document\DocumentMembers;
+use Docuccino\Core\Document\PathItem;
 use Docuccino\Core\Emit\Formats;
 use Docuccino\Core\Support\JsonPointer;
 use Opis\JsonSchema\Validator;
@@ -76,14 +78,6 @@ final class OpenApiMetaSchema
             'sha256' => '2385f5bbb8c37878daae73baeabe7f34b2f022a4a8c049329ee61f71796f039c',
         ],
     ];
-
-    /**
-     * The path-item members that hold an Operation Object. `query` is 3.2's addition; naming one version's
-     * method under another is caught by the meta-schema itself, so the union is safe to walk.
-     *
-     * @var list<string>
-     */
-    private const array METHODS = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace', 'query'];
 
     /**
      * A Link Object's two members that hold ANY value — a literal body, or a map of literals and runtime
@@ -191,8 +185,8 @@ final class OpenApiMetaSchema
     }
 
     /**
-     * Every way $instance fails $format's meta-schema, worst-first, one line each:
-     * `<data pointer> <keyword>: <message> (schema <schema pointer>)`. Empty means valid.
+     * Every way $instance fails $format's meta-schema, worst-first, each a {@see Finding} that reads as
+     * one line: `<data pointer> <keyword>: <message> (schema <schema pointer>)`. Empty means valid.
      *
      * $instance must be an object graph — `json_decode` without `true`, or a kind-preserving YAML parse
      * ({@see EmittedDocument::parseYaml()}). Hand it an associative array and every map in the document
@@ -204,7 +198,7 @@ final class OpenApiMetaSchema
      * {@see operationIdFindings()}). That is what a test over the corpus wants — a caller reporting to
      * a PERSON wants the halves apart instead, because they address different people.
      *
-     * @return list<string>
+     * @return list<Finding>
      */
     public static function findings(string $format, mixed $instance): array
     {
@@ -223,7 +217,7 @@ final class OpenApiMetaSchema
      * is usually the application's own, and bucketing the two makes one of them address the wrong
      * person. {@see EmittedSpecCheck} is where that split becomes two diagnostic codes.
      *
-     * @return list<string>
+     * @return list<Finding>
      */
     public static function emitterFindings(string $format, mixed $instance): array
     {
@@ -244,7 +238,7 @@ final class OpenApiMetaSchema
      * The one finding here whose cause is usually the APPLICATION's, which is why it is asked for
      * separately from {@see emitterFindings()} and reported under a code of its own.
      *
-     * @return list<string>
+     * @return list<Finding>
      */
     public static function operationIdFindings(mixed $instance): array
     {
@@ -267,13 +261,11 @@ final class OpenApiMetaSchema
         foreach ($seen as $id => $pointers) {
             if (count($pointers) > 1) {
                 sort($pointers);
-                $findings[] = sprintf('%s operationId: "%s" is used by %s', $pointers[0], $id, implode(', ', $pointers));
+                $findings[] = new Finding($pointers[0], 'operationId', sprintf('"%s" is used by %s', $id, implode(', ', $pointers)));
             }
         }
 
-        sort($findings);
-
-        return $findings;
+        return Finding::sorted($findings);
     }
 
     /**
@@ -297,7 +289,7 @@ final class OpenApiMetaSchema
      * {@see LINK_LITERALS}) are not descended into at all, so a `$ref` written inside an example is data
      * and stays data.
      *
-     * @return list<string>
+     * @return list<Finding>
      */
     public static function referenceFindings(mixed $instance): array
     {
@@ -307,9 +299,8 @@ final class OpenApiMetaSchema
 
         $findings = [];
         self::walkReferences($instance, $instance, '', null, false, $findings);
-        sort($findings);
 
-        return $findings;
+        return Finding::sorted($findings);
     }
 
     /**
@@ -325,7 +316,7 @@ final class OpenApiMetaSchema
      * `webhooks`, `components.pathItems` and callbacks hold a Path Item OR a Reference Object — and a Link
      * Object's `requestBody` is data.
      *
-     * @return list<string>
+     * @return list<Finding>
      */
     public static function referenceSiblingFindings(string $format, mixed $instance): array
     {
@@ -352,7 +343,7 @@ final class OpenApiMetaSchema
                     }
                 }
 
-                $findings[] = sprintf('%s: a Reference Object cannot carry "%s" beside its $ref', JsonPointer::child($pointer, $member), $member);
+                $findings[] = new Finding(JsonPointer::child($pointer, $member), null, sprintf('a Reference Object cannot carry "%s" beside its $ref', $member));
             }
 
             return true;
@@ -360,9 +351,7 @@ final class OpenApiMetaSchema
 
         (new ReferencePositions($check, self::isDraft04($format), $allowed['referencedPathItems']))->document($instance);
 
-        sort($findings);
-
-        return $findings;
+        return Finding::sorted($findings);
     }
 
     /**
@@ -391,7 +380,7 @@ final class OpenApiMetaSchema
      * @param  ?string  $inNameMap  the name map $node is, or null where its keys are keywords
      * @param  bool  $isLink  whether $node is a Link Object, whose two data members {@see LINK_LITERALS}
      *                        names are not descended into
-     * @param  list<string>  $findings
+     * @param  list<Finding>  $findings
      */
     private static function walkReferences(mixed $node, stdClass $root, string $pointer, ?string $inNameMap, bool $isLink, array &$findings): void
     {
@@ -417,7 +406,7 @@ final class OpenApiMetaSchema
 
             if ($inNameMap === null && $key === '$ref') {
                 if (is_string($value) && str_starts_with($value, '#/') && ! self::resolves($root, $value)) {
-                    $findings[] = sprintf('%s $ref: "%s" names nothing this document defines', $at, $value);
+                    $findings[] = new Finding($at, '$ref', sprintf('"%s" names nothing this document defines', $value));
                 }
 
                 continue;
@@ -452,7 +441,7 @@ final class OpenApiMetaSchema
         $node = $root;
 
         foreach (explode('/', substr($ref, 2)) as $token) {
-            $token = str_replace(['~1', '~0'], ['/', '~'], rawurldecode($token));
+            $token = Pointer::unescape(rawurldecode($token));
 
             if ($node instanceof stdClass) {
                 if (! property_exists($node, $token)) {
@@ -493,7 +482,7 @@ final class OpenApiMetaSchema
      * redirected by an edit to the file. 3.0 needs none: it carries no `unevaluatedProperties` at all,
      * so its 43 gates were never disabled.
      *
-     * @return list<string>
+     * @return list<Finding>
      */
     public static function keyGateFindings(string $format, mixed $instance): array
     {
@@ -515,16 +504,14 @@ final class OpenApiMetaSchema
             ];
         }
 
-        sort($findings);
-
-        return $findings;
+        return Finding::sorted($findings);
     }
 
     /**
      * Every key of $map that matches none of $patterns, as findings.
      *
      * @param  list<string>  $patterns
-     * @return list<string>
+     * @return list<Finding>
      */
     private static function gateKeys(mixed $map, array $patterns, string $pointer, string $gate): array
     {
@@ -541,11 +528,10 @@ final class OpenApiMetaSchema
                 }
             }
 
-            $findings[] = sprintf(
-                '%s patternProperties: The key "%s" matches none of %s (schema %s)',
+            $findings[] = new Finding(
                 JsonPointer::child($pointer, (string) $key),
-                $key,
-                implode(', ', $patterns),
+                'patternProperties',
+                sprintf('The key "%s" matches none of %s', $key, implode(', ', $patterns)),
                 $gate === 'document' ? '/properties' : '/$defs/'.$gate,
             );
         }
@@ -633,7 +619,7 @@ final class OpenApiMetaSchema
             $containers = [];
 
             foreach ($pathItems as $pointer => $item) {
-                foreach (self::METHODS as $method) {
+                foreach (PathItem::METHODS as $method) {
                     $operation = $item->{$method} ?? null;
 
                     if (! $operation instanceof stdClass) {
@@ -688,7 +674,7 @@ final class OpenApiMetaSchema
             : self::opisWorkarounds($schema);
 
         $validator = new Validator;
-        $validator->setMaxErrors(50);
+        SchemaFindings::collecting($validator);
 
         // An oracle may not touch what it reads. opis applies schema `default`s INTO the instance, so
         // validating a 3.2 document silently gave it a `jsonSchemaDialect` and a `servers` it never

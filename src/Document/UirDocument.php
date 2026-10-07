@@ -49,6 +49,9 @@ final readonly class UirDocument
      */
     public static function fromArray(array $data): self
     {
+        // A 2.1 artifact keeps each use's `x-docuccino` on its operation; the model keeps it on the use.
+        $data = UseSites::lower($data);
+
         $openapi = $data['openapi'] ?? '';
         $jsonSchemaDialect = $data['jsonSchemaDialect'] ?? null;
 

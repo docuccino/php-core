@@ -6,6 +6,7 @@ namespace Docuccino\Core\Emit;
 
 use Docuccino\Core\Canonical\Canonicalizer;
 use Docuccino\Core\Canonical\CanonicalJsonSerializer;
+use Docuccino\Core\Contract\Pointer;
 use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
 use Docuccino\Core\Document\NodeIdentity;
@@ -662,7 +663,7 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
 
         $token = substr($ref, strlen(self::SHARED_PATH_ITEM_REF));
 
-        return $token === '' || str_contains($token, '/') ? null : str_replace(['~1', '~0'], ['/', '~'], $token);
+        return $token === '' || str_contains($token, '/') ? null : Pointer::unescape($token);
     }
 
     /**
@@ -799,7 +800,7 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
         $tokens = explode('/', $pointer);
 
         return count($tokens) === 3 && $tokens[1] === 'paths'
-            ? strtoupper($method).' '.str_replace(['~1', '~0'], ['/', '~'], $tokens[2])
+            ? strtoupper($method).' '.Pointer::unescape($tokens[2])
             : null;
     }
 

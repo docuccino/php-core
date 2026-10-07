@@ -6,6 +6,7 @@ namespace Docuccino\Core\Extensions\BuiltIn;
 
 use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
+use Docuccino\Core\Document\UseSites;
 use Docuccino\Core\Draft\ResponseDraft;
 use Docuccino\Core\Extensions\Context\DocumentContext;
 use Docuccino\Core\Extensions\Context\RepresentationPolicy;
@@ -23,7 +24,9 @@ use Docuccino\Core\Support\Json;
  * error components" has the argument, and §2 "Component naming" the names.
  *
  * Identity survives both rewrites: an operation keeps its own response id and provenance beside the
- * `$ref`, and a hoisted component carries an id minted from the bytes it publishes — never a per-route
+ * `$ref` for the rest of the build — and a published full artifact carries them on the operation instead,
+ * under `x-docuccino.uses` ({@see UseSites}), since OpenAPI does not allow an extension on a Reference
+ * Object — and a hoisted component carries an id minted from the bytes it publishes — never a per-route
  * source, which has no business speaking for the other routes sharing it.
  *
  * What REPEATS decides whether a body is hoisted; what its producer DECLARED
@@ -119,7 +122,7 @@ final class SharedErrorResponses implements DocumentTransformer
             $components['responses'] = $responses;
         }
 
-        $doc['paths'] = $paths;
+        $doc['paths'] = self::settleDescriptions($paths, $components);
         $doc['components'] = $components;
 
         $document->replace($doc);
@@ -281,6 +284,12 @@ final class SharedErrorResponses implements DocumentTransformer
             ),
         );
 
+        foreach ($names as $key => $name) {
+            if (is_array($bucket[$name] ?? null)) {
+                $bucket[$name] = self::placeholders($bucket[$name], $bodies[$key]['filled']);
+            }
+        }
+
         return [
             self::rewrite($paths, $names, $sites, self::illustrated(...), self::RESPONSES, $spoken),
             $bucket,
@@ -420,6 +429,187 @@ final class SharedErrorResponses implements DocumentTransformer
         $whole = self::namesResponse($response) ? self::claimed($response) : null;
 
         return [[[], $response, $whole ?? self::carries($content, $minted), null]];
+    }
+
+    /**
+     * A use's own `x-docuccino` as it stands beside the `$ref` to the component $published: its claim,
+     * {@see ResponseDraft::COMPONENT}, gives way to the `$ref`, which is the one answer to which component
+     * the use resolves to. The claim survives only where it did not land, as
+     * {@see ResponseDraft::CLAIMED_COMPONENT} — "asked for this, published under that" — which nothing
+     * else in the document says per use. Its example placeholders go too: the example is the component's
+     * now, and so is the list ({@see placeholders()}).
+     */
+    private static function useSite(mixed $extension, string $published): mixed
+    {
+        $facts = is_array($extension) ? ($extension['facts'] ?? null) : null;
+
+        if (! is_array($extension) || ! is_array($facts)) {
+            return $extension;
+        }
+
+        // The example a use's placeholders described is published by the component now, which records
+        // its own ({@see placeholders()}); on the use the list would describe an example it does not have.
+        unset($facts[ResponseDraft::EXAMPLE_PLACEHOLDERS]);
+
+        // Only a claim is read here. A `component` that is not a name was written by something this hoist
+        // cannot speak for — an overlay, a hand-written document — so it stays exactly as it was found.
+        $asked = $facts[ResponseDraft::COMPONENT] ?? null;
+
+        if (is_string($asked)) {
+            unset($facts[ResponseDraft::COMPONENT]);
+
+            if ($asked !== $published) {
+                $facts[ResponseDraft::CLAIMED_COMPONENT] = $asked;
+            }
+        }
+
+        if ($facts === []) {
+            unset($extension['facts']);
+        } else {
+            ksort($facts, SORT_STRING);
+            $extension['facts'] = $facts;
+        }
+
+        return $extension;
+    }
+
+    /**
+     * $published with the members of each example it publishes that its arms filled from a declared type
+     * rather than read, as `facts.examplePlaceholders`: media type → the example's key in the `examples`
+     * map, or `example` for a single one → those members. Only what every arm publishing those bytes
+     * filled is a placeholder ({@see collect()}), so the list is true of the example as published, and a
+     * reader can tell a stand-in value from evidence without re-running the build.
+     *
+     * @param  array<array-key, mixed>  $published
+     * @param  Filled  $filled
+     * @return array<array-key, mixed>
+     */
+    private static function placeholders(array $published, array $filled): array
+    {
+        $content = is_array($published['content'] ?? null) ? $published['content'] : [];
+        $out = [];
+
+        foreach ($content as $mediaType => $media) {
+            if (! is_array($media)) {
+                continue;
+            }
+
+            $examples = array_key_exists(self::EXAMPLE, $media)
+                ? [self::EXAMPLE => $media[self::EXAMPLE]]
+                : array_map(
+                    static fn (mixed $example): mixed => is_array($example) ? ($example['value'] ?? null) : null,
+                    is_array($media[self::EXAMPLES] ?? null) ? $media[self::EXAMPLES] : [],
+                );
+
+            foreach ($examples as $key => $value) {
+                $members = $filled[(string) $mediaType][Json::stable($value)] ?? [];
+
+                if ($members !== []) {
+                    sort($members, SORT_STRING);
+                    $out[(string) $mediaType][(string) $key] = $members;
+                }
+            }
+        }
+
+        if ($out === []) {
+            return $published;
+        }
+
+        ksort($out, SORT_STRING);
+        $extension = is_array($published[self::PROVENANCE] ?? null) ? $published[self::PROVENANCE] : [];
+        $facts = is_array($extension['facts'] ?? null) ? $extension['facts'] : [];
+        $facts[ResponseDraft::EXAMPLE_PLACEHOLDERS] = $out;
+        ksort($facts, SORT_STRING);
+        $extension['facts'] = $facts;
+
+        return [self::PROVENANCE => $extension] + $published;
+    }
+
+    /**
+     * $paths with each use's `componentDescription` settled against the schema it resolves to: dropped
+     * where that schema publishes the same sentence, which then says it for every use; kept as
+     * {@see ResponseDraft::CLAIMED_COMPONENT_DESCRIPTION} where it publishes something else or nothing —
+     * claimers that disagreed leave it with no description — or where the claim never reached a schema.
+     * Run once both passes are done, because the sentence settles on the schema and the claim sits on the
+     * response.
+     *
+     * @param  array<array-key, mixed>  $paths
+     * @param  array<array-key, mixed>  $components
+     * @return array<array-key, mixed>
+     */
+    private static function settleDescriptions(array $paths, array $components): array
+    {
+        $responses = is_array($components['responses'] ?? null) ? $components['responses'] : [];
+        $schemas = is_array($components['schemas'] ?? null) ? $components['schemas'] : [];
+
+        foreach ($paths as $path => $operations) {
+            if (! is_array($operations)) {
+                continue;
+            }
+
+            foreach ($operations as $method => $operation) {
+                if (! is_array($operation) || ! is_array($operation['responses'] ?? null)) {
+                    continue;
+                }
+
+                foreach ($operation['responses'] as $status => $use) {
+                    $extension = is_array($use) ? ($use[self::PROVENANCE] ?? null) : null;
+                    $facts = is_array($extension) ? ($extension['facts'] ?? null) : null;
+                    $said = is_array($facts) ? ($facts[ResponseDraft::COMPONENT_DESCRIPTION] ?? null) : null;
+                    $ref = is_array($use) ? ($use['$ref'] ?? null) : null;
+
+                    if (! is_string($said) || ! is_string($ref) || ! str_starts_with($ref, self::RESPONSES)) {
+                        continue;
+                    }
+
+                    $published = self::publishedDescription($responses[substr($ref, strlen(self::RESPONSES))] ?? null, $schemas);
+
+                    unset($facts[ResponseDraft::COMPONENT_DESCRIPTION]);
+                    if ($said !== $published) {
+                        $facts[ResponseDraft::CLAIMED_COMPONENT_DESCRIPTION] = $said;
+                        ksort($facts, SORT_STRING);
+                    }
+
+                    if ($facts === []) {
+                        unset($extension['facts']);
+                    } else {
+                        $extension['facts'] = $facts;
+                    }
+
+                    $use[self::PROVENANCE] = $extension;
+                    $operation['responses'][$status] = $use;
+                }
+
+                $operations[$method] = $operation;
+            }
+
+            $paths[$path] = $operations;
+        }
+
+        return $paths;
+    }
+
+    /**
+     * The `description` of the one schema a shared response publishes, or null where it states several
+     * representations (a claim reaches a schema only through one), points at no shared schema, or that
+     * schema publishes none.
+     *
+     * @param  array<array-key, mixed>  $schemas
+     */
+    private static function publishedDescription(mixed $response, array $schemas): ?string
+    {
+        $content = is_array($response) && is_array($response['content'] ?? null) ? $response['content'] : [];
+        $media = count($content) === 1 ? reset($content) : null;
+        $ref = is_array($media) && is_array($media['schema'] ?? null) ? ($media['schema']['$ref'] ?? null) : null;
+
+        if (! is_string($ref) || ! str_starts_with($ref, self::SCHEMAS)) {
+            return null;
+        }
+
+        $schema = $schemas[substr($ref, strlen(self::SCHEMAS))] ?? null;
+        $description = is_array($schema) ? ($schema['description'] ?? null) : null;
+
+        return is_string($description) ? $description : null;
     }
 
     /**
@@ -1134,7 +1324,8 @@ final class SharedErrorResponses implements DocumentTransformer
 
     /**
      * Points every shared body at its component, keeping the body's own provenance beside the `$ref` —
-     * a per-route fact the hoisted component cannot state.
+     * a per-route fact the hoisted component cannot state. That is where the build keeps it; publishing
+     * moves it onto the operation ({@see UseSites}).
      *
      * An arm whose prose is not the prose the component publishes keeps its own beside the `$ref`, where
      * a Reference Object's `summary` and `description` override the ones it points at ({@see spoken()}).
@@ -1181,7 +1372,7 @@ final class SharedErrorResponses implements DocumentTransformer
                         }
 
                         if (array_key_exists(self::PROVENANCE, $body)) {
-                            $reference = [self::PROVENANCE => $body[self::PROVENANCE]] + $reference;
+                            $reference = [self::PROVENANCE => self::useSite($body[self::PROVENANCE], $name)] + $reference;
                         }
 
                         $response = self::place($response, $pointer, $reference);

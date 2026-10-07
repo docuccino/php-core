@@ -1585,6 +1585,141 @@ it('keeps a whole-response name in the dedupe scope it names', function (): void
         ->and(responseRefAt($doc, '/c', '422'))->toBe('#/components/responses/SignInIncomplete');
 });
 
+/**
+ * What a use says about its claim once the response is shared. The `$ref` is the one answer to which
+ * component the use resolves to, so the claim itself does not stay on the use; it survives only where it
+ * did not land, as `claimedComponent`, so a reader can see "asked for this, published under that".
+ */
+it('drops a claim that landed from each use, and keeps one that did not as claimedComponent', function (): void {
+    $landed = wholeResponseBody('AuthenticationChallenge', twoNamedRepresentationBody());
+    $contested = wholeResponseBody('AuthenticationChallenge', ['description' => 'Unprocessable Entity', 'content' => [
+        'application/problem+json' => ['schema' => ['$ref' => '#/components/schemas/ProblemDetailsData']],
+        'application/vnd.api+json' => ['schema' => ['$ref' => '#/components/schemas/AuthenticationChallenge']],
+    ]]);
+    $schemas = ['ProblemDetailsData' => ['type' => 'object'], 'AuthenticationChallenge' => ['type' => 'object']];
+
+    $alone = errorDocWithSchemas(['/a' => ['422' => $landed], '/b' => ['422' => $landed]], $schemas);
+    $contest = errorDocWithSchemas([
+        '/a' => ['422' => $landed], '/b' => ['422' => $landed],
+        '/c' => ['422' => $contested], '/d' => ['422' => $contested],
+    ], $schemas);
+
+    $facts = static fn (array $doc, string $path): mixed => $doc['paths'][$path]['get']['responses']['422']['x-docuccino']['facts'] ?? [];
+
+    // Landed: the $ref says it all, and nothing about the claim stays on the use.
+    expect(responseRefAt($alone, '/a', '422'))->toBe('#/components/responses/AuthenticationChallenge')
+        ->and($facts($alone, '/a'))->not->toHaveKey('component')
+        ->and($facts($alone, '/a'))->not->toHaveKey('claimedComponent');
+
+    // Contested: every use was published under a derived name, and each says what it asked for.
+    foreach (['/a', '/b', '/c', '/d'] as $path) {
+        expect(responseRefAt($contest, $path, '422'))->toMatch('~^#/components/responses/AuthenticationChallenge_[a-z2-7]{8}$~')
+            ->and($facts($contest, $path))->not->toHaveKey('component')
+            ->and($facts($contest, $path)['claimedComponent'] ?? null)->toBe('AuthenticationChallenge');
+    }
+});
+
+/**
+ * The other two ways a claim misses: a name no component may carry, and a response offering several
+ * representations, whose claim says nothing about which of them it names. Each use says what it asked for.
+ */
+it('records a claim that did not land however it missed', function (string $status, array $body, string $asked): void {
+    $doc = errorDocWithSchemas(['/a' => [$status => $body], '/b' => [$status => $body]], ['ProblemDetailsData' => ['type' => 'object']]);
+    $use = $doc['paths']['/a']['get']['responses'][$status];
+
+    expect($use['$ref'])->not->toBe('#/components/responses/'.$asked)
+        ->and($use['x-docuccino']['facts'] ?? [])->toBe(['claimedComponent' => $asked])
+        // Only the claim gave way: the rest of the use's own node is where it was.
+        ->and($use['x-docuccino'])->toHaveKey('provenance');
+})->with([
+    'a name no component may carry' => ['404', claimedBody('not a name!', messageBody('Not Found', 'integration:framework-errors'), 'integration:framework-errors'), 'not a name!'],
+    'a claim over several representations' => ['422', claimedBody('Gone', twoNamedRepresentationBody(), 'integration:framework-errors'), 'Gone'],
+]);
+
+it('leaves a component fact that is not a name exactly as it found it', function (): void {
+    // Not a claim, so not the hoist's to rewrite: whatever wrote it keeps it.
+    $body = messageBody('Not Found', 'integration:framework-errors');
+    $body['x-docuccino']['facts'] = ['component' => ['not' => 'a name']];
+
+    $doc = errorDoc(['/a' => ['404' => $body], '/b' => ['404' => $body]]);
+
+    expect(responseRefAt($doc, '/a', '404'))->toStartWith('#/components/responses/')
+        ->and($doc['paths']['/a']['get']['responses']['404']['x-docuccino']['facts'])->toBe(['component' => ['not' => 'a name']]);
+});
+
+/**
+ * Which members of a published example are stand-ins is a fact about the EXAMPLE, so it lives where the
+ * example is: on the shared component, keyed by the example it describes. A use publishes no example once
+ * its response is shared, so it carries no list.
+ */
+it('records the placeholders of the example a shared component publishes, and none on its uses', function (): void {
+    $body = filledBody(['code' => 'forbidden', 'hint' => 'string'], ['hint']);
+    $doc = errorDoc(['/a' => ['403' => $body], '/b' => ['403' => $body]]);
+
+    $name = substr((string) responseRefAt($doc, '/a', '403'), strlen('#/components/responses/'));
+
+    expect($doc['components']['responses'][$name]['x-docuccino']['facts']['examplePlaceholders'])
+        ->toBe(['application/problem+json' => ['example' => ['hint']]])
+        ->and($doc['paths']['/a']['get']['responses']['403']['x-docuccino']['facts'] ?? [])->not->toHaveKey('examplePlaceholders');
+});
+
+it('keys the placeholders of each example in an examples map by its key', function (): void {
+    // Two arms whose examples neither covers the other publish both, under minted keys.
+    $one = filledBody(['code' => 'forbidden', 'hint' => 'string'], ['hint']);
+    $two = filledBody(['code' => 'denied', 'hint' => 'string'], ['hint']);
+    $doc = errorDoc(['/a' => ['403' => $one], '/b' => ['403' => $two]]);
+
+    $name = substr((string) responseRefAt($doc, '/a', '403'), strlen('#/components/responses/'));
+    $published = $doc['components']['responses'][$name];
+    $keys = array_keys($published['content']['application/problem+json']['examples']);
+
+    expect($keys)->toHaveCount(2)
+        ->and($published['x-docuccino']['facts']['examplePlaceholders'])
+        ->toBe(['application/problem+json' => array_fill_keys($keys, ['hint'])]);
+});
+
+it('is a no-op the second time it runs over a component that records placeholders', function (): void {
+    $body = filledBody(['code' => 'forbidden', 'hint' => 'string'], ['hint']);
+    $once = errorDoc(['/a' => ['403' => $body], '/b' => ['403' => $body]]);
+
+    expect(transformedErrorDoc($once))->toBe($once);
+});
+
+/**
+ * What a claimer said the error is settles on the schema its name names. Where it landed, the schema says it
+ * for every use; where it did not, each use keeps its own sentence as claimedComponentDescription.
+ */
+it('drops a description the shared schema publishes from each use, and keeps one it does not', function (): void {
+    $gone = messageBody('Gone', 'integration:framework-errors');
+
+    $landed = errorDoc(['/a' => ['410' => describedBody('Gone', 'The record was deleted.', $gone)], '/b' => ['410' => describedBody('Gone', 'The record was deleted.', $gone)]]);
+
+    $disputed = errorDoc([
+        '/a' => ['410' => describedBody('Gone', 'The record was deleted.', $gone)], '/b' => ['410' => describedBody('Gone', 'The record was deleted.', $gone)],
+        '/c' => ['410' => describedBody('Gone', 'The record expired.', $gone)], '/d' => ['410' => describedBody('Gone', 'The record expired.', $gone)],
+    ]);
+
+    $facts = static fn (array $doc, string $path): array => $doc['paths'][$path]['get']['responses']['410']['x-docuccino']['facts'] ?? [];
+
+    expect($landed['components']['schemas']['Gone']['description'] ?? null)->toBe('The record was deleted.')
+        ->and($facts($landed, '/a'))->not->toHaveKey('componentDescription')
+        ->and($facts($landed, '/a'))->not->toHaveKey('claimedComponentDescription')
+        // Disputed: the schema publishes neither sentence, so each use says which one it claimed.
+        ->and($disputed['components']['schemas']['Gone'])->not->toHaveKey('description')
+        ->and($facts($disputed, '/a')['claimedComponentDescription'] ?? null)->toBe('The record was deleted.')
+        ->and($facts($disputed, '/c')['claimedComponentDescription'] ?? null)->toBe('The record expired.')
+        ->and($facts($disputed, '/c'))->not->toHaveKey('componentDescription');
+});
+
+it('keeps the description of a claim that never reached a schema', function (): void {
+    // Several representations: the claim names none of the shapes, so its sentence is published nowhere.
+    $body = describedBody('Gone', 'The record was deleted.', twoNamedRepresentationBody());
+    $doc = errorDocWithSchemas(['/a' => ['422' => $body], '/b' => ['422' => $body]], ['ProblemDetailsData' => ['type' => 'object']]);
+
+    expect($doc['paths']['/a']['get']['responses']['422']['x-docuccino']['facts'] ?? [])
+        ->toBe(['claimedComponent' => 'Gone', 'claimedComponentDescription' => 'The record was deleted.']);
+});
+
 it('reports a whole-response name two different bodies contest, rather than picking one', function (): void {
     // An author's name is authoritative and still not magic: two different bodies asking for it is a
     // question only they can settle, and the ladder answers it the way it answers every other contest.
@@ -1680,14 +1815,16 @@ it('leaves a claimed body alone when a response stating several representations 
         ->and(array_keys($after['components']['responses']))->toBe(['NotFound', 'Error404']);
 });
 
-it('leaves the declaration on the operation and out of the component it names', function (): void {
-    // The claim is a per-route provenance fact like the id beside it, so it travels with the `$ref` and
-    // never into the shared body — which speaks for every route pointing at it.
+it('keeps a landed declaration out of the component it names, and off the use the $ref already answers', function (): void {
+    // The claim is a per-route fact, so it never travels into the shared body — which speaks for every
+    // route pointing at it. And once it has landed, the use's `$ref` names the component it asked for, so
+    // nothing about the claim needs to stay beside it either.
     $body = claimedBody('NotFound', messageBody('Not Found', 'integration:framework-errors'));
 
     $doc = errorDoc(['/a' => ['404' => $body], '/b' => ['404' => $body]]);
 
-    expect($doc['paths']['/a']['get']['responses']['404']['x-docuccino']['facts'])->toBe(['component' => 'NotFound'])
+    expect(responseRefAt($doc, '/a', '404'))->toBe('#/components/responses/NotFound')
+        ->and($doc['paths']['/a']['get']['responses']['404']['x-docuccino'])->not->toHaveKey('facts')
         ->and($doc['components']['responses']['NotFound'])->not->toHaveKey('x-docuccino')
         ->and($doc['components']['schemas']['NotFound'])->not->toHaveKey('facts');
 });

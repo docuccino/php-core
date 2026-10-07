@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Docuccino\Core\Document\UirDocument;
 use Docuccino\Core\Emit\EmitOptions;
 use Docuccino\Core\Emit\Formats;
+use Docuccino\Core\SpecValidation\Finding;
 use Docuccino\Core\SpecValidation\OpenApiMetaSchema;
 use Docuccino\Core\Tests\Support\EmittedDocument;
 
@@ -279,7 +280,7 @@ it('reports an operationId two operations share, and nothing when they differ', 
     ]), flags: JSON_THROW_ON_ERROR);
 
     expect(OpenApiMetaSchema::findings('openapi-3.2', $document('listThings')))
-        ->toBe(['/paths/~1others/get operationId: "listThings" is used by /paths/~1others/get, /paths/~1things/get'])
+        ->toEqual([new Finding('/paths/~1others/get', 'operationId', '"listThings" is used by /paths/~1others/get, /paths/~1things/get')])
         ->and(OpenApiMetaSchema::findings('openapi-3.2', $document('listOthers')))->toBe([]);
 });
 
@@ -316,7 +317,7 @@ it('reports an empty map written as a sequence, and nothing when it is written a
     $sound = EmittedDocument::parseYaml(sprintf($skeleton, '{}'));
 
     expect(OpenApiMetaSchema::findings('openapi-3.2', $broken))
-        ->toBe(['/paths type: The data (array) must match the type: object (schema /$defs/paths)'])
+        ->toEqual([new Finding('/paths', 'type', 'The data (array) must match the type: object', '/$defs/paths')])
         ->and(OpenApiMetaSchema::findings('openapi-3.2', $sound))->toBe([])
         ->and(EmittedDocument::differences($sound, $broken))->toBe(['/paths: json is map, yaml is sequence'])
         ->and(EmittedDocument::emptyMaps($sound))->toBe(['/paths'])

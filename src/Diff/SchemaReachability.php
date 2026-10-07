@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Diff;
 
+use Docuccino\Core\Contract\Pointer;
 use Docuccino\Core\Document\UirDocument;
 
 /**
@@ -147,7 +148,7 @@ final readonly class SchemaReachability
             // Both spellings: a pointer escapes `/` and `~`, a URI fragment escapes more again, and which
             // one a hand-written artifact used is not worth guessing at.
             $out[$segment] = true;
-            $out[str_replace(['~1', '~0'], ['/', '~'], rawurldecode($segment))] = true;
+            $out[Pointer::unescape(rawurldecode($segment))] = true;
         }
     }
 }

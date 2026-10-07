@@ -7,6 +7,7 @@ namespace Docuccino\Core\Emit;
 use Docuccino\Core\Canonical\Canonicalizer;
 use Docuccino\Core\Canonical\CanonicalJsonSerializer;
 use Docuccino\Core\Document\UirDocument;
+use Docuccino\Core\Document\UseSites;
 
 /**
  * Emits a {@see UirDocument} in full — canonicalised (member order, sorted keys, method/parameter
@@ -59,7 +60,9 @@ final readonly class UirEmitter implements ReportingEmitter
             $document = $this->levelProvenance($document, $options->provenance);
         }
 
-        return $this->serializer->serialize($this->canonicalizer->canonicalize($document));
+        // After levelling, which finds provenance only under an `x-docuccino` key: once lifted, a use's
+        // provenance sits deeper, under its operation's `uses`.
+        return $this->serializer->serialize($this->canonicalizer->canonicalize(UseSites::lift($document)));
     }
 
     /** Applies the provenance level to every `x-docuccino` member in the tree. */

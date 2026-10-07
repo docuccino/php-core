@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Docuccino\Core\Emit;
 
 use Docuccino\Core\Canonical\Canonicalizer;
+use Docuccino\Core\Contract\Pointer;
 use Docuccino\Core\Draft\SchemaKeywords;
 use Docuccino\Core\Support\Arr;
 use Docuccino\Core\Support\BoundedNumber;
@@ -357,7 +358,7 @@ final readonly class SchemaExampleFactory
 
         $cursor = $components;
         foreach (array_slice(explode('/', $ref), 2) as $segment) {
-            $segment = str_replace(['~1', '~0'], ['/', '~'], $segment);
+            $segment = Pointer::unescape($segment);
             if (! is_array($cursor) || ! array_key_exists($segment, $cursor)) {
                 return null;
             }

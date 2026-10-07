@@ -9,6 +9,7 @@ use Docuccino\Core\Document\IgnoredHeaders;
 use Docuccino\Core\Document\NodeIdentity;
 use Docuccino\Core\Document\PathItem;
 use Docuccino\Core\Document\UirDocument;
+use Docuccino\Core\Document\UseSites;
 use Docuccino\Core\Support\Arr;
 use Docuccino\Core\Support\JsonValue;
 use JsonException;
@@ -54,6 +55,12 @@ final class ContractIndex
      */
     public static function fromArray(array $document, ?string $json = null): self
     {
+        // Every id is indexed where the model keeps it, beside a use's `$ref`, whichever form was read.
+        // The JSON text is kept as the caller wrote it, a 2.1 artifact's `uses` included: re-encoding the
+        // lowered array would lose `{}` against `[]`, which is what the graph is kept for, and no graph
+        // read touches a use's `x-docuccino`.
+        $document = UseSites::lower($document);
+
         return new self(
             $document,
             self::index($document),

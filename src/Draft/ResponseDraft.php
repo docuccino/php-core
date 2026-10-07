@@ -36,6 +36,25 @@ final class ResponseDraft
     public const COMPONENT = 'component';
 
     /**
+     * What a USE of a shared response says about its claim once the response is hoisted: the name it
+     * asked for, present only where the component its `$ref` points at is called something else — a
+     * collision sent it up the ladder, the name was not a legal one, or the response offered several
+     * representations and the claim named none of them. Where the claim landed, the `$ref` already says
+     * so and this is absent. {@see COMPONENT} itself never reaches a use: it is the claim the hoist
+     * reads, and once the response is shared, which component the use resolves to is the `$ref`'s answer
+     * alone.
+     */
+    public const CLAIMED_COMPONENT = 'claimedComponent';
+
+    /**
+     * {@see COMPONENT_DESCRIPTION}'s counterpart on a use of a shared response: the sentence its claimer
+     * said the error is, present only where the schema the use resolves to publishes something else —
+     * claimers that disagreed leave the schema with no description at all — or where the claim never
+     * reached a schema. Where the sentence landed, the schema publishes it and this is absent.
+     */
+    public const CLAIMED_COMPONENT_DESCRIPTION = 'claimedComponentDescription';
+
+    /**
      * Frozen beside {@see COMPONENT} when the standing claim names the WHOLE response — every
      * representation the status answers with — rather than the one body its claimer built. Public for the
      * same reason: the shared-error hoist reads it back off the finished document.

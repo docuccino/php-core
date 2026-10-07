@@ -6,6 +6,7 @@ namespace Docuccino\Core\Identity;
 
 use Docuccino\Core\Canonical\Canonicalizer;
 use Docuccino\Core\Canonical\CanonicalJsonSerializer;
+use Docuccino\Core\Emit\UirEmitter;
 
 /**
  * `contentHash`: hex SHA-256 over the document's canonical serialization, minus everything that
@@ -50,8 +51,9 @@ final readonly class ContentHasher
             }
         }
 
-        $canonical = $this->serializer->serialize($this->canonicalizer->canonicalize($document));
-
-        return hash('sha256', $canonical);
+        // The hash is of the document as the full export publishes it, so a reader holding a full
+        // artifact written with every provenance record can recompute it from the bytes. One levelled
+        // to `winners` or `none` has dropped content the hash covered, and cannot.
+        return hash('sha256', (new UirEmitter($this->canonicalizer, $this->serializer))->emitArray($document));
     }
 }

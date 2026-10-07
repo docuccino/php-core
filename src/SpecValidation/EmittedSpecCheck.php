@@ -66,7 +66,7 @@ final class EmittedSpecCheck
 
         return [
             ...array_map(
-                static fn (string $finding): Diagnostic => self::invalid($format, $finding),
+                static fn (Finding $finding): Diagnostic => self::invalid($format, (string) $finding),
                 OpenApiMetaSchema::emitterFindings($format, $instance),
             ),
             ...self::duplicateOperationIds($format, $instance),

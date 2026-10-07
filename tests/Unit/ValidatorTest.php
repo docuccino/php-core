@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use Docuccino\Core\SpecValidation\Finding;
+use Docuccino\Core\SpecValidation\SchemaFindings;
 use Docuccino\Core\SpecValidation\Validator;
 
 beforeEach(function (): void {
@@ -148,3 +150,50 @@ it('refuses a schema it cannot read, and says which file', function (string $cas
     'JSON, but not an object' => ['not an object', 'UIR schema is not a JSON object'],
     'the embedded resource renamed' => ['resource renamed', 'does not resolve'],
 ]);
+
+/**
+ * opis stops at the first error unless told otherwise, so a document broken in three places used to
+ * report one — and the author fixed it, re-ran, and met the next. Every place is reported at once now,
+ * each anchored where it is.
+ */
+it('reports every place a document fails, not only the first', function (): void {
+    $doc = workedExample();
+    $doc['paths']['/api/v1/forms']['get']['x-docuccino']['provenance'][0]['layer'] = 'bogus';
+    $doc['paths']['/api/v1/forms']['get']['x-docuccino']['id'] = 'op:v1:NOT-A-NODE-ID';
+    unset($doc['info']['title']);
+
+    $pointers = array_map(
+        static fn (Finding $finding): string => $finding->pointer,
+        (new Validator)->validate($doc)->errors,
+    );
+
+    expect($pointers)
+        ->toContain('/paths/~1api~1v1~1forms/get/x-docuccino/provenance/0/layer')
+        ->toContain('/paths/~1api~1v1~1forms/get/x-docuccino/id')
+        ->toContain('/info');
+});
+
+/**
+ * Collecting every error must not turn one mistake into many: a single wrong value is a single finding.
+ */
+it('reports one defect once', function (): void {
+    $doc = workedExample();
+    $doc['paths']['/api/v1/forms']['get']['x-docuccino']['provenance'][0]['layer'] = 'bogus';
+
+    expect((new Validator)->validate($doc)->errors)->toHaveCount(1);
+});
+
+/**
+ * Past the limit the report keeps the first findings and says there were more, so a list cut short never
+ * reads as the whole answer.
+ */
+it('stops at the limit and says there were more', function (): void {
+    $doc = workedExample();
+    $record = $doc['paths']['/api/v1/forms']['get']['x-docuccino']['provenance'][0];
+    $doc['paths']['/api/v1/forms']['get']['x-docuccino']['provenance'] = array_fill(0, SchemaFindings::LIMIT + 10, ['layer' => 'bogus'] + $record);
+
+    $errors = (new Validator)->validate($doc)->errors;
+
+    expect($errors)->toHaveCount(SchemaFindings::LIMIT + 1)
+        ->and((string) end($errors))->toBe('/: more than 50 findings; the first 50 are shown');
+});

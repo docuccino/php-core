@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Docuccino\Core\SpecValidation;
 
 use Closure;
+use Docuccino\Core\Document\PathItem;
 use Docuccino\Core\Draft\SchemaKeywords;
 use Docuccino\Core\Support\JsonPointer;
 use stdClass;
@@ -21,9 +22,6 @@ use stdClass;
  */
 final readonly class ReferencePositions
 {
-    /** The Path Item members that hold an Operation Object, across versions. */
-    private const array METHODS = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace', 'query'];
-
     /**
      * The `components` buckets whose entries may be references, and what an inline entry is. Schemas
      * and path items are the two walked apart, because whether theirs are references depends on the
@@ -95,7 +93,7 @@ final readonly class ReferencePositions
 
         $this->list($item->parameters ?? null, $pointer.'/parameters', 'parameter');
 
-        foreach (self::METHODS as $method) {
+        foreach (PathItem::METHODS as $method) {
             $this->operation($item->{$method} ?? null, $pointer.'/'.$method);
         }
 

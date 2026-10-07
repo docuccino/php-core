@@ -7,6 +7,7 @@ namespace Docuccino\Core\Canonical;
 use Closure;
 use Docuccino\Core\Document\Parameter;
 use Docuccino\Core\Document\PathItem;
+use Docuccino\Core\Document\UseSites;
 use Docuccino\Core\Draft\SchemaKeywords;
 use Docuccino\Core\Support\Arr;
 use Docuccino\Core\Support\Json;
@@ -642,6 +643,15 @@ final class Canonicalizer
             'mock' => fn (mixed $v): mixed => $this->object($v, $this->handlers['docuccino.mock'] ??= [
                 'faker' => $this->keep(...),
                 'seedGroup' => $this->keep(...),
+            ]),
+            // An operation's record of its uses ({@see UseSites}): each one an `x-docuccino` of its own,
+            // keyed by status, or by `in` then `name`, in code-point order like every other map.
+            'uses' => fn (mixed $v): mixed => $this->object($v, $this->handlers['docuccino.uses'] ??= [
+                'responses' => fn (mixed $r): mixed => $this->sortedMap($r, $this->canonicalizeDocuccino(...)),
+                'parameters' => fn (mixed $p): mixed => $this->sortedMap(
+                    $p,
+                    fn (mixed $in): mixed => $this->sortedMap($in, $this->canonicalizeDocuccino(...)),
+                ),
             ]),
             'document' => fn (mixed $v): mixed => $this->object($v, $this->handlers['docuccino.document'] ??= [
                 'id' => $this->keep(...),

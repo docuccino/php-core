@@ -10,7 +10,7 @@ namespace Docuccino\Core\SpecValidation;
 final readonly class ValidationResult
 {
     /**
-     * @param  list<ValidationError>  $errors
+     * @param  list<Finding>  $errors
      */
     public function __construct(
         private bool $valid,
@@ -23,7 +23,7 @@ final readonly class ValidationResult
     }
 
     /**
-     * @param  list<ValidationError>  $errors
+     * @param  list<Finding>  $errors
      */
     public static function invalid(array $errors): self
     {
@@ -40,6 +40,6 @@ final readonly class ValidationResult
      */
     public function messages(): array
     {
-        return array_map(static fn (ValidationError $error): string => (string) $error, $this->errors);
+        return array_map(strval(...), $this->errors);
     }
 }

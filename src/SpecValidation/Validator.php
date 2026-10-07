@@ -6,8 +6,8 @@ namespace Docuccino\Core\SpecValidation;
 
 use Docuccino\Core\Canonical\Canonicalizer;
 use Docuccino\Core\Canonical\CanonicalJsonSerializer;
+use Docuccino\Core\Emit\UirEmitter;
 use Docuccino\Core\Spec\UirSpec;
-use Opis\JsonSchema\Errors\ErrorFormatter;
 use Opis\JsonSchema\Exceptions\UnresolvedReferenceException;
 use Opis\JsonSchema\Validator as OpisValidator;
 use RuntimeException;
@@ -72,7 +72,8 @@ final class Validator
      */
     public function validate(array $document): ValidationResult
     {
-        $json = $this->serializer->serialize($this->canonicalizer->canonicalize($document));
+        // Validated as it is published: the bytes the full export writes, not the shape a build holds.
+        $json = (new UirEmitter($this->canonicalizer, $this->serializer))->emitArray($document);
 
         $data = json_decode($json, false, flags: JSON_THROW_ON_ERROR);
 
@@ -80,8 +81,10 @@ final class Validator
         // embedded in the schema itself, which is the property `SchemaSelfContainmentTest` holds.
         // So a reference that does not resolve says the schema FILE is wrong, not the document — and
         // opis names only the URI, which reads like a failed download of the thing nothing fetches.
+        $validator = SchemaFindings::collecting(new OpisValidator);
+
         try {
-            $result = (new OpisValidator)->validate($data, $this->loadSchema($this->schemaPath));
+            $result = $validator->validate($data, $this->loadSchema($this->schemaPath));
         } catch (UnresolvedReferenceException $exception) {
             throw new RuntimeException(
                 'UIR schema at '.$this->schemaPath.' does not resolve '.$exception->getRef().
@@ -94,26 +97,11 @@ final class Validator
             return ValidationResult::valid();
         }
 
-        $error = $result->error();
-
-        if ($error === null) {
-            return ValidationResult::invalid([new ValidationError('', 'Document failed schema validation.')]);
-        }
-
-        $formatted = (new ErrorFormatter)->format($error, true);
-
-        $errors = [];
-        foreach ($formatted as $pointer => $messages) {
-            foreach ((array) $messages as $message) {
-                $errors[] = new ValidationError((string) $pointer, is_string($message) ? $message : (string) json_encode($message));
-            }
-        }
-
-        if ($errors === []) {
-            $errors[] = new ValidationError('', 'Document failed schema validation.');
-        }
-
-        return ValidationResult::invalid($errors);
+        // A failed validation always names at least one place; the fallback keeps "invalid" from ever
+        // arriving with nothing to show, which would read as valid to anyone counting findings.
+        return ValidationResult::invalid(
+            SchemaFindings::fromError($result->error()) ?: [new Finding('/', null, 'Document failed schema validation.')],
+        );
     }
 
     private function loadSchema(string $path): object

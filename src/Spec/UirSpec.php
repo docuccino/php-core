@@ -24,7 +24,7 @@ namespace Docuccino\Core\Spec;
 final class UirSpec
 {
     /** The precise format version an emitted document declares. */
-    public const string VERSION = '2.0.0';
+    public const string VERSION = '2.1.0';
 
     /** The major.minor the schema is published and bundled under. */
     public static function minor(): string

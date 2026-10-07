@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Tests\Support;
 
+use Docuccino\Core\SpecValidation\SchemaFindings;
 use Opis\JsonSchema\Validator;
 use RuntimeException;
 use stdClass;
@@ -125,8 +126,7 @@ final class ArazzoSchema
             ));
         }
 
-        $validator = new Validator;
-        $validator->setMaxErrors(50);
+        $validator = SchemaFindings::collecting(new Validator);
 
         // An oracle may not touch what it reads: opis writes schema `default`s INTO the instance otherwise.
         $validator->parser()->setOption('allowDefaults', false);

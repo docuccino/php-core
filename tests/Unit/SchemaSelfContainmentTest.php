@@ -119,10 +119,10 @@ function canonicalSchemaText(string $path): string
 it('states absolute references at all, so the scans below are over something', function (): void {
     // Anti-vacuity. A file with no absolute reference in it is trivially self-contained, and a walk
     // that stopped recognising `$ref` would report every schema in the family clean for ever.
-    $references = absoluteSchemaReferences(dirname(__DIR__, 4).'/spec/uir/2.0/schema.json');
+    $references = absoluteSchemaReferences(dirname(__DIR__, 4).'/spec/uir/'.UirSpec::minor().'/schema.json');
 
     expect($references)->toBe([UirSpec::extensionSchemaUrl()])
-        ->and(count(embeddedSchemaResources(dirname(__DIR__, 4).'/spec/uir/2.0/schema.json')))->toBe(1);
+        ->and(count(embeddedSchemaResources(dirname(__DIR__, 4).'/spec/uir/'.UirSpec::minor().'/schema.json')))->toBe(1);
 });
 
 it('leaves no reference outside the file it is written in', function (string $version, string $name): void {
@@ -161,12 +161,12 @@ it('holds the copy the validator actually loads to both properties', function ()
  */
 it('calls a reference that leaves the file, and a copy edited on either side', function (): void {
     $tmp = sys_get_temp_dir().'/docuccino-self-containment-'.uniqid();
-    @mkdir($tmp.'/2.0', 0755, true);
+    @mkdir($tmp.'/'.UirSpec::minor(), 0755, true);
 
     $copy = static function (string $name) use ($tmp): string {
-        copy(dirname(__DIR__, 4).'/spec/uir/2.0/'.$name, $tmp.'/2.0/'.$name);
+        copy(dirname(__DIR__, 4).'/spec/uir/'.UirSpec::minor().'/'.$name, $tmp.'/'.UirSpec::minor().'/'.$name);
 
-        return $tmp.'/2.0/'.$name;
+        return $tmp.'/'.UirSpec::minor().'/'.$name;
     };
 
     $document = $copy('schema.json');
@@ -211,7 +211,7 @@ it('calls a reference that leaves the file, and a copy edited on either side', f
     expect(embeddedSchemaResources($document))->toBe([])
         ->and(referencesLeavingSchema($document))->toBe([UirSpec::extensionSchemaUrl()]);
 
-    array_map('unlink', (array) glob($tmp.'/2.0/*'));
-    @rmdir($tmp.'/2.0');
+    array_map('unlink', (array) glob($tmp.'/'.UirSpec::minor().'/*'));
+    @rmdir($tmp.'/'.UirSpec::minor());
     @rmdir($tmp);
 });

@@ -2,8 +2,10 @@
 
 declare(strict_types=1);
 
+use Docuccino\Core\Document\UseSites;
 use Docuccino\Core\Patch\Layer;
 use Docuccino\Core\Provenance\Explain\ExplainedNode;
+use Docuccino\Core\Provenance\Explain\FieldContribution;
 use Docuccino\Core\Provenance\Explain\OperationExplainer;
 
 /**
@@ -110,6 +112,28 @@ it('names a parameter by the in:name pair rather than its position', function ()
     expect($nodes[1]->label)->toBe('parameters.query:status')
         ->and($nodes[1]->pointer)->toBe('/paths/~1api~1invoices/post/parameters/0')
         ->and($nodes[1]->fields[0]->winner()?->value)->toBeFalse();
+});
+
+/**
+ * A UIR 2.1 use of a shared response no longer carries `facts.component`: the `$ref` names the component its
+ * claim landed on. The trail still says `component` was written, so it must read as the name the producer
+ * asked for — never as a field a layer removed.
+ */
+it('reads the component of a hoisted use off its $ref, and off claimedComponent where the claim did not land', function (): void {
+    $landed = $this->document;
+    unset($landed['paths']['/api/invoices']['post']['responses']['201']['x-docuccino']['facts']);
+
+    $missed = $this->document;
+    $missed['paths']['/api/invoices']['post']['responses']['201']['x-docuccino']['facts'] = ['claimedComponent' => 'InvoiceCreated'];
+
+    $component = static fn (array $document): FieldContribution => (new OperationExplainer)
+        ->explain(UseSites::lift($document), '/api/invoices', 'post')[2]->fields[0]->winner()
+        ?? throw new RuntimeException('no winner');
+
+    expect($component($landed)->value)->toBe('Created')
+        ->and($component($landed)->removed)->toBeFalse()
+        ->and($component($missed)->value)->toBe('InvoiceCreated')
+        ->and($component($missed)->removed)->toBeFalse();
 });
 
 it('reads a value off the facts bag and off the component the node points at', function (): void {
