@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Draft;
 
+use Docuccino\Core\Extensions\Schema\EnumDecoration;
+
 /**
  * What the JSON Schema keywords MEAN, in the one place anything that reads a schema asks. Seven
  * questions live here: the classification {@see SchemaDraft::declareShape()} reasons over — shape,
@@ -103,6 +105,11 @@ final class SchemaKeywords
         'else',
         'discriminator',
     ];
+
+    /** The keywords whose value is one instance, and the ones whose value lists instances ({@see survivor()}). */
+    private const array VALUES = ['const', 'example', 'default'];
+
+    private const array VALUE_LISTS = ['enum', 'examples'];
 
     /**
      * The keywords that constrain values of a given instance type, mapped to the types they constrain
@@ -354,16 +361,179 @@ final class SchemaKeywords
     }
 
     /**
-     * Whether a schema states what kind of value it is — a `type`, or a `$ref` whose component states
-     * it instead. That is what makes a write a declared SHAPE rather than a patch of one keyword, and
-     * so what makes anything it leaves out superseded. A description or an example on its own
+     * Whether a schema states what kind of value it is — a `type`, a `$ref` whose component states it
+     * instead, or a composition of alternatives, which is how a declared union (a nullable class among
+     * them) is spelled. That is what makes a write a declared SHAPE rather than a patch of one keyword,
+     * and so what makes anything it leaves out superseded. A description or an example on its own
      * declares no shape and therefore supersedes nothing.
      *
      * @param  array<string, mixed>  $schema
      */
     public static function statesShape(array $schema): bool
     {
-        return array_key_exists('type', $schema) || array_key_exists('$ref', $schema);
+        if (array_key_exists('type', $schema) || array_key_exists('$ref', $schema)) {
+            return true;
+        }
+
+        // A list of subschemas that applies whatever the type is a composition; `prefixItems` is an array's.
+        foreach (self::at(self::POSITION_SCHEMA_LIST) as $keyword) {
+            if (self::typesOf($keyword) === null && array_key_exists($keyword, $schema)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * What of a standing keyword survives a declared shape: `[$value]` as it stands, `[$narrowed]`, or null
+     * where it is superseded ({@see isSuperseded()}). An `enum` or a `const` lists values, and a value the
+     * declared type cannot hold is one the declaration says cannot be sent — left standing, `type: integer`
+     * beside `enum: ["1", "2"]` is a schema no request satisfies. So an `enum` keeps the values the declared
+     * type holds and goes only when none is left; a `const` it cannot hold goes. An `example`, `examples` or
+     * `default` is a value too, and one the type cannot hold is no example of it. A declaration naming no
+     * type of its own — a `$ref`, a composition — cannot be read for this, and leaves the list standing.
+     *
+     * @param  array<string, mixed>  $declaration
+     * @return array{0: mixed}|null
+     */
+    public static function survivor(array $declaration, string $keyword, mixed $standing): ?array
+    {
+        if (self::isSuperseded($keyword, $declaration)) {
+            return null;
+        }
+
+        $types = self::declaredTypes($declaration);
+        $list = in_array($keyword, self::VALUE_LISTS, true);
+        if (array_key_exists($keyword, $declaration) || $types === [] || (! $list && ! in_array($keyword, self::VALUES, true))) {
+            return [$standing];
+        }
+
+        $holds = static fn (mixed $value): bool => array_intersect(self::instanceTypes($value), $types) !== [];
+
+        if (! $list) {
+            return $holds($standing) ? [$standing] : null;
+        }
+
+        if (! is_array($standing) || ! array_is_list($standing)) {
+            return [$standing];
+        }
+
+        $kept = array_values(array_filter($standing, $holds));
+        if ($kept === []) {
+            return null;
+        }
+
+        return [$kept === $standing ? $standing : $kept];
+    }
+
+    /**
+     * What of every standing keyword survives a declared shape, keyword => {@see survivor()}'s answer — and
+     * the decorations positional over an `enum` ({@see EnumDecoration::KEYS}) narrowed with it, or gone with
+     * it, since a name left beside no value, or beside another value, names nothing true.
+     *
+     * @param  array<string, mixed>  $declaration
+     * @param  array<array-key, mixed>  $standing
+     * @return array<string, array{0: mixed}|null>
+     */
+    public static function survivors(array $declaration, array $standing): array
+    {
+        $out = [];
+        foreach ($standing as $keyword => $value) {
+            $out[(string) $keyword] = self::survivor($declaration, (string) $keyword, $value);
+        }
+
+        $enum = $standing['enum'] ?? null;
+        if (! is_array($enum) || ! array_key_exists('enum', $out) || $out['enum'] === [$enum]) {
+            return $out;
+        }
+
+        $kept = $out['enum'] === null || ! is_array($out['enum'][0]) ? [] : $out['enum'][0];
+        foreach (EnumDecoration::KEYS as $key) {
+            if (array_key_exists($key, $out) && ! array_key_exists($key, $declaration)) {
+                $out[$key] = self::decorationOf($standing[$key], array_values($enum), $kept);
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * One enum decoration narrowed to the values kept: a list by position, a description map by value.
+     *
+     * @param  list<mixed>  $enum
+     * @param  array<mixed>  $kept
+     * @return array{0: mixed}|null
+     */
+    private static function decorationOf(mixed $decoration, array $enum, array $kept): ?array
+    {
+        if (is_array($decoration) && array_is_list($decoration) && count($decoration) === count($enum)) {
+            $narrowed = [];
+            foreach ($enum as $i => $value) {
+                if (in_array($value, $kept, true)) {
+                    $narrowed[] = $decoration[$i];
+                }
+            }
+
+            return $narrowed === [] ? null : [$narrowed];
+        }
+
+        if (is_array($decoration) || $decoration instanceof \stdClass) {
+            $keys = array_map(static fn (mixed $value): string => is_scalar($value) ? (string) $value : '', $kept);
+            // Keyed by value, so a numeric value's key is an int — and a map of them reads as a list.
+            $narrowed = array_filter((array) $decoration, static fn (int|string $key): bool => in_array((string) $key, $keys, true), ARRAY_FILTER_USE_KEY);
+
+            return $narrowed === [] ? null : [array_is_list($narrowed) ? (object) $narrowed : $narrowed];
+        }
+
+        return null;
+    }
+
+    /**
+     * A declared shape written over a standing schema, as arrays — {@see SchemaDraft::declareShape()} for a
+     * caller holding no draft: what the declaration states wins, and of the rest only what it does not
+     * supersede stays, in the place it stood.
+     *
+     * @param  array<string, mixed>  $declaration
+     * @param  array<string, mixed>  $standing
+     * @return array<string, mixed>
+     */
+    public static function declaredOver(array $declaration, array $standing): array
+    {
+        $survivors = self::statesShape($declaration) ? self::survivors($declaration, $standing) : null;
+
+        $out = [];
+        foreach ($standing as $keyword => $value) {
+            $keyword = (string) $keyword;
+            $survivor = $survivors === null ? [$value] : $survivors[$keyword];
+            if (array_key_exists($keyword, $declaration)) {
+                $out[$keyword] = $declaration[$keyword];
+            } elseif ($survivor !== null) {
+                $out[$keyword] = $survivor[0];
+            }
+        }
+
+        return $out + $declaration;
+    }
+
+    /**
+     * The JSON Schema types a value is an instance of — an integral number is both an `integer` and a
+     * `number`, and an empty PHP array either container.
+     *
+     * @return list<string>
+     */
+    private static function instanceTypes(mixed $value): array
+    {
+        return match (true) {
+            $value === null => ['null'],
+            is_bool($value) => ['boolean'],
+            is_int($value) => ['integer', 'number'],
+            is_float($value) => floor($value) === $value ? ['integer', 'number'] : ['number'],
+            is_string($value) => ['string'],
+            is_array($value) && $value === [] => ['array', 'object'],
+            is_array($value) => array_is_list($value) ? ['array'] : ['object'],
+            default => ['object'],
+        };
     }
 
     /**

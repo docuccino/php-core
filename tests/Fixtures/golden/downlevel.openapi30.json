@@ -248,6 +248,10 @@
             "example": "already set"
           },
           "nothing": {
+            "type": "object",
+            "enum": [
+              null
+            ],
             "nullable": true
           },
           "payload": {
@@ -267,9 +271,15 @@
               },
               {
                 "type": "integer"
+              },
+              {
+                "type": "object",
+                "enum": [
+                  null
+                ],
+                "nullable": true
               }
-            ],
-            "nullable": true
+            ]
           },
           "status": {
             "allOf": [

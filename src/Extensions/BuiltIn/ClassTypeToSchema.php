@@ -12,7 +12,7 @@ use Docuccino\Core\Extensions\Schema\ComponentHoist;
 use Docuccino\Core\Extensions\Schema\DocumentedExamples;
 use Docuccino\Core\Extensions\Schema\MockHints;
 use Docuccino\Core\Extensions\Schema\PropertyAnnotations;
-use Docuccino\Core\Extensions\Schema\PropertyPresence;
+use Docuccino\Core\Extensions\Schema\RequestShape;
 use Docuccino\Core\Extensions\Schema\SchemaIdentity;
 use Docuccino\Core\Extensions\Schema\SchemaResult;
 use Docuccino\Core\Extensions\Schema\SealedHierarchy;
@@ -20,7 +20,6 @@ use Docuccino\Core\Inference\ClassRef;
 use Docuccino\Core\Inference\DType\ClassT;
 use Docuccino\Core\Inference\DType\DType;
 use Docuccino\Core\Inference\DType\UnionT;
-use Docuccino\Core\Inference\PropertyMetadata;
 use Docuccino\Core\Provenance\ClassNames;
 use Docuccino\Core\Support\NameList;
 
@@ -57,8 +56,9 @@ final class ClassTypeToSchema implements TypeToSchema
         }
 
         // A request shape that differs from the response one is its own component; one that doesn't is
-        // the same shape, and stays the one component both sides reference.
-        $schemaId = $context->describesRequest() && self::requestDiffers($fqcn, $context)
+        // the same shape, and stays the one component both sides reference. What it reaches is weighed
+        // by the hoist, for every mapper ({@see RequestShape}).
+        $schemaId = $context->describesRequest() && RequestShape::keysDiffer($fqcn, $context)
             ? SchemaIdentity::publishedId($fqcn, 'request')
             : null;
 
@@ -94,7 +94,7 @@ final class ClassTypeToSchema implements TypeToSchema
                     $schema['description'] = $property->summary;
                 }
                 $properties[$property->name] = $schema;
-                if (self::required($fqcn, $property, $context->describesRequest())) {
+                if (RequestShape::required($fqcn, $property, $context->describesRequest())) {
                     $required[] = $property->name;
                 }
             }
@@ -120,37 +120,6 @@ final class ClassTypeToSchema implements TypeToSchema
 
             return MockHints::applyTo($context, $object, $fqcn);
         }, schemaId: $schemaId);
-    }
-
-    /**
-     * Whether the key is always there. A response carries what is initialised, nullable or not — so a
-     * property the constructor assigns on only some paths is optional; a request may leave out what a
-     * default fills in ({@see PropertyPresence}). Where neither can be proved, a nullable type stands in
-     * for "may be absent".
-     */
-    private static function required(string $fqcn, PropertyMetadata $property, bool $request): bool
-    {
-        $nullable = $property->type instanceof UnionT && $property->type->containsNull();
-
-        return $request
-            ? ! $nullable && ! PropertyPresence::defaulted($fqcn, $property->name)
-            : PropertyPresence::written($fqcn, $property->name, $property->initialised) ?? ! $nullable;
-    }
-
-    /** Whether any published property is required on one side of the wire and not the other. */
-    private static function requestDiffers(string $fqcn, SchemaContext $context): bool
-    {
-        $hidden = SchemaIdentity::hidden($fqcn);
-        foreach ($context->engine()->classMetadata(new ClassRef($fqcn))->properties as $property) {
-            if (in_array($property->name, $hidden, true) || SchemaIdentity::hidesProperty($fqcn, $property->name)) {
-                continue;
-            }
-            if (self::required($fqcn, $property, true) !== self::required($fqcn, $property, false)) {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     /**

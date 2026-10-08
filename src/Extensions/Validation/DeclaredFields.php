@@ -18,10 +18,11 @@ use Docuccino\Core\TypeGrammar\TypeStringParser;
  * One class for both layers because the question is one, and one flag inside it because the WRITERS
  * differ — a guard reads the same grammar as the write it guards:
  *
- * - a `#[BodyParameter]` is written INTO the recovered body ({@see DeclaredBodyFields}), the declared
- *   node going in whole, so a declaration anywhere on a field's BRANCH decides that field. Above it,
- *   the field is replaced and no rule the author writes can put it back; at or inside it, the field is
- *   published as what the declaration says, its container settled by the writing.
+ * - a `#[BodyParameter]` is written INTO the recovered body ({@see DeclaredBodyFields}), over what is
+ *   there by the declared-shape rule: one whose type states a shape replaces the field's, and one stating
+ *   none only adds to it. Above a field, then, it decides the field only by stating a shape, which
+ *   replaces it; at it, it publishes the field and decides its container by the type it states; inside
+ *   it, it settles the container by the writing.
  * - a `#[QueryParameter]` mints ONE parameter per name ({@see RecoveredRequest::apply()}) and leaves
  *   every other parameter as the recovery left it, so it answers for the field it NAMES and no other,
  *   and it decides a container only by stating a type — with none it writes no schema at all.
@@ -85,7 +86,7 @@ final class DeclaredFields
     public function publishes(string $field): bool
     {
         foreach ($this->declarations as $declaration) {
-            if ($this->reaches($declaration['path'], $field)) {
+            if ($this->reaches($declaration['path'], $field) && (FieldPath::isAtOrUnder($declaration['path'], $field) || $this->statesShape($declaration['type']))) {
                 return true;
             }
         }
@@ -96,9 +97,9 @@ final class DeclaredFields
     /**
      * Whether a declaration settles which container `$field` is — narrower than {@see publishes()},
      * because a declaration can publish a field without saying which of the two shapes it takes. Read
-     * off the two writers the class header describes: one that is not AT the field settles it by
-     * existing, which only the body layer reaches; one AT the field settles it as far as its type does,
-     * through the parser that will do the writing, and `array`/`mixed` resolve to no shape at all.
+     * off the two writers the class header describes: one INSIDE the field settles it by existing, which
+     * only the body layer reaches; one at or above it settles it as far as its type states a shape,
+     * through the parser that will do the writing — no type, and `array`/`mixed`, state none.
      */
     public function decidesContainer(string $field): bool
     {
@@ -107,24 +108,19 @@ final class DeclaredFields
                 continue;
             }
 
-            if (FieldPath::segments($declaration['path']) !== FieldPath::segments($field)) {
-                return true;
-            }
-
-            if ($declaration['type'] === null) {
-                if ($this->wholeBranch) {
-                    return true;
-                }
-
-                continue;
-            }
-
-            if (! $this->types->parseDeclared($declaration['type']) instanceof UnknownT) {
+            $inside = ! FieldPath::isAtOrUnder($field, $declaration['path']);
+            if ($inside || $this->statesShape($declaration['type'])) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    /** Whether a declared type states a shape, read by the parser that will do the writing. */
+    private function statesShape(?string $type): bool
+    {
+        return $type !== null && ! $this->types->parseDeclared($type) instanceof UnknownT;
     }
 
     /**

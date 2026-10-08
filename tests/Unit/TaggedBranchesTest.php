@@ -156,3 +156,38 @@ it('splits the inner object first, so the outer branches carry its union', funct
     expect($components->schemas()['StoreOrderRequestRetail']['properties']['payment']['anyOf'][0])
         ->toBe(['$ref' => '#/components/schemas/StoreOrderRequestPaymentCard']);
 });
+
+it('splits an object a declaration may adopt in place, and registers none of its branches', function (?string $base): void {
+    // The declaration written over it next decides what is published there, so a component for each branch
+    // would be a type nothing references. Where there is a body component, another object still gets its own.
+    $components = new ComponentRegistry;
+    $body = ['type' => 'object', 'properties' => ['payment' => taggedObject(), 'refund' => taggedObject()]];
+    $refund = new TaggedVariants('refund', 'method', ['number'], array_map(static fn (array $branch): array => ['name' => 'Refund'.substr($branch['name'], strlen('Payment'))] + $branch, paymentVariants()->branches));
+
+    [$split, $published] = TaggedBranches::apply($body, $body, [paymentVariants(), $refund], $components, $base, 'App\\StoreOrderRequest#request', ['payment']);
+
+    expect(array_column($split['properties']['payment']['anyOf'], 'properties'))->toHaveCount(2)
+        ->and($split['properties']['payment']['anyOf'][0]['properties']['method'])->toBe(['type' => 'string', 'description' => 'Which way.', 'const' => 'card'])
+        ->and(array_keys($components->schemas()))->toBe($base === null ? [] : ['StoreOrderRequestRefundCard', 'StoreOrderRequestRefundTransfer'])
+        // With no body component to name branches after, an object nothing adopts reads as it would with
+        // no partition proved.
+        ->and($split['properties']['refund'])->toBe($base === null ? taggedObject() : ['anyOf' => [['$ref' => '#/components/schemas/StoreOrderRequestRefundCard'], ['$ref' => '#/components/schemas/StoreOrderRequestRefundTransfer']], 'description' => 'How the order is paid.', 'minProperties' => 1])
+        ->and(array_map(static fn (TaggedVariants $variant): string => $variant->path, $published))->toBe($base === null ? ['payment'] : ['payment', 'refund']);
+})->with(['a hoisted body' => ['StoreOrderRequest'], 'an inline body' => [null]]);
+
+it('offers for adoption only an object a declaration names that no other partition holds or sits in', function (array $paths, array $declared, array $adoptable): void {
+    $variants = array_map(static fn (string $path): TaggedVariants => new TaggedVariants($path, 'method', ['number'], paymentVariants()->branches), $paths);
+
+    expect(TaggedBranches::adoptable($variants, $declared))->toBe($adoptable);
+})->with([
+    'named exactly' => [['payment'], ['payment'], ['payment']],
+    'named by the same path written another way' => [['items.*.payment'], ['items.*.payment'], ['items.*.payment']],
+    'a key inside it named' => [['payment'], ['payment.number'], []],
+    'the object above it named' => [['order.payment'], ['order'], []],
+    'nothing named' => [['payment'], [], []],
+    'a malformed name' => [['payment'], ['payment.'], []],
+    'the body itself, which no name reaches' => [[''], [''], []],
+    'one inside another, the inner named' => [['order', 'order.payment'], ['order.payment'], []],
+    'one inside another, the outer named' => [['order', 'order.payment'], ['order'], []],
+    'two side by side, both named' => [['refund', 'payment'], ['payment', 'refund'], ['payment', 'refund']],
+]);

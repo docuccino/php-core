@@ -19,6 +19,7 @@ use Docuccino\Core\Inference\DType\NullT;
 use Docuccino\Core\Inference\DType\PayloadStatusT;
 use Docuccino\Core\Inference\DType\ScalarT;
 use Docuccino\Core\Inference\DType\StatusMarkerT;
+use Docuccino\Core\Inference\DType\StatusTextMarkerT;
 use Docuccino\Core\Inference\DType\UnionT;
 use Docuccino\Core\Inference\DType\UnknownT;
 use Docuccino\Core\Inference\DType\VoidT;
@@ -43,6 +44,8 @@ function representativeTypes(): array
         new UnknownT('mixed'),
         new StatusMarkerT,
         new PayloadStatusT,
+        new StatusTextMarkerT(ScalarT::string()),
+        new StatusTextMarkerT(UnionT::of([ScalarT::string(), new NullT]), new LiteralT('Error')),
         new ListT(ScalarT::int()),
         new MapT(ScalarT::string(), ScalarT::int()),
         new ClassT('App\\Models\\User'),
@@ -65,6 +68,20 @@ it('round-trips every DType through toArray/fromArray', function (DType $type): 
 
     expect($restored->toArray())->toBe($type->toArray());
 })->with(representativeTypes());
+
+it('represents every kind the closed set orders', function (): void {
+    $kinds = (new \ReflectionClassConstant(DType::class, 'KIND_ORDER'))->getValue();
+    expect($kinds)->toBeArray();
+
+    $represented = array_unique(array_map(static fn (DType $type): string => $type->kind(), representativeTypes()));
+    sort($represented);
+    $ordered = array_keys(is_array($kinds) ? $kinds : []);
+    sort($ordered);
+
+    // A short read of the constant would pass the comparison below, so it must have been read.
+    expect(count($ordered))->toBeGreaterThan(10)
+        ->and($represented)->toBe($ordered);
+});
 
 it('sorts union members canonically regardless of input order', function (): void {
     $a = UnionT::of([ScalarT::string(), ScalarT::int(), new NullT]);

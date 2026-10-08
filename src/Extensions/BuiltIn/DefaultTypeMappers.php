@@ -23,6 +23,7 @@ final class DefaultTypeMappers
             new ScalarTypeToSchema,
             new LiteralTypeToSchema,
             new StatusMarkerTypeToSchema,
+            new StatusTextMarkerTypeToSchema,
             new EnumTypeToSchema,
             new ArrayShapeTypeToSchema,
             new CollectionTypeToSchema,

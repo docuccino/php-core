@@ -16,13 +16,15 @@ use Docuccino\Core\Support\Hydrate;
  * one did — absent everywhere else, which is every return an error renderer did not produce.
  *
  * Filled only under {@see CallableRef::$narrowToEvery}: `$returnsParameter` names the parameter this path
- * hands back unchanged — nothing that can run first may have written its body, status or media type — and
- * `$conditions` the parameter calls proven to hold on the way here.
+ * hands back unchanged — nothing that can run first may have written its body, status or media type —
+ * `$conditions` the parameter calls proven to hold on the way here, and `$typeConditions` the parameter
+ * classes proven to hold or not.
  */
 final readonly class ReturnSite
 {
     /**
      * @param  list<CallCondition>  $conditions
+     * @param  list<TypeCondition>  $typeConditions
      */
     public function __construct(
         public DType $type,
@@ -30,12 +32,13 @@ final readonly class ReturnSite
         public ?ComponentDeclaration $component = null,
         public ?string $returnsParameter = null,
         public array $conditions = [],
+        public array $typeConditions = [],
     ) {}
 
     /** The same return path under a declaration made further out on the call path. */
     public function withComponent(?ComponentDeclaration $component): self
     {
-        return new self($this->type, $this->location, $component, $this->returnsParameter, $this->conditions);
+        return new self($this->type, $this->location, $component, $this->returnsParameter, $this->conditions, $this->typeConditions);
     }
 
     /**
@@ -52,6 +55,9 @@ final readonly class ReturnSite
         }
         if ($this->conditions !== []) {
             $data['conditions'] = array_map(static fn (CallCondition $c): array => $c->toArray(), $this->conditions);
+        }
+        if ($this->typeConditions !== []) {
+            $data['typeConditions'] = array_map(static fn (TypeCondition $c): array => $c->toArray(), $this->typeConditions);
         }
 
         return $data;
@@ -72,6 +78,7 @@ final readonly class ReturnSite
             is_array($component) ? ComponentDeclaration::fromArray($component) : null,
             Hydrate::stringOrNull($data['returnsParameter'] ?? null),
             Hydrate::listOf($data['conditions'] ?? null, CallCondition::fromArray(...)),
+            Hydrate::listOf($data['typeConditions'] ?? null, TypeCondition::fromArray(...)),
         );
     }
 }

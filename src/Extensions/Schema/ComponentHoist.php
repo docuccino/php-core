@@ -14,7 +14,8 @@ use Docuccino\Core\Support\Fqcn;
  * Resource, JSON:API resource, Eloquent model) all delegate the same dance:
  *
  * 1. resolve the component name (`#[SchemaName]`, else the short class name) and diff identity
- *    (`#[SchemaId]`, else the FQCN) via {@see SchemaIdentity};
+ *    (`#[SchemaId]`, else the FQCN) via {@see SchemaIdentity}, its request facet where the class reaches
+ *    a request shape ({@see RequestShape});
  * 2. cycle-break — a self-reference found mid-expansion returns a `$ref` rather than recursing into
  *    the class forever, taking a name through {@see SchemaContext::reserveComponentName()} at the
  *    moment it needs one;
@@ -52,7 +53,8 @@ final class ComponentHoist
      */
     public function hoist(SchemaContext $context, string $fqcn, callable $build, ?string $schemaName = null, ?string $schemaId = null): SchemaResult
     {
-        $id = $schemaId ?? SchemaIdentity::publishedId($fqcn);
+        // A class reaching a request shape is one too, whichever mapper hoists it.
+        $id = $schemaId ?? SchemaIdentity::publishedId($fqcn, $context->describesRequest() && RequestShape::reached($fqcn, $context) ? 'request' : '');
         $name = $schemaName ?? SchemaIdentity::name($fqcn) ?? Fqcn::short($fqcn);
 
         // Adding a `#[Description]` has to invalidate the fragment that published without one.

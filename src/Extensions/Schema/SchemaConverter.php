@@ -75,6 +75,18 @@ final class SchemaConverter implements TypeSchemaConverter
         }
     }
 
+    /** The mapper {@see convertMember()} hands a type to: the first that supports it. */
+    public function mapperFor(DType $type): ?TypeToSchema
+    {
+        foreach ($this->mappers as $mapper) {
+            if ($mapper->supports($type)) {
+                return $mapper;
+            }
+        }
+
+        return null;
+    }
+
     public function convertMember(DType $member): array
     {
         $this->depth++;

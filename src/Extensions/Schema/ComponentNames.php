@@ -389,15 +389,33 @@ final class ComponentNames
         $prefix = self::PREFIX.$kind.'/';
         $names = [];
 
-        self::repoint($node, static function (string $ref) use ($prefix, &$names): string {
+        foreach (self::references($node) as $ref) {
             if (str_starts_with($ref, $prefix)) {
                 $names[] = substr($ref, strlen($prefix));
             }
+        }
+
+        return $names;
+    }
+
+    /**
+     * Every reference `$node` makes, whatever it points at, read by the walk {@see rename()} rewrites
+     * them with — so a pointer an example states is not one.
+     *
+     * @param  array<array-key, mixed>  $node
+     * @return list<string>
+     */
+    public static function references(array $node): array
+    {
+        $refs = [];
+
+        self::repoint($node, static function (string $ref) use (&$refs): string {
+            $refs[] = $ref;
 
             return $ref;
         });
 
-        return $names;
+        return $refs;
     }
 
     /**

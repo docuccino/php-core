@@ -9,6 +9,7 @@ use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
 use Docuccino\Core\Draft\SchemaKeywords;
 use Docuccino\Core\Extensions\Contracts\TypeSchemaConverter;
+use Docuccino\Core\Extensions\Schema\ComponentRegistry;
 use Docuccino\Core\Provenance\Source;
 use Docuccino\Core\TypeGrammar\TypeStringParser;
 
@@ -26,6 +27,12 @@ use Docuccino\Core\TypeGrammar\TypeStringParser;
  * Declarations are applied shallowest first, so a parent named by one is in place before a child named
  * by another, whichever order the two were written in.
  *
+ * Where the field is already in the body, the declaration is written OVER it rather than in its place, by
+ * the rule every declared shape follows ({@see SchemaKeywords::declaredOver()}): what it states wins, the
+ * rest of the recovered shape goes, and a refinement its type still admits — a `maxLength`, a `format` —
+ * stays, with the field's description and facts. One stating no type states no shape, so it only adds what
+ * it says. And a declared union a tagged object's rules split under it adopts the split ({@see AdoptedUnion}).
+ *
  * A path only reaches somewhere the body can carry it. Where the parent it names is a scalar, a
  * composition, or a `$ref` to a shared component — which every other operation using that component
  * would inherit the new property from — nothing is written and the refusal is reported.
@@ -38,6 +45,7 @@ use Docuccino\Core\TypeGrammar\TypeStringParser;
  * server takes as null does not stop being one for having a key documented inside it.
  *
  * @phpstan-type BodyPathRefusal array{container: string, says: string, shared: bool}
+ * @phpstan-type AdoptionNote array{mismatch: string|null, wider: list<string>, unlisted: list<string>}
  * @phpstan-type BodyFieldsResult array{0: array<string, mixed>, 1: bool, 2: list<Diagnostic>}
  */
 final class DeclaredBodyFields
@@ -55,13 +63,14 @@ final class DeclaredBodyFields
      *
      * `$site` is the class a TYPE-level declaration was written on, named in the refusals so the author
      * is sent to the file holding the declaration; null is the operation's own bag, where the source and
-     * the route signature already say where to go.
+     * the route signature already say where to go. `$components` is what a declared union is read
+     * through to adopt a tagged object; without it, none is adopted.
      *
      * @param  array<string, mixed>  $schema
      * @param  list<BodyParameter>  $declarations
      * @return BodyFieldsResult
      */
-    public function apply(array $schema, array $declarations, TypeSchemaConverter $converter, ?string $site = null, ?Source $source = null, ?string $routeSignature = null): array
+    public function apply(array $schema, array $declarations, TypeSchemaConverter $converter, ?string $site = null, ?Source $source = null, ?string $routeSignature = null, ?ComponentRegistry $components = null): array
     {
         $required = false;
         $diagnostics = [];
@@ -70,7 +79,7 @@ final class DeclaredBodyFields
             // A field the server insists on is a body the server insists on, however deep the field
             // sits — and only the top level of `required` is on the root schema to say so. A written
             // `required: false` says nothing about the body: the request still carries one.
-            $documented = $this->write($schema, $declaration, $converter, $site, $source, $routeSignature, $diagnostics);
+            $documented = $this->write($schema, $declaration, $converter, $components, $site, $source, $routeSignature, $diagnostics);
             $required = $required || ($documented && $declaration->required === true);
         }
 
@@ -105,7 +114,7 @@ final class DeclaredBodyFields
      * @param  array<string, mixed>  $schema
      * @param  list<Diagnostic>  $diagnostics
      */
-    private function write(array &$schema, BodyParameter $declaration, TypeSchemaConverter $converter, ?string $site, ?Source $source, ?string $routeSignature, array &$diagnostics): bool
+    private function write(array &$schema, BodyParameter $declaration, TypeSchemaConverter $converter, ?ComponentRegistry $components, ?string $site, ?Source $source, ?string $routeSignature, array &$diagnostics): bool
     {
         if (! FieldPath::isWellFormed($declaration->name)) {
             $diagnostics[] = new Diagnostic(
@@ -124,8 +133,14 @@ final class DeclaredBodyFields
             return false;
         }
 
-        $refusal = $this->place($schema, FieldPath::segments($declaration->name), $this->property($declaration, $converter), $declaration->required, []);
+        $note = ['mismatch' => null, 'wider' => [], 'unlisted' => []];
+        $property = $this->property($declaration, $converter);
+        // Read after the declared type is converted, which is what registers the components it names.
+        $schemas = $components?->schemas() ?? [];
+        $refusal = $this->place($schema, FieldPath::segments($declaration->name), $property, $declaration, $schemas, $note, []);
         if ($refusal === null) {
+            array_push($diagnostics, ...self::adoptionNotes($declaration, $note, $site, $source, $routeSignature));
+
             return true;
         }
 
@@ -149,6 +164,68 @@ final class DeclaredBodyFields
         return false;
     }
 
+    /**
+     * What adopting — or failing to adopt — a tagged object owes the author ({@see AdoptedUnion}).
+     *
+     * @param  AdoptionNote  $note
+     * @return list<Diagnostic>
+     */
+    private static function adoptionNotes(BodyParameter $declaration, array $note, ?string $site, ?Source $source, ?string $routeSignature): array
+    {
+        $notes = [];
+
+        if ($note['mismatch'] !== null) {
+            $notes[] = new Diagnostic(
+                severity: Severity::Warning,
+                code: 'attribute.body-parameter-union',
+                message: sprintf(
+                    '#[BodyParameter(name: "%s", type: "%s")]%s names a tagged union the rules\' one does not match — %s — so the declared type is published as written, without the bounds the rules put on each shape.',
+                    $declaration->name,
+                    (string) $declaration->type,
+                    self::on($site),
+                    $note['mismatch'],
+                ),
+                source: $source,
+                routeSignature: $routeSignature,
+                help: 'Declare the union whose members are exactly the shapes the rules accept — one per tag value, each fixing the tag to it — or drop the declaration to publish the rules\' own union.',
+            );
+        }
+
+        if ($note['wider'] !== []) {
+            $notes[] = new Diagnostic(
+                severity: Severity::Info,
+                code: 'attribute.body-parameter-narrower',
+                message: sprintf(
+                    '#[BodyParameter(name: "%s")]%s declares less than the rules accept at %s, and the declaration is what is published — so a value the server accepts there reads as invalid.',
+                    $declaration->name,
+                    self::on($site),
+                    implode(', ', $note['wider']),
+                ),
+                source: $source,
+                routeSignature: $routeSignature,
+                help: 'Widen the declared type to what the rules accept, or tighten the rules to what it declares.',
+            );
+        }
+
+        if ($note['unlisted'] !== []) {
+            $notes[] = new Diagnostic(
+                severity: Severity::Info,
+                code: 'attribute.body-parameter-unlisted',
+                message: sprintf(
+                    '#[BodyParameter(name: "%s")]%s declares a type that does not list %s, which the rules require — the document publishes it beside the type, but a client built from the type alone has no field to send it in.',
+                    $declaration->name,
+                    self::on($site),
+                    implode(', ', $note['unlisted']),
+                ),
+                source: $source,
+                routeSignature: $routeSignature,
+                help: 'Add the member to the declared class, or drop the rule that requires it.',
+            );
+        }
+
+        return $notes;
+    }
+
     /** Where a type-level declaration was written, as the message names it; empty for the action's bag. */
     private static function on(?string $site): string
     {
@@ -156,7 +233,24 @@ final class DeclaredBodyFields
     }
 
     /**
-     * The schema one declaration publishes for the field it names.
+     * Whether a declaration's type names a union of components — the one shape a tagged object can be
+     * adopted by ({@see AdoptedUnion::namesUnion()}) — read through the conversion that will write it.
+     */
+    public function namesUnion(BodyParameter $declaration, TypeSchemaConverter $converter, ComponentRegistry $components): bool
+    {
+        if ($declaration->type === null) {
+            return false;
+        }
+
+        $property = $this->property($declaration, $converter);
+
+        // Read after the declared type is converted, which is what registers the components it names.
+        return AdoptedUnion::namesUnion($property, $components->schemas());
+    }
+
+    /**
+     * The schema one declaration states for the field it names — no shape at all where it names no type,
+     * which {@see settle()} reads.
      *
      * @return array<string, mixed>
      */
@@ -164,7 +258,7 @@ final class DeclaredBodyFields
     {
         $property = $declaration->type !== null
             ? $converter->toSchema($this->types->parseDeclared($declaration->type))->schema
-            : ['type' => 'string'];
+            : [];
 
         // After the type keywords, so an explicit format wins over one the type string implied.
         if ($declaration->format !== null) {
@@ -188,11 +282,14 @@ final class DeclaredBodyFields
      * @param  array<string, mixed>  $node  the container the first segment is a member of
      * @param  non-empty-list<string>  $segments
      * @param  array<string, mixed>  $property
+     * @param  array<string, array<string, mixed>>  $schemas
+     * @param  AdoptionNote  $note
      * @param  list<string>  $walked  the segments already descended through, for the refusal
      * @return BodyPathRefusal|null
      */
-    private function place(array &$node, array $segments, array $property, ?bool $required, array $walked): ?array
+    private function place(array &$node, array $segments, array $property, BodyParameter $declaration, array $schemas, array &$note, array $walked): ?array
     {
+        $required = $declaration->required;
         $segment = $segments[0];
         $rest = array_slice($segments, 1);
 
@@ -211,9 +308,9 @@ final class DeclaredBodyFields
 
             if ($rest === []) {
                 // A `*` leaf describes the element itself, so there is no object to mark it required on.
-                $child = $property;
+                $child = self::settle($property, $declaration, is_array($node['items'] ?? null) ? $child : null, $schemas, $note);
             } else {
-                $refusal = $this->place($child, $rest, $property, $required, [...$walked, $segment]);
+                $refusal = $this->place($child, $rest, $property, $declaration, $schemas, $note, [...$walked, $segment]);
                 if ($refusal !== null) {
                     return $refusal;
                 }
@@ -232,7 +329,7 @@ final class DeclaredBodyFields
             /** @var array<string, mixed> $child */
             $child = is_array($properties[$segment] ?? null) ? $properties[$segment] : [];
 
-            $refusal = $this->place($child, $rest, $property, $required, [...$walked, $segment]);
+            $refusal = $this->place($child, $rest, $property, $declaration, $schemas, $note, [...$walked, $segment]);
             if ($refusal !== null) {
                 return $refusal;
             }
@@ -244,7 +341,9 @@ final class DeclaredBodyFields
             return null;
         }
 
-        $properties[$segment] = $property;
+        /** @var array<string, mixed>|null $existing */
+        $existing = is_array($properties[$segment] ?? null) ? $properties[$segment] : null;
+        $properties[$segment] = self::settle($property, $declaration, $existing, $schemas, $note);
         $node['type'] = self::settledTo($node, 'object');
         $node['properties'] = $properties;
 
@@ -260,6 +359,37 @@ final class DeclaredBodyFields
         }
 
         return null;
+    }
+
+    /**
+     * The field one declaration leaves: its statement alone where the body had nothing there — a field it
+     * names no type for is documented a string — and otherwise its statement written over what was there,
+     * adopting a tagged object the rules split where it can, and noting in `$note` what the author owes
+     * an answer.
+     *
+     * @param  array<string, mixed>  $property
+     * @param  array<string, mixed>|null  $existing
+     * @param  array<string, array<string, mixed>>  $schemas
+     * @param  AdoptionNote  $note
+     * @return array<string, mixed>
+     */
+    private static function settle(array $property, BodyParameter $declaration, ?array $existing, array $schemas, array &$note): array
+    {
+        if ($existing === null || $existing === []) {
+            return $declaration->type === null ? ['type' => 'string'] + $property : $property;
+        }
+
+        $adopted = AdoptedUnion::over($property, $existing, $schemas, $declaration->name);
+        if ($adopted !== null && $adopted->schema !== null) {
+            $note['wider'] = $adopted->wider;
+            $note['unlisted'] = $adopted->unlisted;
+
+            return $adopted->schema;
+        }
+
+        $note['mismatch'] = $adopted?->mismatch;
+
+        return SchemaKeywords::declaredOver($property, $existing);
     }
 
     /**

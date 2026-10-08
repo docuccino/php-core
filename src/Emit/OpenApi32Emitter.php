@@ -92,7 +92,7 @@ final readonly class OpenApi32Emitter implements ReportingEmitter
         /** @var array<string, mixed> $stripped */
         $stripped = $this->strip($array, $options);
 
-        return $stripped;
+        return StrandedComponents::drop($array, $stripped);
     }
 
     /**

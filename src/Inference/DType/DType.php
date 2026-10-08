@@ -44,6 +44,7 @@ abstract readonly class DType
         StatusMarkerT::KIND => 14,
         NullT::KIND => 15,
         PayloadStatusT::KIND => 16,
+        StatusTextMarkerT::KIND => 17,
     ];
 
     /** Stable discriminator tag (also the `kind` member in `toArray()`). */
@@ -140,6 +141,7 @@ abstract readonly class DType
             NullT::KIND => new NullT,
             StatusMarkerT::KIND => new StatusMarkerT,
             PayloadStatusT::KIND => new PayloadStatusT,
+            StatusTextMarkerT::KIND => StatusTextMarkerT::fromArray($data),
             UnknownT::KIND => UnknownT::fromArray($data),
             default => throw new InvalidArgumentException(
                 sprintf('Unknown DType kind: %s', is_string($kind) ? $kind : gettype($kind)),

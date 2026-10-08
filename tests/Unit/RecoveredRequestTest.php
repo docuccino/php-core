@@ -482,12 +482,15 @@ it('stands down for a source class that is the route\'s action, whose attribute 
     expect($components->diagnostics())->toBe([]);
 });
 
-it('publishes tagged objects only where each branch has a component to be named after', function (string $method, ?string $class, array $attributes, bool $publishes): void {
+it('publishes tagged objects only where each branch has a component to be named after, or a declaration may adopt one', function (string $method, ?string $class, array $attributes, bool $publishes): void {
     expect(RecoveredRequest::publishesVariants(requestContext(new ComponentRegistry, $attributes, $method), $class))->toBe($publishes);
 })->with([
     'a body from a source class' => ['POST', 'App\\StoreOrderRequest', [], true],
     'a body with no class to name one after' => ['POST', null, [], false],
-    'a body an operation-level declaration patches inline' => ['POST', 'App\\StoreOrderRequest', [new BodyParameter(name: 'extra', type: 'string')], false],
+    // Inline, so no branch is named — but a declaration there may adopt a partition, and one it does
+    // not name is put back as it reads with none proved.
+    'a body an operation-level declaration patches inline' => ['POST', 'App\\StoreOrderRequest', [new BodyParameter(name: 'extra', type: 'string')], true],
+    'an inline body an operation-level declaration patches' => ['POST', null, [new BodyParameter(name: 'extra', type: 'string')], true],
     'query parameters' => ['GET', 'App\\StoreOrderRequest', [], false],
     'query parameters on HEAD' => ['HEAD', 'App\\StoreOrderRequest', [], false],
 ]);

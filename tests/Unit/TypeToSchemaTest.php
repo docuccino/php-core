@@ -21,6 +21,7 @@ use Docuccino\Core\Inference\DType\MapT;
 use Docuccino\Core\Inference\DType\NullT;
 use Docuccino\Core\Inference\DType\ScalarT;
 use Docuccino\Core\Inference\DType\StatusMarkerT;
+use Docuccino\Core\Inference\DType\StatusTextMarkerT;
 use Docuccino\Core\Inference\DType\UnionT;
 use Docuccino\Core\Inference\DType\UnknownT;
 use Docuccino\Core\Inference\PropertyMetadata;
@@ -57,6 +58,10 @@ it('maps each scalar/literal/collection type to its schema', function (DType $ty
     'standalone null' => [new NullT, ['type' => 'null']],
     // An unresolved status marker degrades to a bare integer — no fabricated const/example.
     'status marker → bare integer' => [new StatusMarkerT, ['type' => 'integer']],
+    // A reason phrase differs per status, so its schema is what the member was read as and never the
+    // fallback: the literal `??` stands in for only the statuses the table lacks.
+    'status text → the type it was read as' => [new StatusTextMarkerT(ScalarT::string(), new LiteralT('Error')), ['type' => 'string']],
+    'status text read as nullable' => [new StatusTextMarkerT(UnionT::of([ScalarT::string(), new NullT])), ['type' => ['string', 'null']]],
 ]);
 
 it('maps an enum to a string enum of case names, hint-decorated by default', function (): void {

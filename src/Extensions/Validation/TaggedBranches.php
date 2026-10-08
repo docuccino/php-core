@@ -23,6 +23,10 @@ use Docuccino\Core\Extensions\Schema\EnumDecoration;
  * split, and its rules had their presence moved onto the partition: it is put back as the body's merged
  * reading publishes it, exactly as though no partition had been proved, and every variant inside it with it.
  *
+ * An object a `#[BodyParameter]` names is split INLINE instead ({@see adoptable()}): no component is
+ * registered for its branches, because the declaration written over them next decides what is published
+ * there ({@see AdoptedUnion}), and a component nothing references would be a type nobody can send.
+ *
  * @internal
  *
  * @phpstan-import-type TaggedBranch from TaggedVariants
@@ -45,17 +49,19 @@ final class TaggedBranches
     /**
      * The body with every provable object split into branches, each registered as a component named for the
      * body (`$base`, identified as `$identity`), the object's path and the value's word — and the variants
-     * published. `$merged` is the body as its merged reading publishes it, which every other object is put
-     * back to.
+     * published. The objects at `$inline` are split with their branches written in place, and where there is
+     * no body component to name branches after (`$base` null) every other object is put back. `$merged` is
+     * the body as its merged reading publishes it, which every object not split is put back to.
      *
      * @param  array<string, mixed>  $schema
      * @param  array<string, mixed>  $merged
      * @param  list<TaggedVariants>  $variants
+     * @param  list<string>  $inline
      * @return array{0: array<string, mixed>, 1: list<TaggedVariants>}
      */
-    public static function apply(array $schema, array $merged, array $variants, ComponentRegistry $components, string $base, string $identity): array
+    public static function apply(array $schema, array $merged, array $variants, ComponentRegistry $components, ?string $base, string $identity = '', array $inline = []): array
     {
-        $prefix = ComponentNames::stem($base, $identity);
+        $prefix = $base === null ? null : ComponentNames::stem($base, $identity);
 
         // Deepest first, so an object tagged inside another is already a union when the outer one's
         // branches copy it.
@@ -67,7 +73,8 @@ final class TaggedBranches
         $restored = [];
         foreach ($variants as $variant) {
             $node = self::node($schema, self::segments($variant));
-            if ($node === null || self::shape($node, $variant) === null) {
+            $named = $prefix !== null || in_array($variant->path, $inline, true);
+            if (! $named || $node === null || self::shape($node, $variant) === null) {
                 [$schema, $restored[]] = self::restore($schema, $merged, self::segments($variant));
             }
         }
@@ -78,10 +85,45 @@ final class TaggedBranches
         ));
 
         foreach ($published as $variant) {
-            $schema = self::at($schema, self::segments($variant), $variant, $components, $prefix, $identity);
+            $mint = in_array($variant->path, $inline, true) ? null : $prefix;
+            $schema = self::at($schema, self::segments($variant), $variant, $components, $mint, $identity);
         }
 
         return [$schema, $published];
+    }
+
+    /**
+     * The paths of the variants a declaration names exactly, which are split inline for the declaration to
+     * adopt ({@see AdoptedUnion}) — less any with another variant above or below it, whose branches would
+     * copy or hold the one adopted: that object keeps what it would have had with no adoption to make.
+     *
+     * @param  list<TaggedVariants>  $variants
+     * @param  list<string>  $declared  the field paths declarations name
+     * @return list<string>
+     */
+    public static function adoptable(array $variants, array $declared): array
+    {
+        $named = array_map(static fn (string $path): array => FieldPath::segments($path), array_filter($declared, FieldPath::isWellFormed(...)));
+
+        $paths = [];
+        foreach ($variants as $variant) {
+            $segments = self::segments($variant);
+            if ($segments === [] || ! in_array($segments, $named, true)) {
+                continue;
+            }
+
+            foreach ($variants as $other) {
+                if ($other !== $variant && (self::under(self::segments($other), $segments) || self::under($segments, self::segments($other)))) {
+                    continue 2;
+                }
+            }
+
+            $paths[] = $variant->path;
+        }
+
+        sort($paths, SORT_STRING);
+
+        return $paths;
     }
 
     /** @return list<string> */
@@ -216,7 +258,7 @@ final class TaggedBranches
      * @param  list<string>  $segments
      * @return array<string, mixed>
      */
-    private static function at(array $node, array $segments, TaggedVariants $variant, ComponentRegistry $components, string $prefix, string $identity): array
+    private static function at(array $node, array $segments, TaggedVariants $variant, ComponentRegistry $components, ?string $prefix, string $identity): array
     {
         $segment = array_shift($segments);
         if ($segment === null) {
@@ -252,12 +294,13 @@ final class TaggedBranches
     }
 
     /**
-     * The object as an `anyOf` of its branches, or null where its schema is not the one the rules left.
+     * The object as an `anyOf` of its branches — registered under `$prefix`, or written in place where it is
+     * null — or null where its schema is not the one the rules left.
      *
      * @param  array<string, mixed>  $node
      * @return array<string, mixed>|null
      */
-    private static function split(array $node, TaggedVariants $variant, ComponentRegistry $components, string $prefix, string $identity): ?array
+    private static function split(array $node, TaggedVariants $variant, ComponentRegistry $components, ?string $prefix, string $identity): ?array
     {
         $shape = self::shape($node, $variant);
         if ($shape === null) {
@@ -272,7 +315,7 @@ final class TaggedBranches
         foreach ($variant->branches as $branch) {
             $body = self::branch($properties, $required, $tag, $variant, $branch);
             $id = $identity.'/'.ltrim($variant->path.'.'.$variant->tag, '.').'='.$branch['value'];
-            $members[] = $components->reference($prefix.$branch['name'], $body, $id);
+            $members[] = $prefix === null ? $body : $components->reference($prefix.$branch['name'], $body, $id);
         }
 
         if ($variant->admitsEmpty) {

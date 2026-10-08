@@ -8,6 +8,7 @@ use Docuccino\Core\Tests\Fixtures\Declaration\ChildShape;
 use Docuccino\Core\Tests\Fixtures\Declaration\DeepTrait;
 use Docuccino\Core\Tests\Fixtures\Declaration\LoneShape;
 use Docuccino\Core\Tests\Fixtures\Declaration\OuterTrait;
+use Docuccino\Core\Tests\Fixtures\Tagged\Tree;
 
 /*
  * Which files a class's declaration spans. Real reflection over real fixtures, because the whole point
@@ -40,6 +41,12 @@ it('answers for a trait as it does for a class', function (): void {
     expect(DeclarationFiles::of(OuterTrait::class))
         ->toEqualCanonicalizing([declarationFixture('OuterTrait'), declarationFixture('DeepTrait')])
         ->and(DeclarationFiles::of(DeepTrait::class))->toBe([declarationFixture('DeepTrait')]);
+});
+
+it('answers for an interface, whose docblock can close a hierarchy', function (): void {
+    // A `@phpstan-sealed` interface's file decides what a value typed by it publishes, so editing the seal
+    // has to retire the fragments that read it.
+    expect(DeclarationFiles::of(Tree::class))->toBe([(string) (new ReflectionClass(Tree::class))->getFileName()]);
 });
 
 it('degrades to nothing for a name with no file to point at', function (?string $fqcn): void {

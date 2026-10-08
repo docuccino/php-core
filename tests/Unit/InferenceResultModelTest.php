@@ -18,6 +18,7 @@ use Docuccino\Core\Inference\SourceLocation;
 use Docuccino\Core\Inference\ThrowConfidence;
 use Docuccino\Core\Inference\ThrowDisposition;
 use Docuccino\Core\Inference\ThrownException;
+use Docuccino\Core\Inference\TypeCondition;
 
 /**
  * What an engine hands back is a SERIALIZABLE model: every result crosses a process boundary as JSON
@@ -247,21 +248,27 @@ it('round-trips the parameter a return hands back and the calls proven at it, an
             new CallCondition('request', 'is', ['api/*', 'hooks/*'], false),
             new CallCondition('response', 'getStatusCode', [], 419),
         ],
+        typeConditions: [
+            new TypeCondition('response', 'Illuminate\\Http\\JsonResponse', false),
+            new TypeCondition('e', 'RuntimeException', true),
+        ],
     );
     $payload = $site->toArray();
 
     expect(ReturnSite::fromArray($payload)->toArray())->toBe($payload)
         ->and(ReturnSite::fromArray($payload)->conditions[1]->value)->toBe(419)
+        ->and(ReturnSite::fromArray($payload)->typeConditions)->toEqual($site->typeConditions)
         // Absent keys, not empty ones, so an analysis carrying neither serializes as it always did.
         ->and((new ReturnSite(ScalarT::string(), new SourceLocation('')))->toArray())->toBe(['type' => ScalarT::string()->toArray(), 'location' => (new SourceLocation(''))->toArray()]);
 });
 
 it('carries both facts onto a declaration made further out on the call path', function (): void {
-    $site = new ReturnSite(ScalarT::string(), new SourceLocation('/app/x.php', 3), returnsParameter: 'response', conditions: [new CallCondition('request', 'is', ['api/*'], true)]);
+    $site = new ReturnSite(ScalarT::string(), new SourceLocation('/app/x.php', 3), returnsParameter: 'response', conditions: [new CallCondition('request', 'is', ['api/*'], true)], typeConditions: [new TypeCondition('response', 'Illuminate\\Http\\JsonResponse', true)]);
     $moved = $site->withComponent(new ComponentDeclaration('Problem', 'App\\Renderer::render'));
 
     expect($moved->returnsParameter)->toBe('response')
-        ->and($moved->conditions)->toBe($site->conditions);
+        ->and($moved->conditions)->toBe($site->conditions)
+        ->and($moved->typeConditions)->toBe($site->typeConditions);
 });
 
 it('degrades a malformed call condition around the members it can still read', function (): void {
@@ -271,6 +278,13 @@ it('degrades a malformed call condition around the members it can still read', f
     expect($decoded->toArray())->toBe(['parameter' => '1', 'method' => '', 'arguments' => ['api/*'], 'value' => false]);
 });
 
+it('degrades a malformed type condition around the members it can still read', function (): void {
+    // Only a real `true` holds: a truthy string is not a proof the parameter is an instance.
+    $decoded = TypeCondition::fromArray(['parameter' => 1, 'class' => [], 'value' => 'yes']);
+
+    expect($decoded->toArray())->toBe(['parameter' => '1', 'class' => '', 'value' => false]);
+});
+
 it('keys a callable analysed for every reachable return apart from one analysed for the first', function (): void {
     $first = new CallableRef('/app/bootstrap.php', null, null, 12, 'e', 'App\\Exceptions\\Missing');
     $every = new CallableRef('/app/bootstrap.php', null, null, 12, 'e', 'App\\Exceptions\\Missing', narrowToEvery: true);
@@ -278,3 +292,30 @@ it('keys a callable analysed for every reachable return apart from one analysed 
     expect($every->symbol())->not->toBe($first->symbol())
         ->and($every->target())->toBe($first->target());
 });
+
+it('keys a callable narrowing a property of $this apart from one narrowing a parameter to the same class', function (): void {
+    // A resource collection's with() is read once per envelope, so the narrowed subject is part of the key.
+    $parameter = new CallableRef('/app/Http/Resources/Listed.php', 'App\\Listed', 'with', 0, 'resource', 'Illuminate\\Support\\Collection', narrowToEvery: true);
+    $property = new CallableRef('/app/Http/Resources/Listed.php', 'App\\Listed', 'with', 0, narrowType: 'Illuminate\\Support\\Collection', narrowToEvery: true, narrowProperty: 'resource');
+    $page = new CallableRef('/app/Http/Resources/Listed.php', 'App\\Listed', 'with', 0, narrowType: 'Illuminate\\Pagination\\LengthAwarePaginator', narrowToEvery: true, narrowProperty: 'resource');
+
+    expect($property->symbol())->toBe('App\\Listed::with#$this->resource Illuminate\\Support\\Collection#every')
+        ->and($property->symbol())->not->toBe($parameter->symbol())
+        ->and($property->symbol())->not->toBe($page->symbol())
+        ->and($property->target())->toBe($parameter->target());
+});
+
+it('refuses a callable narrowing a parameter and a property of $this at once', function (): void {
+    // Each would be the subject on its own; together nothing says which the narrowing is of.
+    new CallableRef('/app/Http/Resources/Listed.php', 'App\\Listed', 'with', 0, 'request', 'Illuminate\\Support\\Collection', narrowProperty: 'resource');
+})->throws(InvalidArgumentException::class, 'App\\Listed::with narrows either a parameter or a property of $this, not both.');
+
+it('names the subject a callable narrows as source spells it', function (?string $parameter, ?string $property, ?string $subject): void {
+    $ref = new CallableRef('/app/Listed.php', 'App\\Listed', 'with', 0, $parameter, 'App\\Thing', narrowProperty: $property);
+
+    expect($ref->narrowedSubject())->toBe($subject);
+})->with([
+    'a parameter' => ['e', null, '$e'],
+    'a property of $this' => [null, 'resource', '$this->resource'],
+    'nothing' => [null, null, null],
+]);

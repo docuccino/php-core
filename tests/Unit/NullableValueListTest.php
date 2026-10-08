@@ -31,10 +31,11 @@ function admits(array $schema, mixed $value): bool
 }
 
 /**
- * The same widening through each site, for one value-list schema under one policy.
+ * The same widening through each site, for one value-list schema under one policy: each published
+ * schema, and whether it admits a value as its own dialect reads it.
  *
  * @param  array<string, mixed>  $schema
- * @return array<string, array<string, mixed>>
+ * @return array<string, array{schema: array<string, mixed>, admits: Closure(mixed): bool}>
  */
 function nullableThroughEverySite(array $schema, string $policy): array
 {
@@ -47,7 +48,12 @@ function nullableThroughEverySite(array $schema, string $policy): array
         'request' => $node->build(new RepresentationPolicy(nullable: $policy)),
     ];
 
-    // Each through the 3.0 downlevel too, which spells the null branch as `nullable: true`.
+    $read = [];
+    foreach ($sites as $site => $widened) {
+        $read[$site] = ['schema' => $widened, 'admits' => static fn (mixed $value): bool => admits($widened, $value)];
+    }
+
+    // Each through the 3.0 downlevel too, read as 3.0 reads it: its `nullable` is not JSON Schema.
     foreach ($sites as $site => $widened) {
         $emitted = (new OpenApi30DownlevelEmitter)->emit(UirDocument::fromArray([
             'openapi' => '3.2.0',
@@ -57,25 +63,21 @@ function nullableThroughEverySite(array $schema, string $policy): array
         ]));
         /** @var array<string, mixed> $downlevel */
         $downlevel = json_decode($emitted, true, flags: JSON_THROW_ON_ERROR)['components']['schemas']['Field'];
-
-        // 3.0's `nullable` is not JSON Schema: it adds null to `type`. Stated as such so the validator
-        // reads the downlevel the way a 3.0 reader does.
-        if (($downlevel['nullable'] ?? null) === true && is_string($downlevel['type'] ?? null)) {
-            $downlevel['type'] = [$downlevel['type'], 'null'];
-        }
-        unset($downlevel['nullable']);
-        $sites[$site.' (3.0)'] = $downlevel;
+        $read[$site.' (3.0)'] = [
+            'schema' => $downlevel,
+            'admits' => static fn (mixed $value): bool => openApi30Admits($emitted, '/components/schemas/Field', $value),
+        ];
     }
 
-    return $sites;
+    return $read;
 }
 
 it('admits null, every listed value, and nothing else, at every site that widens a value list', function (array $schema, array $members, mixed $outsider, string $policy): void {
     foreach (nullableThroughEverySite($schema, $policy) as $site => $widened) {
-        expect(admits($widened, null))->toBeTrue($site.' refuses null')
-            ->and(admits($widened, $outsider))->toBeFalse($site.' admits a value outside the list');
+        expect(($widened['admits'])(null))->toBeTrue($site.' refuses null')
+            ->and(($widened['admits'])($outsider))->toBeFalse($site.' admits a value outside the list');
         foreach ($members as $member) {
-            expect(admits($widened, $member))->toBeTrue($site.' refuses '.json_encode($member));
+            expect(($widened['admits'])($member))->toBeTrue($site.' refuses '.json_encode($member));
         }
     }
 })->with([
@@ -90,7 +92,7 @@ it('admits null, every listed value, and nothing else, at every site that widens
 it('keeps an enum\'s name hints parallel to its values wherever it is widened', function (string $policy): void {
     $schema = ['type' => 'string', 'enum' => ['draft', 'live'], 'x-enum-varnames' => ['Draft', 'Live'], 'x-enumNames' => ['Draft', 'Live']];
 
-    foreach (nullableThroughEverySite($schema, $policy) as $site => $widened) {
+    foreach (nullableThroughEverySite($schema, $policy) as $site => ['schema' => $widened]) {
         $holder = isset($widened['anyOf']) ? $widened['anyOf'][0] : $widened;
         $values = array_values(array_filter($holder['enum'], static fn (mixed $v): bool => $v !== null));
 

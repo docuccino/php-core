@@ -56,8 +56,9 @@ final readonly class UirEmitter implements ReportingEmitter
     public function emitArray(array $document, EmitOptions $options = new EmitOptions(provenance: ProvenanceLevel::Full)): string
     {
         if ($options->provenance !== ProvenanceLevel::Full) {
-            /** @var array<string, mixed> $document */
-            $document = $this->levelProvenance($document, $options->provenance);
+            /** @var array<string, mixed> $levelled */
+            $levelled = $this->levelProvenance($document, $options->provenance);
+            $document = StrandedComponents::drop($document, $levelled);
         }
 
         // After levelling, which finds provenance only under an `x-docuccino` key: once lifted, a use's

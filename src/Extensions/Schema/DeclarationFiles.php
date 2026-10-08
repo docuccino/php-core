@@ -32,7 +32,7 @@ final class DeclarationFiles
      */
     public static function of(?string $fqcn): array
     {
-        if ($fqcn === null || (! class_exists($fqcn) && ! trait_exists($fqcn))) {
+        if ($fqcn === null || (! class_exists($fqcn) && ! interface_exists($fqcn) && ! trait_exists($fqcn))) {
             return [];
         }
 

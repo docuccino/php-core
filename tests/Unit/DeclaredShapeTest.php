@@ -526,3 +526,89 @@ it('names every keyword that says nothing about the instance, and nothing that d
         expect(SchemaKeywords::saysNothingAboutTheInstance($keyword))->toBeFalse();
     }
 });
+
+it('reads a composition as a declared shape, and an array\'s list of items as none', function (array $declaration, bool $states): void {
+    // A union is spelled as a composition — a nullable class among them — so it says what kind of value
+    // this is as surely as a `type` does. `prefixItems` is also a list of subschemas, but an array's.
+    expect(SchemaKeywords::statesShape($declaration))->toBe($states);
+})->with([
+    'anyOf' => [['anyOf' => [['$ref' => '#/components/schemas/A'], ['type' => 'null']]], true],
+    'oneOf' => [['oneOf' => [['$ref' => '#/components/schemas/A'], ['$ref' => '#/components/schemas/B']]], true],
+    'allOf' => [['allOf' => [['$ref' => '#/components/schemas/A']]], true],
+    'prefixItems' => [['prefixItems' => [['type' => 'string']]], false],
+]);
+
+it('keeps of a standing value list only what the declared type can hold', function (array $standing, array $declared, array $expected): void {
+    // `type: integer` beside `enum: ["1", "2"]` is a schema no value satisfies — a degraded answer has to
+    // stay true, so a list with nothing the type holds goes with the type that held it. The values it does
+    // hold stay, since they list what the server accepts and the declaration admits; and a declaration
+    // naming no type of its own cannot be read for this, so it leaves the list where it stood.
+    expect(frozenShape($standing, $declared))->toBe($expected)
+        ->and(SchemaKeywords::declaredOver($declared, $standing))->toEqual($expected);
+})->with([
+    'string values under a declared integer' => [['type' => 'string', 'enum' => ['1', '2']], ['type' => 'integer'], ['type' => 'integer']],
+    'a string const under a declared integer' => [['type' => 'string', 'const' => 'a'], ['type' => 'integer'], ['type' => 'integer']],
+    'integers under a declared number' => [['type' => 'integer', 'enum' => [1, 2]], ['type' => 'number'], ['type' => 'number', 'enum' => [1, 2]]],
+    'a null among values under a declared nullable string' => [['type' => ['string', 'null'], 'enum' => ['a', null]], ['type' => ['string', 'null']], ['type' => ['string', 'null'], 'enum' => ['a', null]]],
+    'a null among values under a declared string' => [['type' => ['string', 'null'], 'enum' => ['a', null]], ['type' => 'string'], ['type' => 'string', 'enum' => ['a']]],
+    'values under a declared reference' => [['type' => 'string', 'enum' => ['a']], ['$ref' => '#/components/schemas/Kind'], ['enum' => ['a'], '$ref' => '#/components/schemas/Kind']],
+]);
+
+it('gives the same answer written as arrays as it does on a draft', function (array $standing, array $declared): void {
+    // Two sites compute one rule: a draft's declared shape and a request body's declared field. Held to
+    // each other over every family the rule answers for — keys in whatever order each writes them.
+    $arrays = SchemaKeywords::declaredOver($declared, $standing);
+    $draft = frozenShape($standing, $declared);
+    ksort($arrays);
+    ksort($draft);
+
+    expect($arrays)->toBe($draft);
+})->with([
+    'a closed object over a map' => [['type' => 'object', 'additionalProperties' => ['type' => 'string']], ['type' => 'object', 'properties' => ['a' => ['type' => 'string']]]],
+    'a reference over a shape' => [['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Kept.'], ['$ref' => '#/components/schemas/Widget']],
+    'a union over a shape' => [['type' => 'object', 'maxProperties' => 3, 'title' => 'Kept.'], ['anyOf' => [['$ref' => '#/components/schemas/Widget'], ['type' => 'null']]]],
+    'a refinement the type admits' => [['type' => 'string', 'format' => 'email', 'maxLength' => 9], ['type' => 'string']],
+    'a refinement the type does not' => [['type' => 'integer', 'minimum' => 1], ['type' => 'string']],
+    'a description alone' => [['type' => 'object', 'additionalProperties' => true], ['description' => 'The settings map.']],
+    'an annotation restated' => [['type' => 'string', 'description' => 'Old.'], ['type' => 'string', 'description' => 'New.']],
+    'an unknown keyword' => [['type' => 'array', 'x-custom' => true], ['type' => 'object']],
+]);
+
+it('keeps an example only where the declared type can hold it, and an enum\'s names only beside its values', function (array $standing, array $declared, array $expected): void {
+    // An example of a value the type refuses is no example of it, and a name for an enum value names
+    // nothing once the value is gone — each decoration is positional over the `enum`, so it narrows with it.
+    // Held at both sites the rule is computed at.
+    $arrays = SchemaKeywords::declaredOver($declared, $standing);
+    $draft = frozenShape($standing, $declared);
+    ksort($arrays);
+    ksort($draft);
+    ksort($expected);
+
+    expect($arrays)->toEqual($expected)
+        ->and($draft)->toEqual($expected);
+})->with([
+    'a string example under a declared integer' => [['type' => 'string', 'example' => 'low', 'default' => 'low'], ['type' => 'integer'], ['type' => 'integer']],
+    'an integer example under a declared number' => [['type' => 'integer', 'example' => 3, 'default' => 1], ['type' => 'number'], ['type' => 'number', 'example' => 3, 'default' => 1]],
+    'examples, some held' => [['type' => ['string', 'integer'], 'examples' => ['a', 1]], ['type' => 'integer'], ['type' => 'integer', 'examples' => [1]]],
+    'an example the declaration restates' => [['type' => 'string', 'example' => 'low'], ['type' => 'integer', 'example' => 2], ['type' => 'integer', 'example' => 2]],
+    'names for values the type cannot hold' => [
+        ['type' => 'string', 'enum' => ['low', 'high'], 'x-enum-varnames' => ['Low', 'High'], 'x-enumNames' => ['Low', 'High'], 'x-enum-descriptions' => ['L', 'H'], 'x-enumDescriptions' => ['low' => 'L', 'high' => 'H']],
+        ['type' => 'integer'],
+        ['type' => 'integer'],
+    ],
+    'names for the values kept' => [
+        ['type' => ['string', 'null'], 'enum' => ['low', null, 'high'], 'x-enum-varnames' => ['Low', 'Null', 'High'], 'x-enumDescriptions' => ['low' => 'L', 'high' => 'H']],
+        ['type' => 'string'],
+        ['type' => 'string', 'enum' => ['low', 'high'], 'x-enum-varnames' => ['Low', 'High'], 'x-enumDescriptions' => ['low' => 'L', 'high' => 'H']],
+    ],
+    'descriptions keyed by numeric values' => [
+        ['type' => ['integer', 'string'], 'enum' => [1, 2, 'x'], 'x-enumDescriptions' => (object) ['1' => 'One', '2' => 'Two', 'x' => 'Ex']],
+        ['type' => 'integer'],
+        ['type' => 'integer', 'enum' => [1, 2], 'x-enumDescriptions' => [1 => 'One', 2 => 'Two']],
+    ],
+    'names beside every value kept' => [
+        ['type' => 'string', 'enum' => ['low', 'high'], 'x-enum-varnames' => ['Low', 'High']],
+        ['type' => 'string'],
+        ['type' => 'string', 'enum' => ['low', 'high'], 'x-enum-varnames' => ['Low', 'High']],
+    ],
+]);

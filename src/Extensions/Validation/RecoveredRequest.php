@@ -68,14 +68,16 @@ final class RecoveredRequest
     }
 
     /**
-     * Whether a body recovered for this route may publish its tagged objects as unions of components
-     * ({@see TaggedBranches}) — the one case where there is a component for each branch to be named after:
-     * a body verb, a source class, and no operation-level `#[BodyParameter]` patching the body inline.
-     * A recoverer asks before it splits a rule set, so where the answer is no the rules stay as they were.
+     * Whether a body recovered for this route may publish its tagged objects as unions ({@see TaggedBranches})
+     * — a body verb, and either a component for each branch to be named after (a source class, and no
+     * operation-level `#[BodyParameter]` patching the body inline) or a declaration that may adopt one
+     * ({@see AdoptedUnion}), which an operation-level one is. A recoverer asks before it splits a rule set,
+     * so where the answer is no the rules stay as they were; an object neither named nor adopted is put
+     * back exactly as it reads with no partition proved.
      */
     public static function publishesVariants(RouteContext $context, ?string $sourceClass): bool
     {
-        return self::hoistedClass($context, $sourceClass) !== null;
+        return self::documentsBody($context) && ($sourceClass !== null || self::deviates($context));
     }
 
     /**
@@ -108,7 +110,7 @@ final class RecoveredRequest
             $context->components->addDiagnostic($diagnostic);
         }
 
-        [$result, $declaredRequired] = $this->withDeclarations($result, $context, $sourceClass, $keys);
+        [$result, $declaredRequired, $held] = $this->withDeclarations($result, $context, $sourceClass, $keys);
 
         $contribution = Contribution::integration($producer, $context->actionSource());
 
@@ -122,7 +124,7 @@ final class RecoveredRequest
             return;
         }
 
-        $this->applyRequestBody($operation, $context, $result, $contribution, $sourceClass, $declaredRequired);
+        $this->applyRequestBody($operation, $context, $result, $contribution, $sourceClass, $declaredRequired, $held);
     }
 
     /**
@@ -151,19 +153,29 @@ final class RecoveredRequest
      * `required` list is read for that — so a nested one has to travel out here or the document says a
      * body carrying a required member may be left off entirely.
      *
+     * The type's declarations at or under a tagged object a declaration may adopt are HELD for the body to
+     * write once that object is split ({@see TaggedBranches::adoptable()}), and returned for it; the merged
+     * reading gets them now, for an object put back to read as it would with none held.
+     *
      * @param  array<string, string>  $keys
-     * @return array{0: ValidationSchema, 1: bool}
+     * @return array{0: ValidationSchema, 1: bool, 2: list<BodyParameter>}
      */
     private function withDeclarations(ValidationSchema $result, RouteContext $context, ?string $sourceClass, array $keys): array
     {
         if ($sourceClass === null) {
-            return [$result, false];
+            return [$result, false, []];
         }
 
         $context->recordDependencyFiles(DeclarationFiles::of($sourceClass));
         $this->observe($sourceClass, $context);
 
-        [$schema, $declaredRequired, $diagnostics] = $this->declared($result->schema, $context, $sourceClass, $keys);
+        $adopted = $this->adoptedPaths($context, $result, $sourceClass);
+        $held = array_values(array_filter(
+            self::declaredOn($sourceClass, $context)[0],
+            static fn (BodyParameter $declaration): bool => self::underAny($declaration->name, $adopted),
+        ));
+
+        [$schema, $declaredRequired, $diagnostics] = $this->declared($result->schema, $context, $sourceClass, $keys, $adopted);
 
         foreach ([...$diagnostics, ...$this->unread($sourceClass, $context)] as $diagnostic) {
             $context->components->addDiagnostic($diagnostic);
@@ -174,7 +186,53 @@ final class RecoveredRequest
         // keys, so the ones above already said them.
         $merged = $result->variants === [] ? [] : $this->declared($result->merged, $context, $sourceClass, $keys)[0];
 
-        return [new ValidationSchema($schema, $result->mediaType, variants: $result->variants, merged: $merged), $declaredRequired];
+        return [new ValidationSchema($schema, $result->mediaType, variants: $result->variants, merged: $merged), $declaredRequired, $held];
+    }
+
+    /**
+     * The paths of the tagged objects a `#[BodyParameter]` on this route names as a union of components — on
+     * the action or on the request type — which are split in place for it to adopt
+     * ({@see TaggedBranches::adoptable()}). A declaration naming anything else adopts nothing, so the object
+     * it names keeps its own union, named as it would be with no declaration at all.
+     *
+     * @return list<string>
+     */
+    private function adoptedPaths(RouteContext $context, ValidationSchema $result, ?string $sourceClass): array
+    {
+        if ($result->variants === [] || ! self::documentsBody($context)) {
+            return [];
+        }
+
+        $declarations = [...$context->attributes->all(BodyParameter::class), ...self::declaredOn($sourceClass, $context)[0]];
+        $names = [];
+        foreach ($declarations as $declaration) {
+            // Converted only where it names an object it could adopt, so no other declaration is read twice.
+            if (TaggedBranches::adoptable($result->variants, [$declaration->name]) !== [] && $this->fields->namesUnion($declaration, $context->requestConverter(), $context->components)) {
+                $names[] = $declaration->name;
+            }
+        }
+
+        return TaggedBranches::adoptable($result->variants, $names);
+    }
+
+    /**
+     * Whether a declared name is at or under one of the paths.
+     *
+     * @param  list<string>  $paths
+     */
+    private static function underAny(string $name, array $paths): bool
+    {
+        if (! FieldPath::isWellFormed($name)) {
+            return false;
+        }
+
+        foreach ($paths as $path) {
+            if (FieldPath::isAtOrUnder($name, $path)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -183,9 +241,10 @@ final class RecoveredRequest
      *
      * @param  array<string, mixed>  $schema
      * @param  array<string, string>  $keys
+     * @param  list<string>  $held  the paths whose declarations wait for the split ({@see withDeclarations()})
      * @return array{0: array<string, mixed>, 1: bool, 2: list<Diagnostic>}
      */
-    private function declared(array $schema, RouteContext $context, string $sourceClass, array $keys): array
+    private function declared(array $schema, RouteContext $context, string $sourceClass, array $keys, array $held = []): array
     {
         $metadata = $context->engine->classMetadata(new ClassRef($sourceClass));
         $context->recordDependencyFiles($metadata->dependencyFiles);
@@ -200,9 +259,10 @@ final class RecoveredRequest
         [$declarations, $unreadable] = self::declaredOn($sourceClass, $context);
         [$schema, $declaredRequired, $fieldDiagnostics] = $this->fields->apply(
             $schema,
-            $declarations,
+            array_values(array_filter($declarations, static fn (BodyParameter $declaration): bool => ! self::underAny($declaration->name, $held))),
             $context->requestConverter(),
             ClassNames::publishable($sourceClass),
+            components: $context->components,
         );
 
         return [$schema, $declaredRequired, [...$diagnostics, ...$hintDiagnostics, ...$unreadable, ...$fieldDiagnostics]];
@@ -307,9 +367,26 @@ final class RecoveredRequest
         UnusableBodyDeclarations::observe($context, $sourceClass, self::documentsBody($context));
     }
 
-    private function applyRequestBody(OperationDraft $operation, RouteContext $context, ValidationSchema $result, Contribution $contribution, ?string $sourceClass, bool $declaredRequired = false): void
+    /**
+     * @param  list<BodyParameter>  $held  the type's declarations that wait for the split ({@see withDeclarations()})
+     */
+    private function applyRequestBody(OperationDraft $operation, RouteContext $context, ValidationSchema $result, Contribution $contribution, ?string $sourceClass, bool $declaredRequired, array $held): void
     {
         [$schema, $variants] = $this->bodySchema($context, $result, $sourceClass);
+
+        if ($held !== [] && $sourceClass !== null) {
+            [$schema, $heldRequired, $diagnostics] = $this->fields->apply(
+                $schema,
+                $held,
+                $context->requestConverter(),
+                ClassNames::publishable($sourceClass),
+                components: $context->components,
+            );
+            $declaredRequired = $declaredRequired || $heldRequired;
+            foreach ($diagnostics as $diagnostic) {
+                $context->components->addDiagnostic($diagnostic);
+            }
+        }
 
         $required = $declaredRequired
             || (is_array($schema['required'] ?? null) && $schema['required'] !== [])
@@ -330,20 +407,22 @@ final class RecoveredRequest
 
     /**
      * The body's schema with its tagged objects published as unions where it names a component for each
-     * branch ({@see TaggedBranches}), and the variants it published; the merged reading and none elsewhere.
+     * branch ({@see TaggedBranches}), split in place where a declaration may adopt one, and the variants it
+     * published; the merged reading and none elsewhere.
      *
      * @return array{0: array<string, mixed>, 1: list<TaggedVariants>}
      */
     private function bodySchema(RouteContext $context, ValidationSchema $result, ?string $sourceClass): array
     {
         $class = self::hoistedClass($context, $sourceClass);
-        if ($class === null || $result->variants === []) {
+        $adopted = $this->adoptedPaths($context, $result, $sourceClass);
+        if ($result->variants === [] || ($class === null && $adopted === [])) {
             return [$result->withoutVariants()->schema, []];
         }
 
-        [$name, $id] = self::component($class);
+        [$name, $id] = $class === null ? [null, ''] : self::component($class);
 
-        return TaggedBranches::apply($result->schema, $result->merged, $result->variants, $context->components, $name, $id);
+        return TaggedBranches::apply($result->schema, $result->merged, $result->variants, $context->components, $name, $id, $adopted);
     }
 
     /**

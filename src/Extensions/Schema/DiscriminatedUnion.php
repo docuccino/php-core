@@ -104,7 +104,7 @@ final class DiscriminatedUnion
 
             // An inline member has no name for a mapping to point at.
             $ref = is_array($branch) && count($branch) === 1 ? ($branch['$ref'] ?? null) : null;
-            $name = is_string($ref) && str_starts_with($ref, self::PREFIX) ? substr($ref, strlen(self::PREFIX)) : null;
+            $name = is_string($ref) ? self::componentName($ref) : null;
             $body = $name === null ? null : ($schemas[$name] ?? null);
             if ($name === null || ! is_array($body) || in_array($name, $names, true)) {
                 return $node;
@@ -118,8 +118,8 @@ final class DiscriminatedUnion
             return $node;
         }
 
-        $tags = array_map(self::tags(...), $bodies);
-        $discriminator = self::discriminator($names, $tags);
+        $tags = array_map(self::pinned(...), $bodies);
+        $discriminator = self::discriminator($names, $bodies);
         if ($discriminator === null) {
             $shortfall = self::shortfall($names, $bodies, $tags);
             if ($shortfall !== null) {
@@ -147,44 +147,83 @@ final class DiscriminatedUnion
     }
 
     /** Whether a member is {@see EMPTY_OBJECT}, in whichever key order a producer wrote it. */
-    private static function isEmptyObject(mixed $branch): bool
+    public static function isEmptyObject(mixed $branch): bool
     {
         return is_array($branch) && count($branch) === 2
             && ($branch['type'] ?? null) === 'object' && ($branch['maxProperties'] ?? null) === 0;
     }
 
     /**
-     * The first property, by name, that every member requires and pins to a value of its own.
+     * The body of the component a `$ref` names, or null where it names none registered — how a member is
+     * read here, public so a reader matching a union against another resolves members the same way.
      *
-     * @param  list<string>  $names
-     * @param  list<array<string, string>>  $tags
-     * @return array{propertyName: string, mapping: array<string, string>}|null
+     * @param  array<mixed>  $schemas
+     * @return array<mixed>|null
      */
-    private static function discriminator(array $names, array $tags): ?array
+    public static function component(string $ref, array $schemas): ?array
     {
-        $candidates = array_map(strval(...), array_keys(array_intersect_key(...$tags)));
-        sort($candidates, SORT_STRING);
+        $name = self::componentName($ref);
+        $body = $name === null ? null : ($schemas[$name] ?? null);
 
-        foreach ($candidates as $property) {
-            $values = array_map(static fn (array $tag): string => $tag[$property], $tags);
-            if (count(array_unique($values)) === count($values)) {
-                $mapping = array_combine($values, array_map(static fn (string $name): string => self::PREFIX.$name, $names));
-                ksort($mapping, SORT_STRING);
+        return is_array($body) ? $body : null;
+    }
 
-                return ['propertyName' => $property, 'mapping' => $mapping];
-            }
-        }
-
-        return null;
+    private static function componentName(string $ref): ?string
+    {
+        return str_starts_with($ref, self::PREFIX) ? substr($ref, strlen(self::PREFIX)) : null;
     }
 
     /**
-     * The properties a body requires and pins to one string, less any PHP would read back as an int key.
+     * The properties, by name, that two or more bodies each pin ({@see pinned()}) to a value no other
+     * shares — what they can be told apart by; the first is the discriminator.
+     *
+     * @param  list<array<mixed>>  $bodies
+     * @return list<string>
+     */
+    public static function tags(array $bodies): array
+    {
+        if (count($bodies) < 2) {
+            return [];
+        }
+
+        $pinned = array_map(self::pinned(...), $bodies);
+        $candidates = array_map(strval(...), array_keys(array_intersect_key(...$pinned)));
+        sort($candidates, SORT_STRING);
+
+        return array_values(array_filter(
+            $candidates,
+            static fn (string $tag): bool => count(array_unique(array_column($pinned, $tag))) === count($pinned),
+        ));
+    }
+
+    /**
+     * @param  list<string>  $names
+     * @param  list<array<mixed>>  $bodies
+     * @return array{propertyName: string, mapping: array<string, string>}|null
+     */
+    private static function discriminator(array $names, array $bodies): ?array
+    {
+        $property = self::tags($bodies)[0] ?? null;
+        if ($property === null) {
+            return null;
+        }
+
+        $values = array_map(static fn (array $body): string => self::pinned($body)[$property], $bodies);
+        $mapping = array_combine($values, array_map(static fn (string $name): string => self::PREFIX.$name, $names));
+        ksort($mapping, SORT_STRING);
+
+        return ['propertyName' => $property, 'mapping' => $mapping];
+    }
+
+    /**
+     * The properties a body requires and pins to one string, less any PHP would read back as an int key —
+     * what a member can be told apart by. Public so a reader matching a union against another holds it to
+     * the same reading the discriminator is decided by.
      *
      * @param  array<mixed>  $body
      * @return array<string, string>
      */
-    private static function tags(array $body): array
+    public static function pinned(array $body): array
     {
         $properties = $body['properties'] ?? null;
         $required = $body['required'] ?? null;

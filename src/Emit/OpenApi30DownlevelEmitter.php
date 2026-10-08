@@ -177,6 +177,13 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
      */
     private const string UNDESCRIBED_RESPONSE = "This operation's responses are not described, so no status code or body is guaranteed.";
 
+    /**
+     * 3.0's spelling of `{type: null}`. Its `nullable` adds null only beside a `type` (3.0.3 onwards) and
+     * has no effect elsewhere, so a type plus a one-value enum is what admits null and nothing else. Every
+     * `nullable` this emitter writes stands beside a `type` for the same reason.
+     */
+    private const array NULL_SCHEMA = ['type' => 'object', 'nullable' => true, 'enum' => [null]];
+
     public function __construct(
         private OpenApi31DownlevelEmitter $oas31 = new OpenApi31DownlevelEmitter,
         private Canonicalizer $canonicalizer = new Canonicalizer,
@@ -224,7 +231,8 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
         unset($array['jsonSchemaDialect']);
 
         $array = $this->downlevelInfo($array, $diagnostics);
-        $array = $this->dropWebhooks($array, $diagnostics);
+        // A component only the webhooks referred to goes with them.
+        $array = StrandedComponents::drop($array, $this->dropWebhooks($array, $diagnostics));
         [$array, $removed] = $this->downlevelComponents($array, $diagnostics);
 
         /** @var array<string, mixed> $walked */
@@ -926,13 +934,14 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
         $type = $schema['type'] ?? null;
 
         if ($type === 'null' || $type === ['null']) {
-            unset($schema['type']);
-            $schema['nullable'] = true;
+            // A value list already there says which nulls it admits; a `const` becomes one further on.
+            $listed = array_key_exists('enum', $schema) || array_key_exists('const', $schema);
+            $schema = [...$schema, ...($listed ? array_diff_key(self::NULL_SCHEMA, ['enum' => true]) : self::NULL_SCHEMA)];
 
             $diagnostics[] = new Diagnostic(
-                severity: Severity::Warning,
+                severity: Severity::Info,
                 code: 'downlevel.null-type',
-                message: sprintf('Rewrote the null-only type at %s as an untyped `nullable: true`; OpenAPI 3.0 has no `null` type.', $pointer),
+                message: sprintf('Rewrote the null-only type at %s as `{type: object, nullable: true, enum: [null]}`; OpenAPI 3.0 has no `null` type.', $pointer),
             );
 
             return $schema;
@@ -943,36 +952,36 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
         }
 
         $members = array_values(array_filter($type, static fn (mixed $t): bool => $t !== 'null'));
+        $nullable = count($type) !== count($members);
         unset($schema['type']);
-
-        if (count($type) !== count($members)) {
-            $schema['nullable'] = true;
-        }
 
         if (count($members) <= 1) {
             if ($members !== []) {
                 $schema['type'] = $members[0];
+                if ($nullable) {
+                    $schema['nullable'] = true;
+                }
             }
 
             return $schema;
         }
 
-        return $this->downlevelMultiType($schema, $members, $pointer, $diagnostics);
+        return $this->downlevelMultiType($schema, $members, $nullable, $pointer, $diagnostics);
     }
 
     /**
      * More than one non-null type has no 3.0 spelling. An `anyOf` of single-type branches says the
      * same thing where the schema composes nothing yet, with each keyword that speaks about one type
      * moved into that type's branch — 3.0 requires `items` beside `type: array`, and a generator reads
-     * an array's items from nowhere else. Otherwise the type constraint is dropped, the loosest sound
-     * reading.
+     * an array's items from nowhere else, and a null member is a branch of its own. Otherwise the type
+     * constraint is dropped, the loosest sound reading, leaving the composition to say whether null passes.
      *
      * @param  array<string, mixed>  $schema
      * @param  non-empty-list<mixed>  $members
      * @param  list<Diagnostic>  $diagnostics
      * @return array<string, mixed>
      */
-    private function downlevelMultiType(array $schema, array $members, string $pointer, array &$diagnostics): array
+    private function downlevelMultiType(array $schema, array $members, bool $nullable, string $pointer, array &$diagnostics): array
     {
         $composes = isset($schema['anyOf']) || isset($schema['oneOf']);
 
@@ -991,7 +1000,7 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
                     }
                 }
             }
-            $schema['anyOf'] = $branches;
+            $schema['anyOf'] = $nullable ? [...$branches, self::NULL_SCHEMA] : $branches;
         }
 
         $diagnostics[] = new Diagnostic(
@@ -1006,8 +1015,12 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
     }
 
     /**
-     * A `{type: null}` branch is how 2020-12 spells nullable next to a `$ref` or a union; in 3.0
-     * that is `nullable: true` on the parent, with a lone surviving branch folded back in.
+     * A `{type: null}` branch is how 2020-12 spells nullable next to a `$ref` or a union. A lone
+     * surviving branch with a `type` of its own folds back in as `nullable: true` beside that type. A
+     * lone `$ref` becomes `allOf: [{$ref}]` beside `nullable: true`, and a lone discriminated union
+     * merges in beside it: the idioms 3.0 code generators read as "nullable X", the union keeping its
+     * discriminator where they look for it. Anything else — an untyped branch, an undiscriminated
+     * composition, a real choice — keeps its composition, with the null branch spelled {@see NULL_SCHEMA}.
      *
      * @param  array<string, mixed>  $schema
      * @param  list<Diagnostic>  $diagnostics
@@ -1026,26 +1039,82 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
                 continue;
             }
 
-            $schema[$keyword] = $kept;
-            $schema['nullable'] = true;
-
+            $rest = $schema;
+            unset($rest[$keyword]);
             $lone = count($kept) === 1 ? Arr::stringKeyed(is_array($kept[0]) ? $kept[0] : []) : null;
-            if ($lone !== null) {
-                unset($schema[$keyword]);
-                $schema = self::admitNull($this->foldBranch($schema, $lone));
+
+            if ($lone !== null && self::foldsIn($rest, $lone)) {
+                $schema = self::admitNull([...$rest, ...$lone, 'nullable' => true]);
+
+                continue;
             }
 
-            // A choice survives — the branches left, or the one folded in being itself an anyOf/oneOf.
-            if ($lone === null || isset($lone['anyOf']) || isset($lone['oneOf'])) {
+            // Generators over a strict 3.0.3 validator: the validator reads a `nullable` with no `type`
+            // beside it as nothing and refuses the null, and every generator reads it as "nullable X".
+            $idiom = $lone === null ? null : self::nullableIdiom($rest, $lone);
+            if ($idiom !== null) {
+                $schema = $idiom;
+
                 $diagnostics[] = new Diagnostic(
                     severity: Severity::Info,
                     code: 'downlevel.nullable-composition',
-                    message: sprintf('Moved the `{type: null}` branch at %s/%s onto the parent as `nullable: true`, which OpenAPI 3.0 reads loosely beside a composition.', $pointer, $keyword),
+                    message: sprintf('Moved the `{type: null}` branch at %s/%s onto the parent as `nullable: true`, the spelling OpenAPI 3.0 code generators read as nullable; a strict 3.0.3 validator, which honours `nullable` only beside a `type`, refuses null there.', $pointer, $keyword),
                 );
+
+                continue;
             }
+
+            $schema[$keyword] = array_map(static fn (mixed $b): mixed => $b === ['type' => 'null'] ? self::NULL_SCHEMA : $b, $branches);
+
+            $diagnostics[] = new Diagnostic(
+                severity: Severity::Info,
+                code: 'downlevel.nullable-composition',
+                message: sprintf('Rewrote the `{type: null}` branch at %s/%s as `{type: object, nullable: true, enum: [null]}`; OpenAPI 3.0 has no `null` type, and its `nullable` takes effect only beside one.', $pointer, $keyword),
+            );
         }
 
         return $schema;
+    }
+
+    /**
+     * Whether the one branch left beside a null one can carry `nullable` itself: it states a `type`, is no
+     * `$ref` (which 3.0 lets stand alone), and shares no member with the parent it would merge into.
+     *
+     * @param  array<string, mixed>  $parent
+     * @param  array<string, mixed>  $branch
+     */
+    private static function foldsIn(array $parent, array $branch): bool
+    {
+        return is_string($branch['type'] ?? null)
+            && ! array_key_exists('$ref', $branch)
+            && array_intersect_key($parent, $branch) === [];
+    }
+
+    /**
+     * The parent with its one surviving branch carrying `nullable: true` the way 3.0 generators read it: a
+     * lone `$ref` wrapped in `allOf`, since 3.0 lets nothing stand beside a reference, and a discriminated
+     * union merged in, so its discriminator stays where they read polymorphism from. No `type` goes beside
+     * either: a reference may name any type, and `object` would refuse a referenced enum's strings. Null
+     * for any other branch, or one sharing a member with its parent.
+     *
+     * @param  array<string, mixed>  $parent
+     * @param  array<string, mixed>  $branch
+     * @return array<string, mixed>|null
+     */
+    private static function nullableIdiom(array $parent, array $branch): ?array
+    {
+        $ref = $branch['$ref'] ?? null;
+        if (is_string($ref) && count($branch) === 1) {
+            $existing = is_array($parent['allOf'] ?? null) ? array_values($parent['allOf']) : [];
+
+            return [...$parent, 'allOf' => [['$ref' => $ref], ...$existing], 'nullable' => true];
+        }
+
+        $discriminated = isset($branch['discriminator']) && (isset($branch['oneOf']) || isset($branch['anyOf']));
+
+        return $discriminated && array_intersect_key($parent, $branch) === []
+            ? [...$parent, ...$branch, 'nullable' => true]
+            : null;
     }
 
     /**
@@ -1071,28 +1140,6 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
         }
 
         return $schema;
-    }
-
-    /**
-     * The one surviving branch of a nullable union. A `$ref` can carry no `nullable` sibling, so it
-     * becomes an `allOf` wrapper; anything else merges in, leaving the parent's own members alone.
-     *
-     * @param  array<string, mixed>  $schema
-     * @param  array<string, mixed>  $branch
-     * @return array<string, mixed>
-     */
-    private function foldBranch(array $schema, array $branch): array
-    {
-        $ref = $branch['$ref'] ?? null;
-
-        if (is_string($ref) && count($branch) === 1) {
-            $existing = is_array($schema['allOf'] ?? null) ? array_values($schema['allOf']) : [];
-            $schema['allOf'] = [['$ref' => $ref], ...$existing];
-
-            return $schema;
-        }
-
-        return $schema + $branch;
     }
 
     /**
