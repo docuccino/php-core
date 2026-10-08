@@ -7,6 +7,22 @@ User-facing changes to `docuccino/core` — features, fixes, performance work an
 taken from the commit messages scoped `core`. Entries begin after v0.1.2; older history is in
 the [repository](https://github.com/docuccino/docuccino) git log.
 
+## v0.21.0
+
+### Features
+
+- a claim's description and an example's placeholders go where they are published ([#618](https://github.com/docuccino/docuccino/pull/618))
+- a shared response's use records a claim only where it did not land ([#617](https://github.com/docuccino/docuccino/pull/617))
+- publish a use's x-docuccino on its operation, not beside its $ref (UIR 2.1) ([#616](https://github.com/docuccino/docuccino/pull/616))
+
+### Bug fixes
+
+- spell null with a type in the OpenAPI 3.0 export, keeping the nullable $ref and union idioms generators read ([#639](https://github.com/docuccino/docuccino/pull/639))
+- drop a component only a dropped member referred to ([#638](https://github.com/docuccino/docuccino/pull/638))
+- publish a class reaching a request shape as its own request component ([#637](https://github.com/docuccino/docuccino/pull/637))
+- adopt a declared tagged union over the object the rules split, refined by the rules ([#630](https://github.com/docuccino/docuccino/pull/630))
+- report every place a document fails its schema, not only the first ([#615](https://github.com/docuccino/docuccino/pull/615))
+
 ## v0.20.4
 
 ### Features
