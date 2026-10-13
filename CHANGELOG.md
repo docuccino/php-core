@@ -7,6 +7,17 @@ User-facing changes to `docuccino/core` — features, fixes, performance work an
 taken from the commit messages scoped `core`. Entries begin after v0.1.2; older history is in
 the [repository](https://github.com/docuccino/docuccino) git log.
 
+## v0.21.1
+
+### Features
+
+- read an uploaded OpenAPI document through a public DocumentReader ([#654](https://github.com/docuccino/docuccino/pull/654))
+
+### Bug fixes
+
+- diff a 3.0 document against a 3.1 or 3.2 one in the dialect they share ([#656](https://github.com/docuccino/docuccino/pull/656))
+- keep an empty security requirement read back from JSON ([#653](https://github.com/docuccino/docuccino/pull/653))
+
 ## v0.21.0
 
 ### Features
