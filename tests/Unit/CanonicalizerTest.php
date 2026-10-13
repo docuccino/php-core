@@ -61,6 +61,25 @@ it('is idempotent: emitting canonical output again yields identical bytes', func
     expect($twice)->toBe($once);
 });
 
+it('keeps an empty security requirement read back from JSON, which says credentials are optional', function (): void {
+    // The build writes `[]` for it and publishes `{}`; reading those bytes back through JsonValue gives a
+    // stdClass. Skipped as "not a map", the re-emitted document demanded credentials the original did not,
+    // and a full artifact's `contentHash` stopped recomputing from its own bytes.
+    $bytes = $this->emitter->emitArray([
+        'openapi' => '3.2.0',
+        'info' => ['title' => 'Orders', 'version' => '1.0.0'],
+        'security' => [[], ['bearerAuth' => []]],
+        'paths' => ['/orders' => ['get' => ['security' => [[], ['bearerAuth' => []]], 'responses' => ['200' => ['description' => 'OK']]]]],
+    ]);
+
+    $reread = JsonValue::decode($bytes);
+    expect($reread)->toBeArray();
+
+    /** @var array<string, mixed> $reread */
+    expect($this->emitter->emitArray($reread))->toBe($bytes)
+        ->and($bytes)->toContain("\"security\": [\n    {},\n");
+});
+
 it('orders parameters by in-rank then name', function (): void {
     $doc = [
         'openapi' => '3.2.0',

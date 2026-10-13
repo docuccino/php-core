@@ -64,7 +64,45 @@ final class Validator
 
     private static function schemaDirectory(): string
     {
-        return dirname(__DIR__, 2).'/resources/spec/uir/'.UirSpec::minor();
+        return self::schemaRoot().'/'.UirSpec::minor();
+    }
+
+    private static function schemaRoot(): string
+    {
+        return dirname(__DIR__, 2).'/resources/spec/uir';
+    }
+
+    /**
+     * The document schema this package ships for $version (`major.minor`), or null where it ships none.
+     * Every published version is served forever, so a document written to an older one is checked against
+     * the schema it was written to rather than against the current one.
+     */
+    public static function documentSchemaPathFor(string $version): ?string
+    {
+        $path = self::schemaRoot().'/'.$version.'/schema.json';
+
+        return in_array($version, self::vendoredVersions(), true) && is_file($path) ? $path : null;
+    }
+
+    /**
+     * Every `major.minor` this package ships a document schema for, oldest first.
+     *
+     * @return list<string>
+     */
+    public static function vendoredVersions(): array
+    {
+        $versions = [];
+        foreach ((array) glob(self::schemaRoot().'/*/schema.json') as $file) {
+            $version = basename(dirname((string) $file));
+
+            if (preg_match('/^\d+\.\d+$/', $version) === 1) {
+                $versions[] = $version;
+            }
+        }
+
+        usort($versions, static fn (string $a, string $b): int => version_compare($a, $b));
+
+        return $versions;
     }
 
     /**
@@ -77,6 +115,16 @@ final class Validator
 
         $data = json_decode($json, false, flags: JSON_THROW_ON_ERROR);
 
+        return $this->validateGraph($data);
+    }
+
+    /**
+     * The same check over a document already decoded to its object graph — maps as objects, so `{}` and
+     * `[]` stay apart — and read as it stands. Nothing is canonicalised first, which is right for bytes
+     * someone else wrote: canonicalising would repair what the check is meant to report.
+     */
+    public function validateGraph(mixed $data): ValidationResult
+    {
         // No resolver registration and no fetch: every `$id` the schema references is a resource
         // embedded in the schema itself, which is the property `SchemaSelfContainmentTest` holds.
         // So a reference that does not resolve says the schema FILE is wrong, not the document — and

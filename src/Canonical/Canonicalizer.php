@@ -809,6 +809,12 @@ final class Canonicalizer
         $seen = [];
 
         foreach ($node as $requirement) {
+            // `{}` read back from JSON is a stdClass, and it is the one requirement that says "no
+            // credentials needed" — dropping it turns optional authentication into required.
+            if ($requirement instanceof stdClass) {
+                $requirement = get_object_vars($requirement);
+            }
+
             if (! is_array($requirement)) {
                 continue;
             }

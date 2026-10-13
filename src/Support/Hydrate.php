@@ -181,6 +181,11 @@ final class Hydrate
         $bare = [];
 
         foreach ($value as $key => $item) {
+            // `{}` as JSON reads it back is a stdClass: the empty requirement, which a skip would lose.
+            if (! is_string($key) && $item instanceof stdClass) {
+                $item = get_object_vars($item);
+            }
+
             if (is_string($key)) {
                 $bare[$key] = $item;
             } elseif (is_array($item)) {

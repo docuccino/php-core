@@ -56,14 +56,25 @@ final readonly class UirEmitter implements ReportingEmitter
     public function emitArray(array $document, EmitOptions $options = new EmitOptions(provenance: ProvenanceLevel::Full)): string
     {
         if ($options->provenance !== ProvenanceLevel::Full) {
-            /** @var array<string, mixed> $levelled */
-            $levelled = $this->levelProvenance($document, $options->provenance);
-            $document = StrandedComponents::drop($document, $levelled);
+            $document = StrandedComponents::drop($document, $this->levelled($document, $options->provenance));
         }
 
         // After levelling, which finds provenance only under an `x-docuccino` key: once lifted, a use's
         // provenance sits deeper, under its operation's `uses`.
         return $this->serializer->serialize($this->canonicalizer->canonicalize(UseSites::lift($document)));
+    }
+
+    /**
+     * $document with $level applied to every `x-docuccino` member in it, and nothing else touched — no
+     * component is dropped, so a reader asking for a node's provenance-free bytes finds every node it had.
+     *
+     * @param  array<string, mixed>  $document
+     * @return array<string, mixed>
+     */
+    public function levelled(array $document, ProvenanceLevel $level): array
+    {
+        /** @var array<string, mixed> */
+        return $this->levelProvenance($document, $level);
     }
 
     /** Applies the provenance level to every `x-docuccino` member in the tree. */

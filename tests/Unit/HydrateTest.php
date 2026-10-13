@@ -36,6 +36,12 @@ it('reads a security member the way OAS says it is written', function (): void {
         ->and(Hydrate::securityRequirements(null))->toBeNull();
 });
 
+it('keeps the empty requirement a document read back from JSON spells as an object', function (): void {
+    // `security: [{}, {bearerAuth: []}]` is how OpenAPI says credentials are optional. Read through
+    // JsonValue, the `{}` is a stdClass; skipping it as "not a map" made the model say they are required.
+    expect(Hydrate::securityRequirements([new stdClass, ['bearerAuth' => []]]))->toBe([[], ['bearerAuth' => []]]);
+});
+
 it('keeps the scheme name of a requirement written without the list around it', function (): void {
     // A bare map is malformed and unambiguous: it states one requirement. Unwrapped the way `servers` and
     // `tags` are, the names go and a document demanding a scheme reads as one demanding nothing.

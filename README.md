@@ -44,6 +44,23 @@ use Docuccino\Core\Diff\DocumentDiffer;
 $changes = (new DocumentDiffer())->diff($oldDocument, $newDocument);
 ```
 
+Read a document someone else wrote — a full artifact, an export, or any OpenAPI 3.x description, as
+JSON or YAML — and ask what it is, where it fails its specification, and what it holds:
+
+```php
+use Docuccino\Core\Reader\DocumentReader;
+
+$document = (new DocumentReader())->read($bytes, 'application/yaml');
+
+$document->inspect()->capability;    // Capability::Full, ::Identities or ::Plain
+$document->validate()->isValid();    // OpenAPI meta-schema, plus the extension schema for a full document
+$document->nodes();                  // one DocumentNode per operation, parameter, response and schema
+$document->contentHash();
+```
+
+`read()` throws `UnreadableDocumentException`, with a reason you can show whoever uploaded the bytes,
+when they are not a document it can read.
+
 ## Part of Docuccino
 
 | Package | Role |
