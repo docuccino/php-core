@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Docuccino\Core\Contract\Pointer;
 use Docuccino\Core\Reader\DocumentReader;
 use Docuccino\Core\Reader\ReadFailure;
 use Docuccino\Core\Reader\Syntax;
@@ -174,3 +175,33 @@ it('reads an unquoted YAML date as the text it was written as, never as a count 
     'a date-time with an offset and a fraction' => ['2024-01-01T10:00:00.5+02:00', '2024-01-01T10:00:00.5+02:00'],
     'a date-time with no zone' => ['2024-01-01 10:30:00', '2024-01-01T10:30:00'],
 ]);
+
+it('writes the document back as JSON exactly as it was written', function (): void {
+    // Out of canonical order everywhere: members, parameters, a repeated tag, `{}` beside `[]`, and a map
+    // whose keys read as list indexes.
+    $written = '{"paths":{"/b":{"get":{"tags":["x","x"],"parameters":[{"name":"z","in":"query"},{"name":"a","in":"header"}],"responses":{"200":{"description":"OK"}}}},"/a":{}},'
+        .'"info":{"version":"1","title":"Order"},"openapi":"3.1.0","security":[],"components":{"schemas":{"Empty":{}},"examples":{"0":{"value":"zero"},"1":{"value":"one"}}}}';
+
+    $json = (new DocumentReader)->read($written)->json();
+
+    expect(json_encode(json_decode($json)))->toBe(json_encode(json_decode($written)))
+        ->and($json)->toEndWith("}\n")
+        ->and((new DocumentReader)->read($json)->json())->toBe($json);
+});
+
+it('writes a YAML document and its JSON twin as the same bytes', function (): void {
+    expect((new DocumentReader)->read(loadGolden('kitchen-sink.openapi32.yaml'))->json())
+        ->toBe((new DocumentReader)->read(loadGolden('kitchen-sink.openapi32.json'))->json());
+});
+
+it('writes JSON every node pointer resolves in', function (): void {
+    $document = (new DocumentReader)->read((string) file_get_contents(golden('workbench-content.uir.json')));
+    $graph = json_decode($document->json());
+    expect($graph)->toBeObject();
+
+    foreach ($document->nodes() as $node) {
+        $segments = array_map(Pointer::unescape(...), array_slice(explode('/', $node->pointer), 1));
+
+        expect(Pointer::readGraph($graph, $segments))->not->toBeNull($node->key);
+    }
+});

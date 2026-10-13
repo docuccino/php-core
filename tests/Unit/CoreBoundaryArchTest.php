@@ -411,7 +411,7 @@ it('freezes the contract index at the methods outside core actually call', funct
 it('freezes the document reader at the methods it means to promise', function (): void {
     $promised = [
         DocumentReader::class => ['read'],
-        ReadDocument::class => ['contentHash', 'inspect', 'nodes', 'uir', 'validate'],
+        ReadDocument::class => ['contentHash', 'inspect', 'json', 'nodes', 'uir', 'validate'],
     ];
 
     foreach ($promised as $class => $methods) {

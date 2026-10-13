@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Reader;
 
+use Docuccino\Core\Canonical\CanonicalJsonSerializer;
 use Docuccino\Core\Diff\DocumentDiffer;
 use Docuccino\Core\Document\UirDocument;
 use Docuccino\Core\Identity\ContentHasher;
@@ -93,6 +94,21 @@ final readonly class ReadDocument
     public function contentHash(): string
     {
         return (new ContentHasher)->hash($this->document);
+    }
+
+    /**
+     * The document as JSON, exactly as read: every member and every list in the order it was written,
+     * `{}` and `[]` kept apart, a map whose keys look like numbers still a map, and nothing added,
+     * dropped or rewritten — so every {@see DocumentNode::$pointer} resolves in it, and a YAML document
+     * and its JSON twin give the same bytes. Written by the same deterministic writer as every artifact
+     * (two-space indent, LF, trailing newline), so the same document always gives the same bytes.
+     *
+     * Not canonical: canonical order sorts parameters and drops repeated values, which would move what a
+     * pointer names. {@see contentHash()} is the answer that ignores how a document was written.
+     */
+    public function json(): string
+    {
+        return (new CanonicalJsonSerializer)->serialize($this->graph);
     }
 
     /** The document as the model {@see DocumentDiffer} compares. */

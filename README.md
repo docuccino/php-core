@@ -56,6 +56,7 @@ $document->inspect()->capability;    // Capability::Full, ::Identities or ::Plai
 $document->validate()->isValid();    // OpenAPI meta-schema, plus the extension schema for a full document
 $document->nodes();                  // one DocumentNode per operation, parameter, response and schema
 $document->contentHash();
+$document->json();                   // the document as read, as JSON: what every node pointer points into
 ```
 
 `read()` throws `UnreadableDocumentException`, with a reason you can show whoever uploaded the bytes,
