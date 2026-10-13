@@ -9,6 +9,7 @@ use Docuccino\Core\Canonical\CanonicalJsonSerializer;
 use Docuccino\Core\Contract\Pointer;
 use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
+use Docuccino\Core\Diff\CommonDialect;
 use Docuccino\Core\Document\NodeIdentity;
 use Docuccino\Core\Document\UirDocument;
 use Docuccino\Core\Draft\SchemaKeywords;
@@ -206,8 +207,7 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
         /** @var list<Diagnostic> $diagnostics */
         $diagnostics = [];
 
-        $array = $this->downlevel($this->oas31->toOpenApiArray($document, $diagnostics, $options), $diagnostics);
-        $canonical = $this->canonicalizer->canonicalize($array);
+        $canonical = $this->canonicalizer->canonicalize($this->toOpenApiArray($document, $diagnostics, $options));
 
         // Checked in the carrier it is WRITTEN in, so the YAML writer answers for its own bytes.
         $output = $options->yaml ? $this->yaml->serialize($canonical) : $this->serializer->serialize($canonical);
@@ -216,6 +216,19 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
             $output,
             new EmitReport([...$diagnostics, ...EmittedSpecCheck::diagnostics($this->format(), $output, $options->yaml)]),
         );
+    }
+
+    /**
+     * The 3.0 document as an array, before it is canonicalised or checked against the 3.0 meta-schema —
+     * for a caller that reads the document rather than publishing it, as the differ does to compare a 3.1
+     * or 3.2 document with a 3.0 one ({@see CommonDialect}).
+     *
+     * @param  list<Diagnostic>  $diagnostics
+     * @return array<string, mixed>
+     */
+    public function toOpenApiArray(UirDocument $document, array &$diagnostics, EmitOptions $options = new EmitOptions): array
+    {
+        return $this->downlevel($this->oas31->toOpenApiArray($document, $diagnostics, $options), $diagnostics);
     }
 
     /**

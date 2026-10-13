@@ -59,6 +59,8 @@ final class DocumentDiffer
 
     public function diff(UirDocument $old, UirDocument $new): Changeset
     {
+        [$old, $new] = CommonDialect::of($old, $new);
+
         $oldRefs = ComponentRefs::of($old);
         $newRefs = ComponentRefs::of($new);
 
