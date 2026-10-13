@@ -7,6 +7,12 @@ User-facing changes to `docuccino/core` — features, fixes, performance work an
 taken from the commit messages scoped `core`. Entries begin after v0.1.2; older history is in
 the [repository](https://github.com/docuccino/docuccino) git log.
 
+## v0.21.2
+
+### Features
+
+- write a read document back as JSON, exactly as it was written ([#660](https://github.com/docuccino/docuccino/pull/660))
+
 ## v0.21.1
 
 ### Features
