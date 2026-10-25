@@ -28,6 +28,7 @@ use Docuccino\Core\Support\Json;
  * that may reach itself, so the resolution beneath it is bounded rather than exhaustive and
  * {@see SchemaComparator} owns how. An operation's parameters are its own plus the ones its path item
  * declares for every operation under it, minus any the operation restates for the same `in` + `name`.
+ * Each of those reads is paid for once per use, against a {@see ReferenceBudget} per document.
  *
  * Breaking: a removed operation/parameter/response/status, a parameter becoming required, an
  * added required parameter, a security scheme a requirement still names changing or going away,

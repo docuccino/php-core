@@ -16,4 +16,17 @@ final readonly class DocumentGenerator
         public ?string $specVersion,
         public ?string $schema,
     ) {}
+
+    /**
+     * @return array{name: ?string, version: ?string, specVersion: ?string, schema: ?string}
+     */
+    public function toArray(): array
+    {
+        return [
+            'name' => $this->name,
+            'version' => $this->version,
+            'specVersion' => $this->specVersion,
+            'schema' => $this->schema,
+        ];
+    }
 }

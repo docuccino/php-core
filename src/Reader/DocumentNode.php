@@ -30,4 +30,23 @@ final readonly class DocumentNode
         public bool $deprecated,
         public string $digest,
     ) {}
+
+    /**
+     * The node as values a store or an API response can hold: the kind as its value, every member in
+     * the order above.
+     *
+     * @return array{kind: string, identity: ?string, key: string, pointer: string, label: ?string, deprecated: bool, digest: string}
+     */
+    public function toArray(): array
+    {
+        return [
+            'kind' => $this->kind->value,
+            'identity' => $this->identity,
+            'key' => $this->key,
+            'pointer' => $this->pointer,
+            'label' => $this->label,
+            'deprecated' => $this->deprecated,
+            'digest' => $this->digest,
+        ];
+    }
 }

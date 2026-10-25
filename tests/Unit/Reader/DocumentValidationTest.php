@@ -133,21 +133,41 @@ it('lists the schema versions that ship, and every one of them is in the publish
         ->and($published)->toContain('2.1');
 });
 
-it('cuts the findings at the limit asked for, saying so', function (): void {
+it('cuts the findings at the limit asked for, and says so through isTruncated() alone', function (): void {
     $document = ['openapi' => '3.1.0', 'info' => ['title' => 'Orders', 'version' => '1'], 'paths' => ['/a' => ['get' => 1], '/b' => ['get' => 2], '/c' => ['get' => 3], '/d' => ['get' => 4]]];
 
     $read = (new DocumentReader)->read((string) json_encode($document));
     $all = $read->validate()->findings;
     $cut = $read->validate(2);
 
+    // A finding is a place the document fails. A line saying the list was cut names no place, and
+    // counted or filtered by source it reads as one more failure — and in English, whatever the
+    // caller's language.
     expect(count($all))->toBeGreaterThan(2)
         ->and($cut->isValid())->toBeFalse()
         ->and($cut->isTruncated())->toBeTrue()
-        ->and($cut->findings)->toHaveCount(3)
-        ->and(array_slice($cut->findings, 0, 2))->toEqual(array_slice($all, 0, 2))
-        ->and((string) $cut->findings[2])->toBe('[openapi] /: more than 2 findings; the first 2 are shown')
+        ->and($cut->findings)->toEqual(array_slice($all, 0, 2))
+        ->and($read->validate(count($all))->findings)->toEqual($all)
         ->and($read->validate(count($all))->isTruncated())->toBeFalse();
 });
+
+it('reports a cut one schema check made as truncation, past whatever limit was asked for', function (int $max): void {
+    // 120 operations that are not objects, which the meta-schema check alone reports past its own
+    // limit of 50. Asked for more than that, the list used to carry the check's "more than 50" line as
+    // a finding while calling itself complete.
+    $paths = [];
+    foreach (range(1, 120) as $i) {
+        $paths["/p{$i}"] = ['get' => $i];
+    }
+
+    $validation = (new DocumentReader)->read((string) json_encode(['openapi' => '3.1.0', 'info' => ['title' => 'Orders', 'version' => '1'], 'paths' => $paths]))->validate($max);
+
+    expect($validation->isTruncated())->toBeTrue()
+        ->and(count($validation->findings))->toBeLessThanOrEqual($max)
+        ->and(count($validation->findings))->toBeGreaterThanOrEqual(min($max, 50))
+        ->and(array_filter($validation->findings, static fn (DocumentFinding $finding): bool => str_contains($finding->message, 'more than')))->toBe([])
+        ->and(array_filter($validation->findings, static fn (DocumentFinding $finding): bool => $finding->pointer === '/'))->toBe([]);
+})->with([10, 50, 51, 100, 500]);
 
 it('refuses a limit that would show nothing', function (): void {
     $read = (new DocumentReader)->read('{"openapi":"3.1.0","info":{"title":"Orders","version":"1"},"paths":{}}');

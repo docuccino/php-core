@@ -38,6 +38,8 @@ use Docuccino\Core\Support\Hydrate;
  * `name` nor `in`, which is how a parameter is told from its neighbours, so unresolved they are
  * indistinguishable.
  *
+ * Every resolution is charged to the document's {@see ReferenceBudget}, the size of what it lands on.
+ *
  * @internal
  */
 final readonly class ComponentRefs
@@ -65,6 +67,7 @@ final readonly class ComponentRefs
         private array $requestBodies,
         private array $securitySchemes,
         private array $schemas,
+        private ReferenceBudget $budget,
     ) {}
 
     public static function of(UirDocument $document): self
@@ -78,6 +81,7 @@ final readonly class ComponentRefs
             Hydrate::mapOfArrays($rest['requestBodies'] ?? null),
             Hydrate::mapOfArrays($rest['securitySchemes'] ?? null),
             $document->components?->schemaValues() ?? [],
+            new ReferenceBudget($document),
         );
     }
 
@@ -96,6 +100,8 @@ final readonly class ComponentRefs
         if ($target === null) {
             return $response;
         }
+
+        $this->budget->charge('responses', $name, $target);
 
         return new ResponseObject(
             ref: $target->ref,
@@ -122,6 +128,8 @@ final readonly class ComponentRefs
         if ($target === null) {
             return $parameter;
         }
+
+        $this->budget->charge('parameters', $name, $target);
 
         return new Parameter(
             name: $target->name,
@@ -172,6 +180,8 @@ final readonly class ComponentRefs
             return [$item, UnresolvedRef::unopenable($ref)];
         }
 
+        $this->budget->charge('pathItems', $name, $target);
+
         $rest = self::overrides($item->rest) + $target->rest;
         unset($rest['$ref']);
 
@@ -193,7 +203,7 @@ final readonly class ComponentRefs
      */
     public function resolveRequestBody(array $body): array
     {
-        return self::resolveInto($body, 'requestBodies', $this->requestBodies);
+        return $this->resolveInto($body, 'requestBodies', $this->requestBodies);
     }
 
     /**
@@ -207,7 +217,7 @@ final readonly class ComponentRefs
      */
     public function resolveSecurityScheme(array $scheme): array
     {
-        [$resolved] = self::resolveInto($scheme, 'securitySchemes', $this->securitySchemes);
+        [$resolved] = $this->resolveInto($scheme, 'securitySchemes', $this->securitySchemes);
 
         return $resolved;
     }
@@ -254,6 +264,7 @@ final readonly class ComponentRefs
         }
 
         $target = $this->schemas[$name];
+        $this->budget->charge('schemas', $name, $target);
 
         if (is_bool($target)) {
             return $target;
@@ -291,7 +302,7 @@ final readonly class ComponentRefs
      * @param  array<string, array<string, mixed>>  $bucket
      * @return array{0: array<string, mixed>, 1: UnresolvedRef|null}
      */
-    private static function resolveInto(array $node, string $section, array $bucket): array
+    private function resolveInto(array $node, string $section, array $bucket): array
     {
         $ref = $node['$ref'] ?? null;
 
@@ -314,6 +325,8 @@ final readonly class ComponentRefs
         if (isset($target['$ref'])) {
             return [$node, UnresolvedRef::unopenable($ref)];
         }
+
+        $this->budget->charge($section, $name, $target);
 
         $merged = self::overrides($node) + $target;
         unset($merged['$ref']);

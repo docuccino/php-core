@@ -3,9 +3,15 @@
 declare(strict_types=1);
 
 use Docuccino\Core\Reader\Capability;
+use Docuccino\Core\Reader\DocumentFinding;
 use Docuccino\Core\Reader\DocumentGenerator;
 use Docuccino\Core\Reader\DocumentReader;
 use Docuccino\Core\Reader\ExtensionMember;
+use Docuccino\Core\Reader\FindingSource;
+use Docuccino\Core\Reader\NodeKind;
+use Docuccino\Core\Reader\ReadFailure;
+use Docuccino\Core\Reader\Syntax;
+use Docuccino\Core\SpecValidation\Validator;
 use Docuccino\Core\Support\JsonValue;
 
 /*
@@ -126,3 +132,76 @@ it('marks an artifact written before UIR 2.0 as legacy', function (array $root, 
     'a 2.1 spec version' => [[], ['specVersion' => '2.1.0'], false],
     'no spec version at all' => [[], [], false],
 ]);
+
+it('writes the generator as values a store can hold, one member per property', function (): void {
+    $generator = new DocumentGenerator('docuccino/laravel', '0.9.1', '2.1.0', null);
+
+    expect($generator->toArray())->toBe(['name' => 'docuccino/laravel', 'version' => '0.9.1', 'specVersion' => '2.1.0', 'schema' => null])
+        ->and(array_keys($generator->toArray()))->toBe(array_map(
+            static fn (ReflectionParameter $parameter): string => $parameter->getName(),
+            (new ReflectionMethod(DocumentGenerator::class, '__construct'))->getParameters(),
+        ));
+});
+
+it('reads the UIR version a document is written to as the major.minor its schema is published under', function (array $root, mixed $specVersion, ?string $uirVersion): void {
+    $generator = ['name' => 'docuccino/laravel', 'version' => '0.9.1'] + ($specVersion === null ? [] : ['specVersion' => $specVersion]);
+    $read = (new DocumentReader)->read((string) json_encode($root + [
+        'openapi' => '3.2.0',
+        'info' => ['title' => 'Orders', 'version' => '1'],
+        'paths' => new stdClass,
+        'x-docuccino' => ['generator' => $generator],
+    ]));
+
+    $unvalidated = array_filter(
+        $read->validate()->findingsFrom(FindingSource::Extension),
+        static fn (DocumentFinding $finding): bool => str_contains($finding->message, 'the extension was not validated'),
+    );
+
+    // The version validate() picks the schema by: where it reads none, or one no schema ships for,
+    // the extension goes unvalidated and says so.
+    expect($read->inspect()->uirVersion)->toBe($uirVersion)
+        ->and($unvalidated === [])->toBe($uirVersion !== null && in_array($uirVersion, Validator::vendoredVersions(), true));
+})->with([
+    'a full version' => [[], '2.1.0', '2.1'],
+    'a patch past it' => [[], '2.0.7', '2.0'],
+    'major.minor alone' => [[], '2.1', '2.1'],
+    'two-digit parts' => [[], '10.12.3', '10.12'],
+    'a version no schema ships for' => [[], '2.9.0', '2.9'],
+    'a major alone' => [[], '2', null],
+    'a pre-release suffix' => [[], '2.1-beta', null],
+    'not a version' => [[], 'current', null],
+    'not text' => [[], 2.1, null],
+    'none at all' => [[], null, null],
+    'the root uir of an artifact before 2.0' => [['uir' => '1.0.0'], null, '1.0'],
+]);
+
+it('publishes every reader enum as values a caller may store, and changes none of them quietly', function (): void {
+    $published = [
+        Capability::class => ['plain', 'identities', 'full'],
+        ExtensionMember::class => ['provenance', 'content', 'mock', 'workflows', 'diagnostics', 'uses'],
+        FindingSource::class => ['openapi', 'extension'],
+        NodeKind::class => ['operation', 'parameter', 'response', 'schema', 'page', 'workflow'],
+        ReadFailure::class => ['encoding', 'syntax', 'not-an-object', 'alias-expansion', 'unrepresentable', 'too-deep', 'node-expansion'],
+        Syntax::class => ['json', 'yaml'],
+    ];
+
+    // Read off the directory, so an enum the reader adds tomorrow is a row owed rather than one skipped.
+    $declared = [];
+    foreach ((array) glob(dirname(__DIR__, 3).'/src/Reader/*.php') as $file) {
+        $class = 'Docuccino\Core\Reader\\'.basename((string) $file, '.php');
+        if (enum_exists($class) && (new ReflectionEnum($class))->isBacked()) {
+            $declared[] = $class;
+        }
+    }
+    sort($declared);
+
+    $listed = array_keys($published);
+    sort($listed);
+
+    expect($declared)->toBe($listed)
+        ->and(count($declared))->toBeGreaterThanOrEqual(5);
+
+    foreach ($published as $enum => $values) {
+        expect(array_map(static fn (BackedEnum $case): string|int => $case->value, $enum::cases()))->toBe($values);
+    }
+});

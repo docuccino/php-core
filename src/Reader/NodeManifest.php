@@ -30,10 +30,21 @@ use Docuccino\Core\Identity\IdentityGenerator;
  * pointing there; a callback's operations are part of the operation declaring them, and a path item no
  * path references is not an endpoint, so neither is listed on its own.
  *
+ * Both of those list one written node many times over, so the index can outgrow the document by any
+ * factor: {@see admit()} is the bound, counted before anything is digested. Within it, a path item is
+ * read and a node digested once, however often either is listed.
+ *
  * @internal
+ *
+ * @phpstan-type Listed array{node: mixed, pointer: string}
+ * @phpstan-type Planned array{method: string, operation: array<string, mixed>, pointer: string, parameters: array<string, Listed>, responses: array<array-key, Listed>}
+ * @phpstan-type Plan array{shared: array<string, Listed>, operations: list<Planned>}
  */
 final class NodeManifest
 {
+    /** The fewest nodes a document may index to, so a small one sharing a path item is never refused. */
+    private const int MIN_NODES = 10_000;
+
     private readonly Canonicalizer $canonicalizer;
 
     private readonly CanonicalJsonSerializer $serializer;
@@ -48,6 +59,27 @@ final class NodeManifest
     /** @var list<DocumentNode> */
     private array $nodes = [];
 
+    /**
+     * Each path item's operations, by where the item is written.
+     *
+     * @var array<string, Plan>
+     */
+    private array $plans = [];
+
+    /**
+     * How many nodes each path item lists, by where the item is written.
+     *
+     * @var array<string, int>
+     */
+    private array $counts = [];
+
+    /**
+     * Each listed node's digest, by where the node is written.
+     *
+     * @var array<string, string>
+     */
+    private array $digests = [];
+
     public function __construct()
     {
         $this->canonicalizer = new Canonicalizer;
@@ -57,17 +89,79 @@ final class NodeManifest
     }
 
     /**
+     * Refuses $document where it would index to more nodes than its $length in bytes, or than
+     * {@see MIN_NODES} for a small one. A document listing every node where it is written cannot spell
+     * more, so past that the index is only repeating what the document shares.
+     *
+     * @param  array<string, mixed>  $document  as read, in either UIR minor's form
+     *
+     * @throws UnreadableDocumentException
+     */
+    public function admit(array $document, int $length): void
+    {
+        $count = $this->count($document);
+        $limit = max(self::MIN_NODES, $length);
+
+        if ($count > $limit) {
+            throw new UnreadableDocumentException(ReadFailure::NodeExpansion, sprintf(
+                'The document expands to %d nodes from %d bytes, more than the %d it may: the path items its paths share, and the parameters a path item lists for every operation, repeat far more often than any document needs, so it was refused rather than indexed.',
+                $count,
+                $length,
+                $limit,
+            ));
+        }
+    }
+
+    /**
+     * How many nodes {@see of()} lists for $document, counted without listing or digesting any.
+     *
+     * @param  array<string, mixed>  $document  as read, in either UIR minor's form
+     */
+    public function count(array $document): int
+    {
+        $this->start($document);
+
+        $count = 0;
+        foreach ($this->pathItems() as [, , $item, $segments]) {
+            $at = Pointer::of($segments);
+
+            if (! isset($this->counts[$at])) {
+                $plan = $this->plan($item, $segments);
+                $this->counts[$at] = 0;
+                foreach ($plan['operations'] as $planned) {
+                    $parameters = count($planned['parameters']) + count($plan['shared']) - count(array_intersect_key($planned['parameters'], $plan['shared']));
+                    $this->counts[$at] += 1 + $parameters + count($planned['responses']);
+                }
+            }
+
+            $count += $this->counts[$at];
+        }
+
+        $components = self::map($this->document['components'] ?? null);
+        $extension = self::map($this->document['x-docuccino'] ?? null);
+
+        return $count
+            + count(self::map($components['schemas'] ?? null))
+            + count(self::map($components['parameters'] ?? null))
+            + count(self::map($components['responses'] ?? null))
+            + count(array_filter(self::map(self::map($extension['content'] ?? null)['pages'] ?? null), is_array(...)))
+            + count(array_filter(self::map($extension['workflows'] ?? null), is_array(...)));
+    }
+
+    /**
      * @param  array<string, mixed>  $document  as read, in either UIR minor's form
      * @return list<DocumentNode>
      */
     public function of(array $document): array
     {
-        $this->document = UseSites::lower($document);
-        $this->nodes = [];
+        $this->start($document);
 
-        foreach (['paths', 'webhooks'] as $member) {
-            foreach (self::map($this->document[$member] ?? null) as $name => $item) {
-                $this->pathItem($member, (string) $name, $item);
+        foreach ($this->pathItems() as [$member, $name, $item, $segments]) {
+            $path = $member === 'webhooks' ? 'webhook:'.$name : $this->identities->normalizePathTemplate($name);
+
+            $plan = $this->plan($item, $segments);
+            foreach ($plan['operations'] as $planned) {
+                $this->operation($planned['method'].' '.$path, $planned, $plan['shared']);
             }
         }
 
@@ -124,25 +218,63 @@ final class NodeManifest
         return $this->nodes;
     }
 
-    private function pathItem(string $member, string $name, mixed $item): void
+    /**
+     * @param  array<string, mixed>  $document
+     */
+    private function start(array $document): void
     {
-        if (! is_array($item)) {
-            return;
-        }
+        $this->document = UseSites::lower($document);
+        $this->nodes = [];
+        $this->plans = [];
+        $this->counts = [];
+        $this->digests = [];
+    }
 
-        /** @var array<string, mixed> $item */
-        $segments = [$member, $name];
+    /**
+     * Every path and webhook, with the path item it lists operations from and where that item is written
+     * — which, for a path written as a `$ref`, is where the reference lands. One landing nowhere lists
+     * nothing.
+     *
+     * @return iterable<array{string, string, array<string, mixed>, list<string>}>
+     */
+    private function pathItems(): iterable
+    {
+        foreach (['paths', 'webhooks'] as $member) {
+            foreach (self::map($this->document[$member] ?? null) as $name => $item) {
+                if (! is_array($item)) {
+                    continue;
+                }
 
-        // A path item may be a reference to one under `components.pathItems`; its operations are then
-        // written there, and that is where they are pointed at.
-        if (is_string($item['$ref'] ?? null)) {
-            [$resolved, $target, $dangling] = Refs::follow($this->document, $item, $segments);
-            if ($dangling !== null) {
-                return;
+                /** @var array<string, mixed> $item */
+                $segments = [$member, (string) $name];
+
+                if (is_string($item['$ref'] ?? null)) {
+                    [$item, $segments, $dangling] = Refs::follow($this->document, $item, $segments);
+                    if ($dangling !== null) {
+                        continue;
+                    }
+                }
+
+                yield [$member, (string) $name, $item, $segments];
             }
+        }
+    }
 
-            $item = $resolved;
-            $segments = $target;
+    /**
+     * The parameters the path item written at $segments shares, and its operations, each with its own
+     * parameters and its responses — read once, however many paths reference the item. The two lists of
+     * parameters are kept apart: merged, a path item with many operations and many parameters would
+     * hold their product.
+     *
+     * @param  array<string, mixed>  $item
+     * @param  list<string>  $segments
+     * @return Plan
+     */
+    private function plan(array $item, array $segments): array
+    {
+        $at = Pointer::of($segments);
+        if (isset($this->plans[$at])) {
+            return $this->plans[$at];
         }
 
         $shared = $this->parameters($item['parameters'] ?? null, [...$segments, 'parameters']);
@@ -155,42 +287,87 @@ final class NodeManifest
             $operations[(string) $method] = [$operation, [...$segments, 'additionalOperations', (string) $method]];
         }
 
-        foreach ($operations as $method => [$operation, $at]) {
+        $plan = [];
+        foreach ($operations as $method => [$operation, $operationAt]) {
             if (! is_array($operation)) {
                 continue;
             }
 
             /** @var array<string, mixed> $operation */
-            $key = strtoupper($method).' '.($member === 'webhooks' ? 'webhook:'.$name : $this->identities->normalizePathTemplate($name));
+            $responses = [];
+            foreach (self::map($operation['responses'] ?? null) as $status => $response) {
+                $responses[$status] = ['node' => $response, 'pointer' => Pointer::of([...$operationAt, 'responses', (string) $status])];
+            }
+
+            $plan[] = [
+                'method' => strtoupper((string) $method),
+                'operation' => $operation,
+                'pointer' => Pointer::of($operationAt),
+                'parameters' => $this->parameters($operation['parameters'] ?? null, [...$operationAt, 'parameters']),
+                'responses' => $responses,
+            ];
+        }
+
+        return $this->plans[$at] = ['shared' => $shared, 'operations' => $plan];
+    }
+
+    /**
+     * An operation's node under $key, then its parameters' — its own, and those its path item shares
+     * that it does not restate — and its responses'.
+     *
+     * @param  Planned  $planned
+     * @param  array<string, Listed>  $shared
+     */
+    private function operation(string $key, array $planned, array $shared): void
+    {
+        $operation = $planned['operation'];
+
+        $this->nodes[] = new DocumentNode(
+            NodeKind::Operation,
+            NodeIdentity::inArray($operation),
+            $key,
+            $planned['pointer'],
+            self::string($operation, 'summary') ?? self::string($operation, 'operationId'),
+            ($operation['deprecated'] ?? null) === true,
+            $this->digests[$planned['pointer']] ??= $this->digest(['paths' => ['/' => ['get' => $operation]]], ['paths', '/', 'get']),
+        );
+
+        foreach ($planned['parameters'] + $shared as $location => ['node' => $parameter, 'pointer' => $pointer]) {
+            $resolved = $this->resolved($parameter) ?? [];
 
             $this->nodes[] = new DocumentNode(
-                NodeKind::Operation,
-                NodeIdentity::inArray($operation),
-                $key,
-                Pointer::of($at),
-                self::string($operation, 'summary') ?? self::string($operation, 'operationId'),
-                ($operation['deprecated'] ?? null) === true,
-                $this->digest(['paths' => ['/' => ['get' => $operation]]], ['paths', '/', 'get']),
+                NodeKind::Parameter,
+                $this->identity($parameter, $resolved),
+                $key.' '.$location,
+                $pointer,
+                self::string($resolved, 'name'),
+                ($resolved['deprecated'] ?? null) === true,
+                $this->digests[$pointer] ??= $this->digest(['paths' => ['/' => ['get' => ['parameters' => [$parameter]]]]], ['paths', '/', 'get', 'parameters', 0]),
             );
+        }
 
-            $own = $this->parameters($operation['parameters'] ?? null, [...$at, 'parameters']);
-            foreach ($own + $shared as $location => $parameter) {
-                $this->parameter($key.' '.$location, ...$parameter);
-            }
+        foreach ($planned['responses'] as $status => ['node' => $response, 'pointer' => $pointer]) {
+            $resolved = $this->resolved($response) ?? [];
 
-            foreach (self::map($operation['responses'] ?? null) as $status => $response) {
-                $this->response($key.' '.$status, $response, [...$at, 'responses', (string) $status]);
-            }
+            $this->nodes[] = new DocumentNode(
+                NodeKind::Response,
+                $this->identity($response, $resolved),
+                $key.' '.$status,
+                $pointer,
+                self::string($resolved, 'description'),
+                false,
+                $this->digests[$pointer] ??= $this->digest(['paths' => ['/' => ['get' => ['responses' => [$status => $response]]]]], ['paths', '/', 'get', 'responses', (string) $status]),
+            );
         }
     }
 
     /**
-     * $parameters keyed by `in:name`, each with the parameter and its own segments. A `$ref` is keyed by
-     * what it resolves to, and by the reference itself where that is nothing. A second parameter under one
-     * key is a document OpenAPI calls invalid; the first is the one listed.
+     * $parameters keyed by `in:name`, each with the parameter and where it is written. A `$ref` is keyed
+     * by what it resolves to, and by the reference itself where that is nothing. A second parameter under
+     * one key is a document OpenAPI calls invalid; the first is the one listed.
      *
      * @param  list<string>  $segments  where the list is written
-     * @return array<string, array{mixed, list<string>}>
+     * @return array<string, Listed>
      */
     private function parameters(mixed $parameters, array $segments): array
     {
@@ -202,47 +379,10 @@ final class NodeManifest
                 ? '$ref:'.$parameter['$ref']
                 : (self::string($resolved ?? [], 'in') ?? '').':'.(self::string($resolved ?? [], 'name') ?? '');
 
-            $keyed[$location] ??= [$parameter, [...$segments, (string) $index]];
+            $keyed[$location] ??= ['node' => $parameter, 'pointer' => Pointer::of([...$segments, (string) $index])];
         }
 
         return $keyed;
-    }
-
-    /**
-     * @param  list<string>  $segments
-     */
-    private function parameter(string $key, mixed $parameter, array $segments): void
-    {
-        $resolved = $this->resolved($parameter) ?? [];
-
-        $this->nodes[] = new DocumentNode(
-            NodeKind::Parameter,
-            $this->identity($parameter, $resolved),
-            $key,
-            Pointer::of($segments),
-            self::string($resolved, 'name'),
-            ($resolved['deprecated'] ?? null) === true,
-            $this->digest(['paths' => ['/' => ['get' => ['parameters' => [$parameter]]]]], ['paths', '/', 'get', 'parameters', 0]),
-        );
-    }
-
-    /**
-     * @param  list<string>  $segments
-     */
-    private function response(string $key, mixed $response, array $segments): void
-    {
-        $resolved = $this->resolved($response) ?? [];
-        $status = (string) end($segments);
-
-        $this->nodes[] = new DocumentNode(
-            NodeKind::Response,
-            $this->identity($response, $resolved),
-            $key,
-            Pointer::of($segments),
-            self::string($resolved, 'description'),
-            false,
-            $this->digest(['paths' => ['/' => ['get' => ['responses' => [$status => $response]]]]], ['paths', '/', 'get', 'responses', $status]),
-        );
     }
 
     private function pages(mixed $pages): void

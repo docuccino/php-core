@@ -10,6 +10,11 @@ namespace Docuccino\Core\Reader;
  * `format` is the id of the OpenAPI version it declares (`openapi-3.0`, `openapi-3.1`, `openapi-3.2`),
  * or null where it declares none this package carries a meta-schema for. `legacy` marks an artifact
  * written before UIR 2.0: a root `uir` or `$schema` member, or a generator spec version below 2.
+ *
+ * `uirVersion` is the UIR version a full document says it was written to, as the major.minor its schema
+ * is published under (`2.1` for a `specVersion` of `2.1.0`): its generator's `specVersion`, or the root
+ * `uir` an artifact written before UIR 2.0 carries. It is the version {@see ReadDocument::validate()}
+ * picks the extension's schema by, and null where the document states none that reads as one.
  */
 final readonly class DocumentInspection
 {
@@ -24,6 +29,7 @@ final readonly class DocumentInspection
         public array $extensions,
         public ?DocumentGenerator $generator,
         public bool $legacy,
+        public ?string $uirVersion = null,
     ) {}
 
     public function carries(ExtensionMember $member): bool

@@ -48,6 +48,7 @@ final class Inspector
             $extensions,
             $generator,
             property_exists($graph, 'uir') || property_exists($graph, '$schema') || self::major($generator?->specVersion) < 2,
+            self::uirVersion(self::specVersion($graph)),
         );
     }
 
@@ -84,6 +85,12 @@ final class Inspector
         $legacy = $graph->uir ?? null;
 
         return is_string($legacy) ? $legacy : null;
+    }
+
+    /** The major.minor $version names — `2.1` for `2.1.0` or `2.1` — or null where it names none. */
+    private static function uirVersion(?string $version): ?string
+    {
+        return $version !== null && preg_match('/^(\d+\.\d+)(?:\.|$)/', $version, $match) === 1 ? $match[1] : null;
     }
 
     private static function generator(stdClass $root): ?DocumentGenerator

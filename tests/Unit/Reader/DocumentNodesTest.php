@@ -296,3 +296,25 @@ it('hands the differ a model it pairs by identity', function (): void {
 
     expect($changes->isBreaking())->toBeTrue();
 });
+
+it('writes a node as values a store can hold, one member per property', function (): void {
+    $nodes = (new DocumentReader)->read((string) file_get_contents(golden('workbench-content.uir.json')))->nodes();
+    $node = $nodes[0];
+
+    expect($node->toArray())->toBe([
+        'kind' => $node->kind->value,
+        'identity' => $node->identity,
+        'key' => $node->key,
+        'pointer' => $node->pointer,
+        'label' => $node->label,
+        'deprecated' => $node->deprecated,
+        'digest' => $node->digest,
+    ])
+        ->and($node->identity)->toBeString()
+        // Every property the node carries, in the order it declares them, so one added is one written.
+        ->and(array_keys($node->toArray()))->toBe(array_map(
+            static fn (ReflectionParameter $parameter): string => $parameter->getName(),
+            (new ReflectionMethod(DocumentNode::class, '__construct'))->getParameters(),
+        ))
+        ->and(array_map(static fn (DocumentNode $node): string => $node->toArray()['kind'], $nodes))->each->toBeIn(array_map(static fn (NodeKind $kind): string => $kind->value, NodeKind::cases()));
+});

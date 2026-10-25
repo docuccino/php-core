@@ -59,8 +59,12 @@ $document->contentHash();
 $document->json();                   // the document as read, as JSON: what every node pointer points into
 ```
 
-`read()` throws `UnreadableDocumentException`, with a reason you can show whoever uploaded the bytes,
-when they are not a document it can read.
+`read()` throws `UnreadableDocumentException`, with a reason you can show whoever uploaded the bytes
+and a `ReadFailure` to branch on, when they are not a document it can read — including one that only
+grows past its own size once walked, through YAML aliases or paths sharing a path item. The differ
+refuses the same way: `IncomparableDocumentsException::$failure` is `DiffFailure::ReferenceExpansion`
+for two documents whose comparison would read their shared nodes far more often than any document
+needs.
 
 ## Part of Docuccino
 

@@ -86,10 +86,21 @@ final class SchemaFindings
             return $findings;
         }
 
-        return [
-            ...array_slice($findings, 0, self::LIMIT),
-            new Finding('/', null, sprintf('more than %d findings; the first %1$d are shown', self::LIMIT)),
-        ];
+        return [...array_slice($findings, 0, self::LIMIT), self::overflow()];
+    }
+
+    /**
+     * The last finding of a list cut at {@see LIMIT}: no place in the document, but the line saying there
+     * were more. A caller reporting the cut as a fact of its own recognises it with {@see isOverflow()}.
+     */
+    public static function overflow(): Finding
+    {
+        return new Finding('/', null, sprintf('more than %d findings; the first %1$d are shown', self::LIMIT));
+    }
+
+    public static function isOverflow(Finding $finding): bool
+    {
+        return $finding == self::overflow();
     }
 
     /** The document root reads as `/`, which is what a person looks for; JSON Pointer spells it `''`. */

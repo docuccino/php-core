@@ -10,6 +10,7 @@ use Docuccino\Core\Document\UirDocument;
 use Docuccino\Core\Identity\ContentHasher;
 use Docuccino\Core\SpecValidation\Finding;
 use Docuccino\Core\SpecValidation\OpenApiMetaSchema;
+use Docuccino\Core\SpecValidation\SchemaFindings;
 use Docuccino\Core\SpecValidation\Validator;
 use InvalidArgumentException;
 use stdClass;
@@ -46,6 +47,10 @@ final readonly class ReadDocument
      * Every place the document fails the OpenAPI meta-schema for the version it declares and — for a full
      * document — the Docuccino schema for the UIR version its generator wrote, cut at $max findings.
      *
+     * Every finding is a place the document fails. That there were more than the list holds — past $max,
+     * or past the {@see SchemaFindings::LIMIT} one schema check collects in a run — is
+     * {@see DocumentValidation::isTruncated()}'s answer, never a finding of its own.
+     *
      * A version with no schema in this package is reported as a finding rather than checked against
      * another version's: the OpenAPI version from `openapi`, the UIR version from
      * `x-docuccino.generator.specVersion` (or the root `uir` an artifact written before UIR 2.0 carries).
@@ -56,21 +61,17 @@ final readonly class ReadDocument
             throw new InvalidArgumentException(sprintf('A validation reports at least one finding; %d asks for none.', $max));
         }
 
-        $findings = [...$this->openApiFindings(), ...$this->extensionFindings()];
-
-        if (count($findings) <= $max) {
-            return new DocumentValidation($findings);
+        $findings = [];
+        $truncated = false;
+        foreach ([...$this->openApiFindings(), ...$this->extensionFindings()] as $finding) {
+            if (SchemaFindings::isOverflow($finding->finding())) {
+                $truncated = true;
+            } else {
+                $findings[] = $finding;
+            }
         }
 
-        $shown = array_slice($findings, 0, $max);
-        $shown[] = new DocumentFinding(
-            $findings[$max]->source,
-            '/',
-            null,
-            sprintf('more than %d findings; the first %1$d are shown', $max),
-        );
-
-        return new DocumentValidation($shown, truncated: true);
+        return new DocumentValidation(array_slice($findings, 0, $max), $truncated || count($findings) > $max);
     }
 
     /**
@@ -152,7 +153,7 @@ final readonly class ReadDocument
         }
 
         $declared = Inspector::specVersion($this->graph);
-        $version = $declared !== null && preg_match('/^(\d+\.\d+)(?:\.|$)/', $declared, $match) === 1 ? $match[1] : null;
+        $version = $this->inspection->uirVersion;
         $schema = $version === null ? null : Validator::documentSchemaPathFor($version);
 
         if ($schema === null) {

@@ -24,4 +24,10 @@ enum ReadFailure: string
 
     /** Nesting deeper than a document can be written back out. */
     case TooDeep = 'too-deep';
+
+    /**
+     * A document whose node index expands far past its own size — paths sharing one path item, each
+     * listing that item's parameters for every operation — refused rather than indexed.
+     */
+    case NodeExpansion = 'node-expansion';
 }

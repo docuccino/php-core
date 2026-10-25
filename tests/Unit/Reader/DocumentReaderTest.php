@@ -205,3 +205,14 @@ it('writes JSON every node pointer resolves in', function (): void {
         expect(Pointer::readGraph($graph, $segments))->not->toBeNull($node->key);
     }
 });
+
+it('names the media type of each syntax, and reads that media type back as it', function (Syntax $syntax, string $mediaType): void {
+    // Text either reader accepts, so only the media type can say which syntax read it.
+    $bytes = '{"openapi":"3.1.0","info":{"title":"Orders","version":"1"},"paths":{}}';
+
+    expect($syntax->mediaType())->toBe($mediaType)
+        ->and((new DocumentReader)->read($bytes, $syntax->mediaType())->inspect()->syntax)->toBe($syntax);
+})->with(static fn (): array => array_map(
+    static fn (Syntax $syntax): array => [$syntax, ['json' => 'application/json', 'yaml' => 'application/yaml'][$syntax->value]],
+    Syntax::cases(),
+));

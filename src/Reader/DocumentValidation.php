@@ -8,8 +8,9 @@ namespace Docuccino\Core\Reader;
  * What {@see ReadDocument::validate()} found. Valid means nothing was found — including that nothing
  * could not be checked, since a version with no schema to check it against is reported as a finding.
  *
- * A list cut at the caller's limit ends in one more finding saying so, and {@see isTruncated()} answers
- * the same question for code.
+ * Every finding is a place the document fails, so `$findings` can be counted, filtered by source and
+ * shown as it is. Whether there were more than it holds is {@see isTruncated()}'s answer alone — no
+ * line in the list says so, since how to say it is the caller's.
  */
 final readonly class DocumentValidation
 {

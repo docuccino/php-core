@@ -11,7 +11,12 @@ use Docuccino\Core\Support\JsonValue;
  * with its ids kept, or a plain OpenAPI 3.x description from any tool — as JSON or YAML.
  *
  * It reads and reports; it sets no policy. How large a document may be, and what to do with one that
- * fails validation, are the caller's to decide.
+ * fails validation, are the caller's to decide. What it does refuse is a document that only expands
+ * past its own size once walked — YAML aliases, or nodes listed far more often than they are written —
+ * so every answer a read document gives costs in proportion to its bytes.
+ *
+ * Every enum it hands back is backed by a string a caller may store, and those strings change only as a
+ * breaking change.
  *
  * ```php
  * $document = (new DocumentReader)->read($bytes, 'application/yaml');
@@ -35,6 +40,8 @@ final class DocumentReader
 
         /** @var array<string, mixed> $document */
         $document = array_map(JsonValue::normalize(...), get_object_vars($graph));
+
+        (new NodeManifest)->admit($document, strlen($bytes));
 
         return new ReadDocument($graph, $document, Inspector::inspect($graph, $syntax));
     }
