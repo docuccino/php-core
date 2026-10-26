@@ -7,6 +7,12 @@ User-facing changes to `docuccino/core` — features, fixes, performance work an
 taken from the commit messages scoped `core`. Entries begin after v0.1.2; older history is in
 the [repository](https://github.com/docuccino/docuccino) git log.
 
+## v0.23.1
+
+### Features
+
+- report the line and column each finding and refusal sits at, in JSON and YAML ([#676](https://github.com/docuccino/docuccino/pull/676))
+
 ## v0.23.0
 
 ### Breaking changes
