@@ -17,8 +17,9 @@ enum ReadFailure: string
     case NotAnObject = 'not-an-object';
 
     /**
-     * YAML whose aliases expand it far past its own size, in values or in the text they hold — refused
-     * rather than expanded.
+     * YAML whose aliases expand it far past its own size, in values or in the text they hold, or that names
+     * more maps than its size allows where a merge key could copy them while it is parsed — refused rather
+     * than expanded.
      */
     case AliasExpansion = 'alias-expansion';
 

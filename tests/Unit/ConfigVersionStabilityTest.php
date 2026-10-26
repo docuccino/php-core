@@ -16,8 +16,8 @@ use Docuccino\Core\Support\Json;
  * byte, so a reading that varies with which patch release of `symfony/yaml` a machine's lockfile
  * resolved is a determinism break that arrives from a dependency and looks exactly like a flake.
  *
- * Measured across the range `php/core` allows, one patch apart, the parser is free in two ways: it may
- * hand back an integer or that integer's float twin, and it may hand back any non-finite float for a
+ * Measured one `symfony/yaml` patch release apart (7.4.12 and 7.4.15), the parser has been free in two
+ * ways: it has handed back an integer or that integer's float twin, and either non-finite float for a
  * non-finite spelling. This file writes BOTH readings out and holds the reader to answering the same
  * thing for each — which states the rule on whichever single version happens to be installed, rather
  * than needing two of them side by side.

@@ -115,6 +115,96 @@ it('reads a path item written as a reference where its operations are', function
     ]);
 });
 
+it('lists a custom operation whose method spells a fixed one as an operation of its own', function (): void {
+    // OpenAPI 3.2's `additionalOperations` maps a method, case-sensitive and sent as written, to an operation,
+    // and forbids only the nine fixed methods in upper case: `get` and `Get` there are methods of their own
+    // beside the fixed `get`, which is sent as `GET`. So all four are listed, each keyed by where it is
+    // written, and so are their parameters and responses — the path item's parameter under each of them.
+    $operation = static fn (string $summary, string $description): array => [
+        'summary' => $summary,
+        'parameters' => [['name' => 'into', 'in' => 'query']],
+        'responses' => ['200' => ['description' => $description]],
+    ];
+    $nodes = (new DocumentReader)->read((string) json_encode([
+        'openapi' => '3.2.0',
+        'info' => ['title' => 'Forms', 'version' => '1'],
+        'paths' => ['/forms/{form}' => [
+            'parameters' => [['name' => 'form', 'in' => 'path', 'required' => true]],
+            'get' => $operation('Show', 'Shown'),
+            'additionalOperations' => ['get' => $operation('Fetch', 'Fetched'), 'Get' => $operation('Retrieve', 'Retrieved'), 'COPY' => $operation('Copy', 'Copied')],
+        ]],
+    ]))->nodes();
+
+    $at = '/paths/~1forms~1{form}';
+    [$get, $copy, $Custom, $custom] = ['GET /forms/{p0}', 'additionalOperations/COPY /forms/{p0}', 'additionalOperations/Get /forms/{p0}', 'additionalOperations/get /forms/{p0}'];
+
+    expect(array_map(static fn (DocumentNode $node): array => [$node->kind, $node->key, $node->pointer, $node->label], $nodes))->toBe([
+        [NodeKind::Operation, $get, $at.'/get', 'Show'],
+        [NodeKind::Operation, $copy, $at.'/additionalOperations/COPY', 'Copy'],
+        [NodeKind::Operation, $Custom, $at.'/additionalOperations/Get', 'Retrieve'],
+        [NodeKind::Operation, $custom, $at.'/additionalOperations/get', 'Fetch'],
+        [NodeKind::Parameter, $get.' path:form', $at.'/parameters/0', 'form'],
+        [NodeKind::Parameter, $get.' query:into', $at.'/get/parameters/0', 'into'],
+        [NodeKind::Parameter, $copy.' path:form', $at.'/parameters/0', 'form'],
+        [NodeKind::Parameter, $copy.' query:into', $at.'/additionalOperations/COPY/parameters/0', 'into'],
+        [NodeKind::Parameter, $Custom.' path:form', $at.'/parameters/0', 'form'],
+        [NodeKind::Parameter, $Custom.' query:into', $at.'/additionalOperations/Get/parameters/0', 'into'],
+        [NodeKind::Parameter, $custom.' path:form', $at.'/parameters/0', 'form'],
+        [NodeKind::Parameter, $custom.' query:into', $at.'/additionalOperations/get/parameters/0', 'into'],
+        [NodeKind::Response, $get.' 200', $at.'/get/responses/200', 'Shown'],
+        [NodeKind::Response, $copy.' 200', $at.'/additionalOperations/COPY/responses/200', 'Copied'],
+        [NodeKind::Response, $Custom.' 200', $at.'/additionalOperations/Get/responses/200', 'Retrieved'],
+        [NodeKind::Response, $custom.' 200', $at.'/additionalOperations/get/responses/200', 'Fetched'],
+    ])
+        ->and(array_unique(array_map(static fn (DocumentNode $node): string => $node->key, $nodes)))->toHaveCount(count($nodes));
+});
+
+it('lists every other node of a document exactly as the document without its custom operations lists it', function (): void {
+    // A custom operation is a node of its own, so adding one — under a path, a webhook or a shared path item,
+    // and whatever method it spells — moves nothing else the index lists: not a key, a pointer, a label, an
+    // id or a digest, nor their order.
+    $operation = static fn (string $id): array => [
+        'x-docuccino' => ['id' => $id],
+        'summary' => 'An operation',
+        'parameters' => [['name' => 'into', 'in' => 'query'], ['$ref' => '#/components/parameters/Tenant']],
+        'responses' => ['200' => ['description' => 'Done'], '404' => ['$ref' => '#/components/responses/NotFound']],
+    ];
+    $custom = ['get' => $operation('op:v1:1'), 'Get' => $operation('op:v1:2'), 'GET' => $operation('op:v1:3'), 'COPY' => $operation('op:v1:4')];
+    $document = [
+        'openapi' => '3.2.0',
+        'info' => ['title' => 'Forms', 'version' => '1'],
+        'paths' => [
+            '/forms/{form}' => [
+                'parameters' => [['name' => 'form', 'in' => 'path', 'required' => true]],
+                'get' => $operation('op:v1:5'),
+                'post' => $operation('op:v1:6'),
+                'additionalOperations' => $custom,
+            ],
+            '/archive' => ['$ref' => '#/components/pathItems/Archive'],
+        ],
+        'webhooks' => ['formCopied' => ['post' => $operation('op:v1:7'), 'additionalOperations' => $custom]],
+        'components' => [
+            'parameters' => ['Tenant' => ['name' => 'Tenant', 'in' => 'header']],
+            'responses' => ['NotFound' => ['description' => 'Not found']],
+            'pathItems' => ['Archive' => ['get' => $operation('op:v1:8'), 'additionalOperations' => $custom]],
+        ],
+    ];
+    $without = $document;
+    unset($without['paths']['/forms/{form}']['additionalOperations'], $without['webhooks']['formCopied']['additionalOperations'], $without['components']['pathItems']['Archive']['additionalOperations']);
+
+    $listed = static fn (array $document): array => array_map(
+        static fn (DocumentNode $node): array => $node->toArray(),
+        (new DocumentReader)->read((string) json_encode($document))->nodes(),
+    );
+    $all = $listed($document);
+    $others = array_values(array_filter($all, static fn (array $node): bool => ! str_starts_with($node['key'], 'additionalOperations/')));
+
+    // Three path items of four custom operations, each listing itself, a parameter and a response of its own
+    // and one it shares; and under the one item that states one, the path parameter for each.
+    expect($others)->toBe($listed($without))
+        ->and(count($all) - count($others))->toBe(3 * 4 * 5 + 4);
+});
+
 it('lists a full document\'s nodes with every identity it carries', function (): void {
     $nodes = (new DocumentReader)->read((string) file_get_contents(golden('workbench-content.uir.json')))->nodes();
 

@@ -11,7 +11,9 @@ namespace Docuccino\Core\Reader;
  * - `identity` is the node's Docuccino id (`op:`, `par:`, `res:`, `sch:`, `page:`), or null where the
  *   document carries none;
  * - `key` is structural and needs no id: `GET /forms/{p0}` for an operation (path parameters numbered,
- *   so renaming one moves nothing; a webhook is `POST webhook:<name>`), the operation's key plus
+ *   so renaming one moves nothing; a webhook is `POST webhook:<name>`; one under OpenAPI 3.2's
+ *   `additionalOperations` is `additionalOperations/COPY /forms/{p0}`, its method as written, so a custom
+ *   `get` is never the fixed `get`'s `GET /forms/{p0}`), the operation's key plus
  *   `query:page` for a parameter or `404` for a response, the reference its uses write for a shared
  *   parameter or response (`#/components/responses/NotFound`), the component name for a schema, the
  *   slug for a page and the id for a workflow;

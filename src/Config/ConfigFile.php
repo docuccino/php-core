@@ -256,10 +256,10 @@ final class ConfigFile
     /**
      * The parse with every numeric reading the PARSER was free to choose settled to one answer.
      *
-     * Which is not a hypothetical. Across the range of `symfony/yaml` this package allows, one patch
-     * release apart, `+1` reads as the int 1 or as the float 1.0, and `.nan` reads as NAN or as INF.
-     * A parsed value is a fragment-cache key input and a published byte, so a reading that depends on
-     * which patch a machine's lockfile resolved is a determinism break arriving from a dependency.
+     * Which is not a hypothetical. One `symfony/yaml` patch release apart, `+1` has read as the float
+     * 1.0 (7.4.12) and as the int 1 (7.4.15), and `.nan` as INF and as NAN. A parsed value is a
+     * fragment-cache key input and a published byte, so a reading that depends on which patch a
+     * machine's lockfile resolved is a determinism break arriving from a dependency.
      *
      * Two settlements, and they are different in kind:
      *
@@ -271,8 +271,8 @@ final class ConfigFile
      * be accepted on one patch release and refused on the next.
      *
      * A non-finite float becomes NULL, with a diagnostic. `.nan` and `.inf` are the one reading whose
-     * VALUE — not just its type — differs across the range, so no type-shaped guard would see it, and
-     * they are the reading that survives into a hash as a bare word rather than a number. They are
+     * VALUE — not just its type — has differed between releases, so no type-shaped guard would see it,
+     * and they are the reading that survives into a hash as a bare word rather than a number. They are
      * also not values a document can carry at all: the canonical writer refuses them outright. Null is
      * the honest answer rather than a hole, because present-and-null is already exactly what this
      * reader means by "an intent expressed and unreadable" — so the key stays written, every typed
@@ -309,8 +309,8 @@ final class ConfigFile
                     severity: Severity::Warning,
                     code: 'config.value-not-finite',
                     message: sprintf(
-                        // Deliberately NOT distinguishing not-a-number from an infinity. `.nan` reads
-                        // as one on some versions in the range and as the other on others, so a
+                        // Deliberately NOT distinguishing not-a-number from an infinity. `.nan` has
+                        // read as one on some releases and as the other on others, so a
                         // message that told them apart would put a dependency's patch level into the
                         // build's report — the same leak as the value, one layer out.
                         '%s is not a finite number, which is not a value a document can carry, so the setting is read as empty.',

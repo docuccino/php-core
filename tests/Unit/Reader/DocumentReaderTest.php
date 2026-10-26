@@ -74,7 +74,7 @@ it('resolves YAML anchors, aliases and merge keys', function (): void {
 });
 
 it('reads a merge key inside a flow mapping as the merge it is, or refuses it, and lets no parser error out', function (string $yaml, ?array $merged, array $reasons): void {
-    // symfony/yaml before 7.4.21, and 8.0, throws a TypeError here rather than reading it or refusing it, so
+    // symfony/yaml before 7.4.21 and 8.1.9 throws a TypeError here rather than reading it or refusing it, so
     // which of the two happens is the release's to decide. What may never happen is the TypeError.
     try {
         $read = json_decode((new DocumentReader)->read($yaml)->json(), true, 512, JSON_THROW_ON_ERROR);
@@ -102,7 +102,7 @@ it('reads a merge key inside a flow mapping as the merge it is, or refuses it, a
 });
 
 it('refuses a mapping key starting with a NUL byte, in every style, as text it cannot read', function (string $bytes): void {
-    // No PHP object can hold such a name. Releases before 7.4.21, and 8.0, threw an Error for it, from the
+    // No PHP object can hold such a name. Releases before 7.4.21 and 8.1.9 throw an Error for it, from the
     // parser for a block mapping and from the copy for a flow one; later ones refuse it themselves.
     try {
         (new DocumentReader)->read($bytes);
@@ -117,21 +117,6 @@ it('refuses a mapping key starting with a NUL byte, in every style, as text it c
     'nested in a block mapping' => ["openapi: 3.1.0\nx:\n  \"\\0a\": 1\n"],
     'in a flow mapping' => ["openapi: 3.1.0\nx: {\"\\0a\": 1}\n"],
     'in text that looked like JSON' => ['{"openapi":"3.1.0","\u0000a":1}'],
-]);
-
-it('refuses a date the YAML parser matched and could not construct', function (string $yaml): void {
-    // symfony/yaml 7.0 let the date's own exception out; every later release refuses it in these words.
-    try {
-        (new DocumentReader)->read($yaml);
-        $this->fail('An impossible date was read.');
-    } catch (UnreadableDocumentException $exception) {
-        expect($exception->failure)->toBe(ReadFailure::Syntax)
-            ->and($exception->reason)->toStartWith('The document is not valid YAML: ')
-            ->and($exception->reason)->toEndWith('could not be parsed as it is an invalid date.');
-    }
-})->with([
-    'a month past twelve' => ["openapi: 3.1.0\nx-released: 2024-13-45\n"],
-    'an hour past twenty-four' => ["openapi: 3.1.0\nx-released: 2024-01-01 25:61:61\n"],
 ]);
 
 it('refuses a YAML alias bomb cheaply rather than expanding it', function (): void {

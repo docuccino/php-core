@@ -70,7 +70,7 @@ final class IdentityOverlap
 
             // A path item's parameters belong to the operations under it, and the pairing compares them
             // there, so they count as parameter identities here too.
-            foreach ($item->operations as $operation) {
+            foreach (PathOperations::of($item) as [, , $operation]) {
                 $id = NodeIdentity::of($operation->docuccino, $operation->rest);
                 if ($id !== null) {
                     $operations[$id] = true;

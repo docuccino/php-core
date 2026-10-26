@@ -72,17 +72,16 @@ it('reads each hostile spelling as exactly one type and value', function (string
 ]);
 
 /**
- * The spellings whose reading the PARSER chooses, and which choice it makes is not stable across the
- * versions of it this package allows. Measured one patch release apart, inside the range `php/core`
- * declares:
+ * The spellings whose reading the PARSER chooses, and which choice it makes has not been stable across
+ * its releases. Measured one patch release apart:
  *
  * | spelling | 7.4.12 | 7.4.15 |
  * |---|---|---|
  * | `+1`, `+0`, `+1_000` | float | int |
  * | `.nan`, `.NaN` | INF | NAN |
  *
- * So these rows say what is true across the whole range rather than what this lockfile happens to
- * resolve — a number, and which KIND of number is the parser's business. What must not vary is what
+ * So these rows say what holds whichever release is installed rather than what this lockfile happens
+ * to resolve — a number, and which KIND of number is the parser's business. What must not vary is what
  * the reader does with it, and that is asserted where the reader is, not here.
  */
 it('reads a signed integer as some number, without promising which kind', function (string $spelling, int|float $number): void {

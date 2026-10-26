@@ -57,6 +57,11 @@ it('refuses a comparison that reads a shared node far more often than its docume
         'paths' => array_fill_keys(array_map(static fn (int $i): string => "/a{$i}", range(1, 1000)), ['get' => ['parameters' => [['$ref' => '#/components/parameters/Q']], 'responses' => ['204' => ['description' => 'Done']]]]),
         'components' => ['parameters' => ['Q' => ['name' => 'q', 'in' => 'query', 'schema' => ['enum' => array_map(static fn (int $i): string => "value-{$i}", range(1, $changed ? 1999 : 2000))]]]],
     ]],
+    // The same response under 1,000 custom methods of one path item, which are operations like any other.
+    'a shared response under custom methods' => [static fn (bool $changed): array => [
+        'paths' => ['/a' => ['additionalOperations' => array_fill_keys(array_map(static fn (int $i): string => "M{$i}", range(1, 1000)), ['responses' => ['200' => ['$ref' => '#/components/responses/R']]])]],
+        'components' => ['responses' => ['R' => ['description' => 'OK', 'content' => ['application/json' => ['schema' => ['type' => 'object', 'properties' => array_fill_keys(array_map(static fn (int $i): string => "p{$i}", range(1, 200)), ['type' => $changed ? 'integer' : 'string'])]]]]]],
+    ]],
     'a shared request body' => [static fn (bool $changed): array => [
         'paths' => array_fill_keys(array_map(static fn (int $i): string => "/a{$i}", range(1, 1000)), ['post' => ['requestBody' => ['$ref' => '#/components/requestBodies/B'], 'responses' => ['204' => ['description' => 'Done']]]]),
         'components' => ['requestBodies' => ['B' => ['content' => ['application/json' => ['schema' => ['type' => 'object', 'properties' => array_fill_keys(array_map(static fn (int $i): string => "p{$i}", range(1, 200)), ['type' => $changed ? 'integer' : 'string'])]]]]]],
@@ -75,13 +80,17 @@ it('refuses a comparison that reads a shared node far more often than its docume
     ]],
 ]);
 
-it('reads a document through its references for exactly its budget, and refuses one byte more', function (int $uses, int $response, ?int $size, bool $compared): void {
+it('reads a document through its references for exactly its budget, and refuses one byte more', function (int $uses, int $response, ?int $size, bool $compared, bool $custom): void {
     // $uses operations each using one shared response $response bytes long, so a comparison reads
-    // $uses × $response bytes through each document's references.
+    // $uses × $response bytes through each document's references — whether each is a path's `get` or a
+    // custom method of one path item.
+    $operation = ['responses' => ['200' => ['$ref' => '#/components/responses/R']]];
     $document = [
-        'openapi' => '3.1.0',
+        'openapi' => $custom ? '3.2.0' : '3.1.0',
         'info' => ['title' => 'Shared', 'version' => '1', 'description' => ''],
-        'paths' => array_fill_keys(array_map(static fn (int $i): string => "/o{$i}", range(1, $uses)), ['get' => ['responses' => ['200' => ['$ref' => '#/components/responses/R']]]]),
+        'paths' => $custom
+            ? ['/o' => ['additionalOperations' => array_fill_keys(array_map(static fn (int $i): string => "M{$i}", range(1, $uses)), $operation)]]
+            : array_fill_keys(array_map(static fn (int $i): string => "/o{$i}", range(1, $uses)), ['get' => $operation]),
         'components' => ['responses' => ['R' => ['description' => str_repeat('x', $response - strlen('{"description":""}'))]]],
     ];
     // A document's size is its length as compact JSON.
@@ -107,7 +116,7 @@ it('reads a document through its references for exactly its budget, and refuses 
     // Past it, 32 times its size: 1,000 × 3,000 bytes from a document of 93,750.
     'thirty-two times its size, exactly' => [1000, 3000, 93_750, true],
     'thirty-two times its size, one byte short' => [1000, 3000, 93_749, false],
-]);
+])->with(['under get' => [false], 'under custom methods' => [true]]);
 
 it('compares documents that share nodes the way real ones do', function (): void {
     // 200 operations using one shared error response and one shared parameter, and a chain of

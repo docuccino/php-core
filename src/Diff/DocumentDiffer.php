@@ -18,9 +18,10 @@ use Docuccino\Core\Support\Json;
  * The semantic diff engine: compares two {@see UirDocument}s by their stable `x-docuccino.id`s,
  * so a path-parameter rename (same op id) reads as no change while a URI change reads as
  * remove + add. Walks operations — under `paths` and under `webhooks`, which are one contract and are
- * diffed by one machinery — their parameters/responses/request bodies, named component schemas,
- * security schemes and content pages, delegating field-level schema comparison to
- * {@see SchemaComparator}, and flags each {@see Change} breaking or not.
+ * diffed by one machinery, at a fixed method or a custom one ({@see PathOperations}) — their
+ * parameters/responses/request bodies, named component schemas, security schemes and content pages,
+ * delegating field-level schema comparison to {@see SchemaComparator}, and flags each {@see Change}
+ * breaking or not.
  *
  * Responses, parameters, request bodies, path items and SCHEMAS are read through {@see ComponentRefs} on
  * both sides, so where one lives — inline or hoisted into `components` — is not itself a change, while a
@@ -663,14 +664,14 @@ final class DocumentDiffer
     {
         $out = [];
 
-        foreach ($this->operations($document, $refs) as [$op, $method, $path, $shared]) {
+        foreach ($this->operations($document, $refs) as [$op, $method, $written, $path, $shared]) {
             if (isset($skip[$path])) {
                 continue;
             }
 
             $out[] = [
                 $pairing === Pairing::Identity ? self::operationId($op) : null,
-                '_'.strtoupper($method).' '.$path,
+                '_'.$written.' '.$path,
                 self::fingerprint($op->toArray()),
                 ['path' => $path, 'method' => $method, 'op' => $op, 'shared' => $shared],
             ];
@@ -690,7 +691,10 @@ final class DocumentDiffer
      * author wrote the endpoint inline or hoisted it. One whose pointer reached nothing yields none, and
      * {@see diffOperations()} is what says so.
      *
-     * @return list<array{0: Operation, 1: string, 2: string, 3: list<Parameter>}>
+     * Each with the method a client sends, which is what a change's path names, and where it is written
+     * below the item, which is what keys it when there is no identity to pair on ({@see PathOperations}).
+     *
+     * @return list<array{0: Operation, 1: string, 2: string, 3: string, 4: list<Parameter>}>
      */
     private function operations(UirDocument $document, ComponentRefs $refs): array
     {
@@ -699,8 +703,8 @@ final class DocumentDiffer
         foreach (self::pathItems($document) as $path => $item) {
             [$item] = $refs->resolvePathItem($item);
 
-            foreach ($item->operations as $method => $op) {
-                $out[] = [$op, $method, $path, $item->parameters];
+            foreach (PathOperations::of($item) as [$method, $written, $op]) {
+                $out[] = [$op, $method, $written, $path, $item->parameters];
             }
         }
 
@@ -885,7 +889,7 @@ final class DocumentDiffer
      */
     private function display(array $entry): string
     {
-        return strtoupper($entry['method']).' '.$entry['path'];
+        return $entry['method'].' '.$entry['path'];
     }
 
     /**

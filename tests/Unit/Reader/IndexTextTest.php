@@ -203,6 +203,14 @@ it('counts exactly the text it lists, for each part of a node that spells it', f
                 'additionalOperations' => ['COPY/MOVE' => ['parameters' => [['name' => '123', 'in' => 'path']], 'responses' => ['2XX' => ['description' => 'Copied']]]],
             ]],
         ]],
+        // Each key opens with where its operation is written, which for a custom one is longer than its method.
+        'custom methods spelt like a fixed one, and one holding a space' => [$head + [
+            'paths' => ['/f' => [
+                'parameters' => [['name' => 'tenant', 'in' => 'header']],
+                'get' => ['responses' => $ok],
+                'additionalOperations' => ['get' => ['responses' => $ok], 'Get' => ['summary' => 'Get', 'responses' => $ok], 'GET' => ['responses' => $ok], 'C P' => ['responses' => $ok]],
+            ]],
+        ]],
         'webhooks, schemas, pages and workflows' => [$head + [
             'webhooks' => ['order.created' => ['post' => ['summary' => 'Created', 'responses' => $ok]]],
             'components' => ['schemas' => ['Order' => ['title' => 'An order', 'x-docuccino' => ['id' => 'sch:v1:order']], 'Bare' => true]],

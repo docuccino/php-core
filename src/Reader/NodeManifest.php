@@ -8,8 +8,8 @@ use Docuccino\Core\Canonical\Canonicalizer;
 use Docuccino\Core\Canonical\CanonicalJsonSerializer;
 use Docuccino\Core\Contract\Pointer;
 use Docuccino\Core\Contract\RefHops;
+use Docuccino\Core\Diff\PathOperations;
 use Docuccino\Core\Document\NodeIdentity;
-use Docuccino\Core\Document\PathItem;
 use Docuccino\Core\Document\UseSites;
 use Docuccino\Core\Emit\ProvenanceLevel;
 use Docuccino\Core\Emit\UirEmitter;
@@ -20,6 +20,10 @@ use Docuccino\Core\Support\CompactJson;
  * The {@see DocumentNode}s of a document. Read off the LOWERED document ({@see UseSites}), so a use's
  * id is found beside its `$ref` whichever UIR minor wrote it, and lowering moves nothing in a list, so
  * every pointer is still a position in the bytes that were read.
+ *
+ * An operation's key opens with where it is written below its path item, spelt as the differ spells it
+ * ({@see PathOperations}): `GET` for the fixed `get`, `additionalOperations/get` for a custom `get`. So no
+ * two operations of one path item share a key, and a custom method never takes a fixed one's place.
  *
  * A digest is of the node as written, canonicalised on its own and with every `provenance` record
  * stripped. A `$ref` is a node's bytes like any other, so a use of a shared response digests the
@@ -41,7 +45,7 @@ use Docuccino\Core\Support\CompactJson;
  *
  * @phpstan-type Listed array{node: mixed, tail: string, label: ?string, identity: ?string, spelled: int}
  * @phpstan-type Parameter array{node: mixed, tail: string, label: ?string, identity: ?string, spelled: int, in: string, name: string, deprecated: bool}
- * @phpstan-type Planned array{method: string, operation: array<string, mixed>, tail: string, label: ?string, identity: ?string, parameters: list<Parameter>, restated: array<int, true>, responses: array<array-key, Listed>}
+ * @phpstan-type Planned array{written: string, operation: array<string, mixed>, tail: string, label: ?string, identity: ?string, parameters: list<Parameter>, restated: array<int, true>, responses: array<array-key, Listed>}
  * @phpstan-type Plan array{shared: list<Parameter>, operations: list<Planned>, listed: int, spelled: int}
  * @phpstan-type Component array{NodeKind, ?string, string, string, ?string, bool, array<string, mixed>, list<string|int>}
  */
@@ -195,7 +199,7 @@ final class NodeManifest
 
             $plan = $this->plan($item, $at);
             foreach ($plan['operations'] as $planned) {
-                $this->operation($planned['method'].' '.$path, $at, $planned, $plan['shared']);
+                $this->operation($planned['written'].' '.$path, $at, $planned, $plan['shared']);
             }
         }
 
@@ -310,20 +314,8 @@ final class NodeManifest
         [$shared, $sharing] = $this->parameters($item['parameters'] ?? null);
         $everyShared = self::spelt($shared);
 
-        $operations = [];
-        foreach (PathItem::METHODS as $method) {
-            $operations[$method] = [$item[$method] ?? null, '/'.$method];
-        }
-        foreach (self::map($item['additionalOperations'] ?? null) as $method => $operation) {
-            $operations[(string) $method] = [$operation, '/additionalOperations/'.Pointer::escape((string) $method)];
-        }
-
         $plan = ['shared' => $shared, 'operations' => [], 'listed' => 0, 'spelled' => 0];
-        foreach ($operations as $method => [$operation, $tail]) {
-            if (! is_array($operation)) {
-                continue;
-            }
-
+        foreach (PathOperations::written($item) as [$written, $tail, $operation]) {
             /** @var array<string, mixed> $operation */
             [$parameters] = $this->parameters($operation['parameters'] ?? null);
 
@@ -350,13 +342,12 @@ final class NodeManifest
                 );
             }
 
-            $method = strtoupper((string) $method);
             $label = self::string($operation, 'summary') ?? self::string($operation, 'operationId');
             $identity = NodeIdentity::inArray($operation);
             $listed = 1 + count($parameters) + count($shared) - count($restated) + count($responses);
 
             $plan['operations'][] = [
-                'method' => $method,
+                'written' => $written,
                 'operation' => $operation,
                 'tail' => $tail,
                 'label' => $label,
@@ -366,10 +357,10 @@ final class NodeManifest
                 'responses' => $responses,
             ];
 
-            // Each listed node's key opens with the method; the operation's own nodes point below its tail.
+            // Each listed node's key opens with where the operation is written; its own nodes point below its tail.
             $plan['listed'] += $listed;
             $plan['spelled'] += strlen($label ?? '') + strlen($identity ?? '')
-                + $listed * (strlen($method) + 1)
+                + $listed * (strlen($written) + 1)
                 + (1 + count($parameters) + count($responses)) * strlen($tail)
                 + self::spelt($parameters) + $sharedSpelled + self::spelt($responses);
         }

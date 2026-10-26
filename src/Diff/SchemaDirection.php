@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Diff;
 
-use Docuccino\Core\Document\PathItem;
 use Docuccino\Core\Document\UirDocument;
 
 /**
@@ -91,12 +90,7 @@ final readonly class SchemaDirection
             unset($item['parameters']);
         }
 
-        foreach (PathItem::METHODS as $method) {
-            $operation = $item[$method] ?? null;
-            if (! is_array($operation)) {
-                continue;
-            }
-
+        return PathOperations::rewritten($item, static function (array $operation) use (&$writer): array {
             foreach (['parameters', 'requestBody'] as $position) {
                 if (is_array($operation[$position] ?? null)) {
                     $writer[] = $operation[$position];
@@ -104,9 +98,7 @@ final readonly class SchemaDirection
                 }
             }
 
-            $item[$method] = $operation;
-        }
-
-        return $item;
+            return $operation;
+        });
     }
 }
