@@ -180,17 +180,18 @@ it('reads whitespace and comments as nothing, however much of them there is', fu
 ]);
 
 it('does not let an alias buy an index, nor write out what the alias repeats to find that out', function (): void {
-    $item = ['parameters' => array_map(static fn (int $i): array => ['name' => "q{$i}", 'in' => 'query'], range(1, 2000))];
+    $item = ['parameters' => array_map(static fn (int $i): array => ['name' => "q{$i}", 'in' => 'query'], range(1, 200))];
     $item += array_fill_keys(['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'], ['summary' => 'x', 'responses' => ['200' => ['description' => 'OK']]]);
     $shared = [
         'openapi' => '3.1.0',
         'info' => ['title' => 'Shared', 'version' => '1'],
-        'paths' => array_fill_keys(array_map(static fn (int $i): string => "/a{$i}", range(1, 2000)), ['$ref' => '#/components/pathItems/P']),
+        'paths' => array_fill_keys(array_map(static fn (int $i): string => "/a{$i}", range(1, 100)), ['$ref' => '#/components/pathItems/P']),
         'components' => ['pathItems' => ['P' => $item]],
     ];
 
-    // 32,032,000 nodes, beside one 1 MB string an alias names 10,000 times: 10 GB as JSON, from 1.2 MB.
-    $yaml = "x-text: &text '".str_repeat('x', 1_000_000)."'\nx-again:\n".str_repeat("  - *text\n", 10_000).Yaml::dump($shared, 2, 2);
+    // 161,600 nodes, beside a 10 KB string an alias names 100 times: 1 MB as JSON from 21 KB, as much text
+    // as the decoder lets aliases spell from a document this small.
+    $yaml = "x-text: &text '".str_repeat('x', 10_000)."'\nx-again:\n".str_repeat("  - *text\n", 100).Yaml::dump($shared, 2, 2);
 
     memory_reset_peak_usage();
     $before = memory_get_usage();
@@ -200,7 +201,7 @@ it('does not let an alias buy an index, nor write out what the alias repeats to 
         (new DocumentReader)->read($yaml);
         $this->fail('An index an alias paid for was read.');
     } catch (UnreadableDocumentException $exception) {
-        // Four nodes a byte of the text it was read from, where its JSON would have allowed ten billion.
+        // Four nodes a byte of the text it was read from, where its JSON would have allowed a million.
         expect($exception->failure)->toBe(ReadFailure::NodeExpansion)
             ->and($exception->reason)->toContain(sprintf('more than the %d its size allows', 4 * strlen($yaml)))
             ->and((hrtime(true) - $started) / 1e9)->toBeLessThan(1.0)
@@ -227,7 +228,7 @@ it('caps a limit at the text only where an alias wrote the document', function (
     'unquoted strings' => ['{openapi: 3.1.0, x: ['.implode(',', array_fill(0, 2_000, 'a')).']}', 2.0, false],
     'dates written short' => ['{openapi: 3.1.0, x: ['.implode(',', array_fill(0, 2_000, '2024-1-1')).']}', 1.4, false],
     'a real YAML description' => [loadGolden('kitchen-sink.openapi32.yaml'), 0.7, false],
-    'a string an alias names 2,000 times' => ["openapi: 3.1.0\nx-text: &text '".str_repeat('x', 1_000)."'\nx-again: [".implode(',', array_fill(0, 2_000, '*text'))."]\n", 153.9, true],
+    'a string an alias names 1,000 times' => ["openapi: 3.1.0\nx-text: &text '".str_repeat('x', 1_000)."'\nx-again: [".implode(',', array_fill(0, 1_000, '*text'))."]\n", 142.6, true],
 ]);
 
 it('reads a document that shares a path item a few times over', function (): void {

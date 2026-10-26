@@ -6,6 +6,7 @@ use Docuccino\Core\Reader\DocumentDecoder;
 use Docuccino\Core\Reader\DocumentReader;
 use Docuccino\Core\Support\CompactJson;
 use Docuccino\Core\Support\JsonValue;
+use Symfony\Component\Yaml\Yaml;
 
 /*
  * A document's size as compact JSON: the bytes of the JSON it is written back as, once the whitespace is
@@ -63,7 +64,9 @@ it('counts a float as every host writes it, and leaves the host as it was', func
 
 it('reads no more of a string an alias repeats than the answer needs', function (): void {
     // One 1 MB string named 10,000 times: 10 GB written out, and seconds even to count by reading it all.
-    [$graph] = (new DocumentDecoder)->decode("x-text: &text '".str_repeat('x', 1_000_000)."'\nx-again:\n".str_repeat("  - *text\n", 10_000), null);
+    // The parser's graph, since the decoder refuses to copy one: values the count is handed are not only
+    // the reader's.
+    $graph = Yaml::parse("x-text: &text '".str_repeat('x', 1_000_000)."'\nx-again:\n".str_repeat("  - *text\n", 10_000), Yaml::PARSE_OBJECT_FOR_MAP);
 
     memory_reset_peak_usage();
     $before = memory_get_usage();

@@ -17,12 +17,14 @@ use Symfony\Component\Yaml\Yaml;
  * two values. JSON is read by `json_decode`; YAML by symfony/yaml with no PHP objects, constants or
  * custom tags, so YAML is held to the values JSON can spell.
  *
- * Every value is copied into a fresh graph on the way out, under two bounds. One is depth, at the
- * canonical writer's own limit, so a document that reads is one that can be written back. The other is
- * how many values the copy may make: YAML aliases share one parsed value however often they are named,
- * so a billion-laughs document parses in microseconds and only explodes when something walks it. The
- * copy is that walk, and it stops — rather than expanding — once it has made more values than the
- * document has bytes (or {@see MIN_VALUES}, for a small one): text without aliases cannot spell more.
+ * Every value is copied into a fresh graph on the way out, under three bounds. One is depth, at the
+ * canonical writer's own limit, so a document that reads is one that can be written back. The other two
+ * are how much the copy may make: YAML aliases share one parsed value however often they are named, so a
+ * billion-laughs document parses in microseconds and only explodes when something walks it. The copy is
+ * that walk, and it stops — rather than expanding — once it has made more values than the document has
+ * bytes, or more text than {@see TEXT_PER_BYTE} bytes for each of them (or {@see MIN_VALUES} and
+ * {@see MIN_TEXT}, for a small one). Text is every string and member name, counted wherever an alias puts
+ * it: counting values alone admits one long string named over and over, cheap to read and not to write.
  *
  * @internal
  */
@@ -34,15 +36,37 @@ final class DocumentDecoder
     /** The least a document may expand to, so a small one sharing a block by alias is never refused. */
     private const int MIN_VALUES = 10_000;
 
+    /**
+     * The text the copy may spell for each byte of the document. Only aliases come near it: without them
+     * JSON spells at most what it is written in, and the most YAML was found to spell is 1.5 (its `\L`
+     * escape, three bytes from two); the most any real description measured spells is 1.9.
+     */
+    private const int TEXT_PER_BYTE = 8;
+
+    /** The least text a document may expand to, so a small one sharing a description by alias is never refused. */
+    private const int MIN_TEXT = 1_048_576;
+
     private const string BOM = "\u{FEFF}";
 
     private const int YAML_FLAGS = Yaml::PARSE_OBJECT_FOR_MAP | Yaml::PARSE_EXCEPTION_ON_INVALID_TYPE | Yaml::PARSE_DATETIME;
 
     private int $values = 0;
 
-    private int $budget = 0;
+    private int $valueBudget = 0;
+
+    private int $text = 0;
+
+    private int $textBudget = 0;
 
     private int $length = 0;
+
+    /**
+     * Where the copy is, as segments, spelt as a pointer only when a refusal names it: a pointer for every
+     * value repeats each name above it, so one long name over many values would cost their product.
+     *
+     * @var list<string|int>
+     */
+    private array $path = [];
 
     /**
      * @return array{stdClass, Syntax}
@@ -144,10 +168,13 @@ final class DocumentDecoder
     private function admitted(mixed $parsed, int $length): stdClass
     {
         $this->values = 0;
+        $this->text = 0;
         $this->length = $length;
-        $this->budget = max(self::MIN_VALUES, $length);
+        $this->valueBudget = max(self::MIN_VALUES, $length);
+        $this->textBudget = max(self::MIN_TEXT, self::TEXT_PER_BYTE * $length);
+        $this->path = [];
 
-        $graph = $this->copy($parsed, 0, '');
+        $graph = $this->copy($parsed);
 
         if (! $graph instanceof stdClass) {
             throw new UnreadableDocumentException(ReadFailure::NotAnObject, sprintf(
@@ -167,19 +194,19 @@ final class DocumentDecoder
     /**
      * @throws UnreadableDocumentException
      */
-    private function copy(mixed $value, int $depth, string $pointer): mixed
+    private function copy(mixed $value): mixed
     {
-        if (++$this->values > $this->budget) {
+        if (++$this->values > $this->valueBudget) {
             throw new UnreadableDocumentException(ReadFailure::AliasExpansion, sprintf(
                 'The document expands to more than %d values from %d bytes: its YAML aliases repeat a block far more often than any document needs, so it was refused rather than expanded.',
-                $this->budget,
+                $this->valueBudget,
                 $this->length,
             ));
         }
 
         if ($value instanceof stdClass || is_array($value)) {
-            if ($depth >= self::MAX_DEPTH) {
-                throw self::tooDeep($pointer === '' ? '/' : $pointer);
+            if (count($this->path) >= self::MAX_DEPTH) {
+                throw self::tooDeep($this->pointer());
             }
 
             // A YAML sequence is a list. Anything else symfony hands back as an array is a map it built
@@ -187,7 +214,9 @@ final class DocumentDecoder
             if (is_array($value) && array_is_list($value)) {
                 $list = [];
                 foreach ($value as $index => $member) {
-                    $list[] = $this->copy($member, $depth + 1, $pointer.'/'.$index);
+                    $this->path[] = $index;
+                    $list[] = $this->copy($member);
+                    array_pop($this->path);
                 }
 
                 return $list;
@@ -195,29 +224,63 @@ final class DocumentDecoder
 
             $object = new stdClass;
             foreach (is_array($value) ? $value : get_object_vars($value) as $name => $member) {
-                $object->{$name} = $this->copy($member, $depth + 1, Pointer::append($pointer, $name));
+                $this->spell((string) $name);
+                $this->path[] = $name;
+                $object->{$name} = $this->copy($member);
+                array_pop($this->path);
             }
 
             return $object;
         }
 
         if ($value instanceof DateTimeInterface) {
-            return self::timestamp($value);
+            return $this->spell(self::timestamp($value));
         }
 
         if (is_float($value) && ! is_finite($value)) {
-            throw self::unrepresentable($pointer, 'an infinite or NaN number');
+            throw self::unrepresentable($this->pointer(), 'an infinite or NaN number');
         }
 
-        if (is_string($value) && preg_match('//u', $value) !== 1) {
-            throw self::unrepresentable($pointer, 'a string that is not UTF-8 text');
+        if (is_string($value)) {
+            // Counted before it is read, so an alias naming it again and again is read no further than allowed.
+            $this->spell($value);
+
+            if (preg_match('//u', $value) !== 1) {
+                throw self::unrepresentable($this->pointer(), 'a string that is not UTF-8 text');
+            }
         }
 
         if (is_object($value)) {
-            throw self::unrepresentable($pointer, 'a '.get_debug_type($value));
+            throw self::unrepresentable($this->pointer(), 'a '.get_debug_type($value));
         }
 
         return $value;
+    }
+
+    /**
+     * Counts $text against what the copy may spell, and hands it back.
+     *
+     * @throws UnreadableDocumentException
+     */
+    private function spell(string $text): string
+    {
+        $this->text += strlen($text);
+
+        if ($this->text > $this->textBudget) {
+            throw new UnreadableDocumentException(ReadFailure::AliasExpansion, sprintf(
+                'The document expands to more than %d bytes of text from %d bytes: its YAML aliases repeat text far more often than any document needs, so it was refused rather than expanded.',
+                $this->textBudget,
+                $this->length,
+            ));
+        }
+
+        return $text;
+    }
+
+    /** Where the copy is, as a pointer: `/` for the root. */
+    private function pointer(): string
+    {
+        return $this->path === [] ? '/' : Pointer::of($this->path);
     }
 
     /**
@@ -271,7 +334,7 @@ final class DocumentDecoder
         return new UnreadableDocumentException(ReadFailure::Unrepresentable, sprintf(
             'The document holds %s at %s, which JSON cannot represent.',
             $what,
-            $pointer === '' ? '/' : $pointer,
+            $pointer,
         ));
     }
 }

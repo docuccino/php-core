@@ -101,6 +101,18 @@ it('reads a document that shares a block by alias many times over', function ():
     expect((new DocumentReader)->read($yaml)->nodes())->toHaveCount(91);
 });
 
+it('reads a long member name over many values in time proportional to the text', function (): void {
+    // An 800 KB name over 80,000 values: a pointer spelt for each value would copy the name 80,000 times,
+    // 64 GB of copying from under 1 MB of JSON.
+    $bytes = '{"openapi":"3.1.0","info":{"title":"Orders","version":"1"},"paths":{},"x-'.str_repeat('k', 800_000).'":['.implode(',', array_fill(0, 80_000, '1')).']}';
+
+    $started = hrtime(true);
+    $document = (new DocumentReader)->read($bytes);
+
+    expect((hrtime(true) - $started) / 1e9)->toBeLessThan(1.0)
+        ->and($document->inspect()->openapi)->toBe('3.1.0');
+});
+
 it('reads the syntax a media type names, ignoring its parameters', function (?string $mediaType, Syntax $syntax): void {
     $bytes = $syntax === Syntax::Json
         ? '{"openapi":"3.1.0","info":{"title":"Orders","version":"1"},"paths":{}}'
@@ -154,6 +166,7 @@ it('refuses what is not a document, saying why', function (string $bytes, ?strin
     'a number' => ['42', null, ReadFailure::NotAnObject, 'The document is a single int, not an object: an OpenAPI document is an object at its root.', null],
     'null' => ['~', null, ReadFailure::NotAnObject, 'The document is null, not an object: an OpenAPI document is an object at its root.', null],
     'an infinite number' => ["openapi: 3.1.0\nx-limit: .inf\n", null, ReadFailure::Unrepresentable, 'The document holds an infinite or NaN number at /x-limit, which JSON cannot represent.', null],
+    'an infinite number in a list, under a name with a slash' => ["openapi: 3.1.0\nx-a/b: [1, .inf]\n", null, ReadFailure::Unrepresentable, 'The document holds an infinite or NaN number at /x-a~1b/1, which JSON cannot represent.', null],
     'binary that is not text' => ["openapi: 3.1.0\nx-blob: !!binary /w==\n", null, ReadFailure::Unrepresentable, 'The document holds a string that is not UTF-8 text at /x-blob, which JSON cannot represent.', null],
     'nested past the writer' => [str_repeat('[', 130).str_repeat(']', 130), 'application/json', ReadFailure::TooDeep, 'The document nests more than 128 levels deep at '.str_repeat('/0', 128).', past what can be written back out.', null],
     'nested past the JSON parser' => [str_repeat('[', 600).str_repeat(']', 600), 'application/json', ReadFailure::TooDeep, 'The document nests more than 128 levels deep, past what can be written back out.', null],

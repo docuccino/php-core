@@ -16,7 +16,10 @@ enum ReadFailure: string
     /** The text parses, but to something other than an object at the root. */
     case NotAnObject = 'not-an-object';
 
-    /** YAML whose aliases expand it far past its own size — refused rather than expanded. */
+    /**
+     * YAML whose aliases expand it far past its own size, in values or in the text they hold — refused
+     * rather than expanded.
+     */
     case AliasExpansion = 'alias-expansion';
 
     /** A value JSON has no spelling for: an infinite or NaN number, or a string that is not UTF-8. */
