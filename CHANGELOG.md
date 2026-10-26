@@ -7,6 +7,14 @@ User-facing changes to `docuccino/core` — features, fixes, performance work an
 taken from the commit messages scoped `core`. Entries begin after v0.1.2; older history is in
 the [repository](https://github.com/docuccino/docuccino) git log.
 
+## v0.22.1
+
+### Bug fixes
+
+- bound what the node index spells and how often a $ref is followed, and refuse YAML the parser throws on ([#668](https://github.com/docuccino/docuccino/pull/668))
+- refuse YAML whose aliases repeat text far past its own size ([#667](https://github.com/docuccino/docuccino/pull/667))
+- measure the node budget against the document's compact JSON, not its whitespace ([#665](https://github.com/docuccino/docuccino/pull/665))
+
 ## v0.22.0
 
 ### Breaking changes
