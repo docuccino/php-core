@@ -7,6 +7,22 @@ User-facing changes to `docuccino/core` — features, fixes, performance work an
 taken from the commit messages scoped `core`. Entries begin after v0.1.2; older history is in
 the [repository](https://github.com/docuccino/docuccino) git log.
 
+## v0.23.0
+
+### Breaking changes
+
+- key a custom operation's nodes by where it is written, so none takes another's key ([#673](https://github.com/docuccino/docuccino/pull/673))
+  - `DocumentNode::$key` changes for the nodes of an operation under OpenAPI 3.2's `additionalOperations`. The operation is keyed `additionalOperations/COPY /forms/{p0}` where it was `COPY /forms/{p0}`, its method as written with its case kept, and the keys of its parameters and responses open the same way. A fixed method's nodes, and every node of a document without `additionalOperations`, keep their keys, and a custom operation's nodes keep their pointers, ids, labels and digests. A caller storing keys should expect each stored custom-operation node to match no new key until it is re-keyed by its pointer, which did not move, and a fixed operation a custom `get` hid to be listed again, as a node it has not stored.
+- read YAML as it was written, and refuse what symfony/yaml would misread ([#672](https://github.com/docuccino/docuccino/pull/672))
+  - `DocumentReader::read()` refuses YAML it used to read as something else: a `!!float` on what is not a number, a merge of anything but a map or a list of maps, a merge symfony/yaml reads otherwise than YAML, and a key written twice after a merge or, on symfony/yaml 7.4, over a null, each with `ReadFailure::Syntax`. It also reads an impossible timestamp, a timestamp key, a keyword in a case YAML does not spell it and a non-specific tag's value as the text written. UPGRADING.md has the details under v0.23.0.
+- bound what YAML merge keys cost the parser by the document's size ([#671](https://github.com/docuccino/docuccino/pull/671))
+  - `DocumentReader::read()` refuses YAML whose text could spell a merge key and that names more aliases to a map or a list than 524,288 / (its separators + 1), where it read up to 128 of them. That refusal, and the one past 128, are `ReadFailure::AliasExpansion` where they were `ReadFailure::Syntax`. UPGRADING.md has the details under v0.23.0.
+
+### Bug fixes
+
+- diff OpenAPI 3.2 additionalOperations as it diffs every other operation ([#670](https://github.com/docuccino/docuccino/pull/670))
+- read YAML past 128 aliases wherever no merge key can copy a map, and require a symfony/yaml that bounds its own nesting and lexing ([#669](https://github.com/docuccino/docuccino/pull/669))
+
 ## v0.22.1
 
 ### Bug fixes
