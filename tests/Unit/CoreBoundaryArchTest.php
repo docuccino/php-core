@@ -280,6 +280,10 @@ it('never hands a public API consumer a type marked @internal', function (): voi
         'Docuccino\Core\Reader\DocumentDecoder',
         'Docuccino\Core\Reader\Inspector',
         'Docuccino\Core\Reader\NodeManifest',
+        'Docuccino\Core\Reader\SourceMap',
+        'Docuccino\Core\Reader\JsonPositions',
+        'Docuccino\Core\Reader\YamlPositions',
+        'Docuccino\Core\Reader\PointerTrie',
     ] as $marked) {
         expect($surface)->not->toContain($marked);
     }
@@ -411,7 +415,7 @@ it('freezes the contract index at the methods outside core actually call', funct
 it('freezes the document reader at the methods it means to promise', function (): void {
     $promised = [
         DocumentReader::class => ['read'],
-        ReadDocument::class => ['contentHash', 'inspect', 'json', 'nodes', 'uir', 'validate'],
+        ReadDocument::class => ['contentHash', 'inspect', 'json', 'nodes', 'position', 'uir', 'validate'],
     ];
 
     foreach ($promised as $class => $methods) {

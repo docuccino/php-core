@@ -57,11 +57,16 @@ $document->validate()->isValid();    // OpenAPI meta-schema, plus the extension 
 $document->nodes();                  // one DocumentNode per operation, parameter, response and schema
 $document->contentHash();
 $document->json();                   // the document as read, as JSON: what every node pointer points into
+$document->position('/paths');       // SourcePosition: where it is written, line and column, or null
 ```
+
+Every finding `validate()` returns carries its `position` too, so a CI annotation can point at the line
+rather than the file, in JSON and YAML alike. Positions are worked out from the text only when asked for.
 
 `read()` throws `UnreadableDocumentException`, with a reason you can show whoever uploaded the bytes
 and a `ReadFailure` to branch on, when they are not a document it can read — including one that only
-grows past its own size once walked, through YAML aliases or paths sharing a path item. The differ
+grows past its own size once walked, through YAML aliases or paths sharing a path item. Where the fault
+is in one place, such as where JSON stops parsing, it says where. The differ
 refuses the same way: `IncomparableDocumentsException::$failure` is `DiffFailure::ReferenceExpansion`
 for two documents whose comparison would read their shared nodes far more often than any document
 needs.

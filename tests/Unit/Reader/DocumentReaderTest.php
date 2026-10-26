@@ -189,6 +189,9 @@ it('reads YAML flow style that only looked like JSON, unless the media type said
         ->toThrow(UnreadableDocumentException::class, 'The document is not valid JSON: Syntax error.');
 });
 
+// The line is the one at fault wherever one place is: where symfony/yaml stops, and — from the reader's own
+// scan of the text — the first byte that is not UTF-8, where JSON stops parsing, where nesting passes the limit,
+// and the value JSON cannot represent. A refusal about the document as a whole has none.
 it('refuses what is not a document, saying why', function (string $bytes, ?string $mediaType, ReadFailure $failure, string $reason, ?int $line): void {
     try {
         (new DocumentReader)->read($bytes, $mediaType);
@@ -201,8 +204,8 @@ it('refuses what is not a document, saying why', function (string $bytes, ?strin
     }
 })->with([
     'empty' => ["  \n", null, ReadFailure::Syntax, 'The document is empty.', null],
-    'not UTF-8' => ["openapi: \xC3\x28", null, ReadFailure::Encoding, 'The document is not UTF-8 text.', null],
-    'broken JSON' => ['{"openapi": ', 'application/json', ReadFailure::Syntax, 'The document is not valid JSON: Syntax error.', null],
+    'not UTF-8' => ["openapi: \xC3\x28", null, ReadFailure::Encoding, 'The document is not UTF-8 text.', 1],
+    'broken JSON' => ['{"openapi": ', 'application/json', ReadFailure::Syntax, 'The document is not valid JSON: Syntax error.', 1],
     'broken YAML' => ["openapi: 3.1.0\n  info: indented\n", null, ReadFailure::Syntax, 'The document is not valid YAML: A colon cannot be used in an unquoted mapping value.', 2],
     'a custom tag' => ["openapi: !version 3.1.0\n", null, ReadFailure::Syntax, 'The document is not valid YAML: Tags support is not enabled. Enable the "Yaml::PARSE_CUSTOM_TAGS" flag to use "!version".', 1],
     'a PHP object' => ["openapi: !php/object 'O:8:\"stdClass\":0:{}'\n", null, ReadFailure::Syntax, 'The document is not valid YAML: Object support when parsing a YAML file has been disabled.', 1],
@@ -211,11 +214,11 @@ it('refuses what is not a document, saying why', function (string $bytes, ?strin
     'a string' => ['just words', null, ReadFailure::NotAnObject, 'The document is a single string, not an object: an OpenAPI document is an object at its root.', null],
     'a number' => ['42', null, ReadFailure::NotAnObject, 'The document is a single int, not an object: an OpenAPI document is an object at its root.', null],
     'null' => ['~', null, ReadFailure::NotAnObject, 'The document is null, not an object: an OpenAPI document is an object at its root.', null],
-    'an infinite number' => ["openapi: 3.1.0\nx-limit: .inf\n", null, ReadFailure::Unrepresentable, 'The document holds an infinite or NaN number at /x-limit, which JSON cannot represent.', null],
-    'an infinite number in a list, under a name with a slash' => ["openapi: 3.1.0\nx-a/b: [1, .inf]\n", null, ReadFailure::Unrepresentable, 'The document holds an infinite or NaN number at /x-a~1b/1, which JSON cannot represent.', null],
-    'binary that is not text' => ["openapi: 3.1.0\nx-blob: !!binary /w==\n", null, ReadFailure::Unrepresentable, 'The document holds a string that is not UTF-8 text at /x-blob, which JSON cannot represent.', null],
-    'nested past the writer' => [str_repeat('[', 130).str_repeat(']', 130), 'application/json', ReadFailure::TooDeep, 'The document nests more than 128 levels deep at '.str_repeat('/0', 128).', past what can be written back out.', null],
-    'nested past the JSON parser' => [str_repeat('[', 600).str_repeat(']', 600), 'application/json', ReadFailure::TooDeep, 'The document nests more than 128 levels deep, past what can be written back out.', null],
+    'an infinite number' => ["openapi: 3.1.0\nx-limit: .inf\n", null, ReadFailure::Unrepresentable, 'The document holds an infinite or NaN number at /x-limit, which JSON cannot represent.', 2],
+    'an infinite number in a list, under a name with a slash' => ["openapi: 3.1.0\nx-a/b: [1, .inf]\n", null, ReadFailure::Unrepresentable, 'The document holds an infinite or NaN number at /x-a~1b/1, which JSON cannot represent.', 2],
+    'binary that is not text' => ["openapi: 3.1.0\nx-blob: !!binary /w==\n", null, ReadFailure::Unrepresentable, 'The document holds a string that is not UTF-8 text at /x-blob, which JSON cannot represent.', 2],
+    'nested past the writer' => [str_repeat('[', 130).str_repeat(']', 130), 'application/json', ReadFailure::TooDeep, 'The document nests more than 128 levels deep at '.str_repeat('/0', 128).', past what can be written back out.', 1],
+    'nested past the JSON parser' => [str_repeat('[', 600).str_repeat(']', 600), 'application/json', ReadFailure::TooDeep, 'The document nests more than 128 levels deep, past what can be written back out.', 1],
 ]);
 
 it('reads a byte-order mark as nothing', function (): void {

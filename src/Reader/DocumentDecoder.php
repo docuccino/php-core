@@ -33,6 +33,9 @@ use TypeError;
  * {@see MIN_TEXT}, for a small one). Text is every string and member name, counted wherever an alias puts
  * it: counting values alone admits one long string named over and over, cheap to read and not to write.
  *
+ * A refusal about one place in the text says where it is ({@see SourceMap}), worked out only once the
+ * document has been refused.
+ *
  * @internal
  */
 final class DocumentDecoder
@@ -86,6 +89,12 @@ final class DocumentDecoder
 
     private int $length = 0;
 
+    /** The text being read, for saying where a refusal is. */
+    private string $source = '';
+
+    /** How the text is being read. */
+    private Syntax $syntax = Syntax::Json;
+
     /** What {@see PlainScalars} marked the text with, taken back out of every string and name the copy makes. */
     private ?string $mark = null;
 
@@ -114,8 +123,10 @@ final class DocumentDecoder
             $bytes = substr($bytes, strlen(self::BOM));
         }
 
+        $this->source = $bytes;
+
         if (preg_match('//u', $bytes) !== 1) {
-            throw new UnreadableDocumentException(ReadFailure::Encoding, 'The document is not UTF-8 text.');
+            throw new UnreadableDocumentException(ReadFailure::Encoding, 'The document is not UTF-8 text.', position: (new SourceMap($bytes))->encodingError());
         }
 
         if (trim($bytes) === '') {
@@ -140,15 +151,18 @@ final class DocumentDecoder
                 }
 
                 if ($exception->getCode() === JSON_ERROR_DEPTH) {
-                    throw self::tooDeep(null, $exception);
+                    throw new UnreadableDocumentException(ReadFailure::TooDeep, self::tooDeepReason(null), previous: $exception, position: (new SourceMap($bytes))->jsonDeeperThan(self::MAX_DEPTH));
                 }
 
                 throw new UnreadableDocumentException(
                     ReadFailure::Syntax,
                     sprintf('The document is not valid JSON: %s.', rtrim($exception->getMessage(), '.')),
                     previous: $exception,
+                    position: (new SourceMap($bytes))->jsonError(),
                 );
             }
+
+            $this->syntax = Syntax::Json;
 
             return [$this->admitted($parsed, strlen($bytes)), Syntax::Json];
         }
@@ -186,6 +200,7 @@ final class DocumentDecoder
      */
     private function yaml(string $bytes): stdClass
     {
+        $this->syntax = Syntax::Yaml;
         [$text, $this->mark] = PlainScalars::marked($bytes);
         $aliases = self::aliasCap($bytes);
 
@@ -348,7 +363,7 @@ final class DocumentDecoder
 
         if ($value instanceof stdClass || is_array($value)) {
             if (count($this->path) >= self::MAX_DEPTH) {
-                throw self::tooDeep($this->pointer());
+                throw new UnreadableDocumentException(ReadFailure::TooDeep, self::tooDeepReason($this->pointer()), position: $this->here());
             }
 
             // A YAML sequence is a list. Anything else symfony hands back as an array is a map it built
@@ -392,11 +407,11 @@ final class DocumentDecoder
 
         if ($value instanceof TaggedValue && in_array($value->getTag(), ['!str', '!float'], true) && is_string($value->getValue())) {
             // Releases before 7.4.21 and 8.1.9 hand a block scalar back still tagged, where later ones read it.
-            $value = $value->getTag() === '!str' ? $value->getValue() : YamlTwin::float(PlainScalars::unmarked($value->getValue(), $this->mark), $this->path);
+            $value = $value->getTag() === '!str' ? $value->getValue() : $this->float($value->getValue());
         } elseif (is_float($value) && is_string($twin)) {
             // Only a float tag reads as a float in one reading and a string in the other, and symfony/yaml casts
             // what it tags (`abc` to 0, `.inf` to 0) where YAML reads it.
-            $value = YamlTwin::float(PlainScalars::unmarked($twin, $this->mark), $this->path);
+            $value = $this->float($twin);
         }
 
         if ($value instanceof DateTimeInterface) {
@@ -404,7 +419,7 @@ final class DocumentDecoder
         }
 
         if (is_float($value) && ! is_finite($value)) {
-            throw self::unrepresentable($this->pointer(), 'an infinite or NaN number');
+            throw $this->unrepresentable('an infinite or NaN number');
         }
 
         if (is_string($value)) {
@@ -412,12 +427,12 @@ final class DocumentDecoder
             $value = $this->spell(PlainScalars::unmarked($value, $this->mark));
 
             if (preg_match('//u', $value) !== 1) {
-                throw self::unrepresentable($this->pointer(), 'a string that is not UTF-8 text');
+                throw $this->unrepresentable('a string that is not UTF-8 text');
             }
         }
 
         if (is_object($value)) {
-            throw self::unrepresentable($this->pointer(), 'a '.get_debug_type($value));
+            throw $this->unrepresentable('a '.get_debug_type($value));
         }
 
         return $value;
@@ -470,6 +485,26 @@ final class DocumentDecoder
         return $this->path === [] ? '/' : Pointer::of($this->path);
     }
 
+    /** Where the copy is, in the text. */
+    private function here(): ?SourcePosition
+    {
+        return (new SourceMap($this->source))->position($this->syntax, $this->pointer());
+    }
+
+    /**
+     * The text a float tag is on, read as YAML reads a float: refused, at the tagged value, where it reads as none.
+     *
+     * @throws UnreadableDocumentException
+     */
+    private function float(string $text): float
+    {
+        try {
+            return YamlTwin::float(PlainScalars::unmarked($text, $this->mark), $this->path);
+        } catch (UnreadableDocumentException $refusal) {
+            throw new UnreadableDocumentException($refusal->failure, $refusal->reason, position: $this->here());
+        }
+    }
+
     /**
      * A YAML timestamp back as the text it was written as, near enough to mean the same thing: symfony
      * reads an unquoted `2024-01-01` as a date where JSON (and YAML 1.2) read a string, and without
@@ -507,21 +542,21 @@ final class DocumentDecoder
     }
 
     /** @param  ?string  $pointer  where the limit was met, when the reader that met it can say */
-    private static function tooDeep(?string $pointer, ?JsonException $previous = null): UnreadableDocumentException
+    private static function tooDeepReason(?string $pointer): string
     {
-        return new UnreadableDocumentException(ReadFailure::TooDeep, sprintf(
+        return sprintf(
             'The document nests more than %d levels deep%s, past what can be written back out.',
             self::MAX_DEPTH,
             $pointer === null ? '' : ' at '.$pointer,
-        ), previous: $previous);
+        );
     }
 
-    private static function unrepresentable(string $pointer, string $what): UnreadableDocumentException
+    private function unrepresentable(string $what): UnreadableDocumentException
     {
         return new UnreadableDocumentException(ReadFailure::Unrepresentable, sprintf(
             'The document holds %s at %s, which JSON cannot represent.',
             $what,
-            $pointer,
-        ));
+            $this->pointer(),
+        ), position: $this->here());
     }
 }

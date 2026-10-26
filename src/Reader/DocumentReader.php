@@ -24,6 +24,7 @@ use Docuccino\Core\Support\JsonValue;
  *
  * $document->inspect()->capability;   // Capability::Full
  * $document->validate()->isValid();
+ * $document->validate()->findings[0]->position;   // SourcePosition: line and column, or null
  * $document->nodes();                 // list<DocumentNode>
  * ```
  */
@@ -33,7 +34,8 @@ final class DocumentReader
      * Reads $bytes as JSON or YAML: as the media type says where it names one, and otherwise by the text
      * itself — JSON when it opens with `{` or `[`, YAML when it does not.
      *
-     * @throws UnreadableDocumentException when the bytes are not a document it can read
+     * @throws UnreadableDocumentException when the bytes are not a document it can read, with where in them
+     *                                     the fault is when it is in one place
      */
     public function read(string $bytes, ?string $mediaType = null): ReadDocument
     {
@@ -44,6 +46,6 @@ final class DocumentReader
 
         (new NodeManifest)->admit($document, strlen($bytes));
 
-        return new ReadDocument($graph, $document, Inspector::inspect($graph, $syntax));
+        return new ReadDocument($graph, $document, Inspector::inspect($graph, $syntax), $bytes);
     }
 }

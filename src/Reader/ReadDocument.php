@@ -17,7 +17,8 @@ use stdClass;
 
 /**
  * A document {@see DocumentReader} has read: the facts it states about itself, where it fails its
- * specifications, the nodes it holds, its content hash, and the model the differ reads.
+ * specifications and where in its text each failure is written, the nodes it holds, its content hash, and
+ * the model the differ reads.
  *
  * Every answer is computed when asked for and nothing is cached, so hold on to what you need. Nothing
  * here reaches the network: every schema a document is checked against ships with this package.
@@ -31,11 +32,13 @@ final readonly class ReadDocument
      *
      * @param  array<string, mixed>  $document  the same document as $graph, with maps as arrays except
      *                                          the two shapes no PHP array can spell
+     * @param  string  $source  the bytes it was read from
      */
     public function __construct(
         private stdClass $graph,
         private array $document,
         private DocumentInspection $inspection,
+        private string $source,
     ) {}
 
     public function inspect(): DocumentInspection
@@ -50,6 +53,9 @@ final readonly class ReadDocument
      * Every finding is a place the document fails. That there were more than the list holds — past $max,
      * or past the {@see SchemaFindings::LIMIT} one schema check collects in a run — is
      * {@see DocumentValidation::isTruncated()}'s answer, never a finding of its own.
+     *
+     * Each finding carries where its pointer is written ({@see position()}), worked out only for the
+     * findings returned, and only when there are any.
      *
      * A version with no schema in this package is reported as a finding rather than checked against
      * another version's: the OpenAPI version from `openapi`, the UIR version from
@@ -71,7 +77,25 @@ final readonly class ReadDocument
             }
         }
 
-        return new DocumentValidation(array_slice($findings, 0, $max), $truncated || count($findings) > $max);
+        return new DocumentValidation($this->placed(array_slice($findings, 0, $max)), $truncated || count($findings) > $max);
+    }
+
+    /**
+     * Where $pointer is written in the text the document was read from: the first character of a member's
+     * entry (its name, or the anchor or tag before it) or of a list's item (a YAML block sequence's `-`), and
+     * for `/` where the document starts, past any comments, directives and `---`. Null where it names nothing
+     * written there — a member the document does not have, or a place inside a scalar.
+     *
+     * In YAML, a pointer that passes through an alias is placed where the alias is written, since that is
+     * where everything beneath it enters the document, and a member a merge key (`<<`) brings in is placed at
+     * the alias, or the map written in its place, that brings it. A finding about a member that is missing
+     * names the object it is missing from, so it is placed at that object.
+     *
+     * Worked out from the text when asked for, in one pass over it: hold on to the answer.
+     */
+    public function position(string $pointer): ?SourcePosition
+    {
+        return (new SourceMap($this->source))->position($this->inspection->syntax, $pointer);
     }
 
     /**
@@ -117,6 +141,36 @@ final readonly class ReadDocument
     public function uir(): UirDocument
     {
         return UirDocument::fromArray($this->document);
+    }
+
+    /**
+     * $findings, each with where its pointer is written, all placed in one pass over the text.
+     *
+     * @param  list<DocumentFinding>  $findings
+     * @return list<DocumentFinding>
+     */
+    private function placed(array $findings): array
+    {
+        if ($findings === []) {
+            return [];
+        }
+
+        $positions = (new SourceMap($this->source))->positions(
+            $this->inspection->syntax,
+            array_map(static fn (DocumentFinding $finding): string => $finding->pointer, $findings),
+        );
+
+        return array_map(
+            static fn (DocumentFinding $finding): DocumentFinding => new DocumentFinding(
+                $finding->source,
+                $finding->pointer,
+                $finding->keyword,
+                $finding->message,
+                $finding->schemaPointer,
+                $positions[$finding->pointer] ?? null,
+            ),
+            $findings,
+        );
     }
 
     /**
