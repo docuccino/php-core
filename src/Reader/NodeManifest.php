@@ -14,6 +14,7 @@ use Docuccino\Core\Document\UseSites;
 use Docuccino\Core\Emit\ProvenanceLevel;
 use Docuccino\Core\Emit\UirEmitter;
 use Docuccino\Core\Identity\IdentityGenerator;
+use Docuccino\Core\Support\CompactJson;
 
 /**
  * The {@see DocumentNode}s of a document. Read off the LOWERED document ({@see UseSites}), so a use's
@@ -44,6 +45,13 @@ final class NodeManifest
 {
     /** The fewest nodes a document may index to, so a small one sharing a path item is never refused. */
     private const int MIN_NODES = 10_000;
+
+    /**
+     * The most a document's compact JSON counts for, as a multiple of the text it was read from. Only YAML
+     * aliases write a document that much larger than its text: without them a list of floats like `1e14`
+     * grows the most, 3.2 times, and an escape like `"\0"` 3.
+     */
+    private const int MAX_GROWTH = 4;
 
     private readonly Canonicalizer $canonicalizer;
 
@@ -89,25 +97,36 @@ final class NodeManifest
     }
 
     /**
-     * Refuses $document where it would index to more nodes than its $length in bytes, or than
-     * {@see MIN_NODES} for a small one. A document listing every node where it is written cannot spell
-     * more, so past that the index is only repeating what the document shares.
+     * Refuses $document where it would index to more nodes than it takes bytes as compact JSON
+     * ({@see CompactJson}), or than {@see MIN_NODES} for a small one. A document listing every node where
+     * it is written cannot spell more, so past that the index is only repeating what the document shares.
+     *
+     * The size is the document's, not its text's: whitespace, comments and a YAML layout neither raise
+     * the limit nor lower it, so {@see ReadDocument::json()} reads back under the limit the document was
+     * read under. The exception is a text the document outgrows more than {@see MAX_GROWTH} times, which
+     * only aliases write; there the limit is that multiple of the text, so an alias cannot buy an index.
      *
      * @param  array<string, mixed>  $document  as read, in either UIR minor's form
+     * @param  int  $text  the length of the text it was read from
      *
      * @throws UnreadableDocumentException
      */
-    public function admit(array $document, int $length): void
+    public function admit(array $document, int $text): void
     {
         $count = $this->count($document);
-        $limit = max(self::MIN_NODES, $length);
 
-        if ($count > $limit) {
+        if ($count <= self::MIN_NODES) {
+            return;
+        }
+
+        // Counted only as far as the answer needs: a document far under its limit measures a sliver of itself.
+        $size = CompactJson::lengthUpTo($document, min($count, self::MAX_GROWTH * $text));
+
+        if ($size < $count) {
             throw new UnreadableDocumentException(ReadFailure::NodeExpansion, sprintf(
-                'The document expands to %d nodes from %d bytes, more than the %d it may: the path items its paths share, and the parameters a path item lists for every operation, repeat far more often than any document needs, so it was refused rather than indexed.',
+                'The document expands to %d nodes, more than the %d its size allows: the path items its paths share, and the parameters a path item lists for every operation, repeat far more often than any document needs, so it was refused rather than indexed.',
                 $count,
-                $length,
-                $limit,
+                max(self::MIN_NODES, $size),
             ));
         }
     }

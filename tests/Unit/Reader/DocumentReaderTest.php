@@ -189,6 +189,21 @@ it('writes the document back as JSON exactly as it was written', function (): vo
         ->and((new DocumentReader)->read($json)->json())->toBe($json);
 });
 
+it('reads the JSON it writes back as the same document, for every document in the fixture trees', function (): void {
+    $documents = openApiDocuments();
+
+    foreach ($documents as $path) {
+        $json = (new DocumentReader)->read((string) file_get_contents($path))->json();
+
+        expect((new DocumentReader)->read($json)->json())->toBe($json, $path);
+    }
+
+    // A scan that found nothing would agree with itself forever, and a YAML document's JSON is the one
+    // written fresh rather than copied.
+    expect(count($documents))->toBeGreaterThan(90)
+        ->and(count(array_filter($documents, static fn (string $path): bool => str_ends_with($path, '.yaml'))))->toBeGreaterThan(2);
+});
+
 it('writes a YAML document and its JSON twin as the same bytes', function (): void {
     expect((new DocumentReader)->read(loadGolden('kitchen-sink.openapi32.yaml'))->json())
         ->toBe((new DocumentReader)->read(loadGolden('kitchen-sink.openapi32.json'))->json());

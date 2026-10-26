@@ -13,7 +13,7 @@ use Docuccino\Core\Support\JsonValue;
  * It reads and reports; it sets no policy. How large a document may be, and what to do with one that
  * fails validation, are the caller's to decide. What it does refuse is a document that only expands
  * past its own size once walked — YAML aliases, or nodes listed far more often than they are written —
- * so every answer a read document gives costs in proportion to its bytes.
+ * so every answer a read document gives costs in proportion to its size.
  *
  * Every enum it hands back is backed by a string a caller may store, and those strings change only as a
  * breaking change.

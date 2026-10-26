@@ -102,7 +102,8 @@ final readonly class ReadDocument
      * `{}` and `[]` kept apart, a map whose keys look like numbers still a map, and nothing added,
      * dropped or rewritten — so every {@see DocumentNode::$pointer} resolves in it, and a YAML document
      * and its JSON twin give the same bytes. Written by the same deterministic writer as every artifact
-     * (two-space indent, LF, trailing newline), so the same document always gives the same bytes.
+     * (two-space indent, LF, trailing newline), so the same document always gives the same bytes, and
+     * {@see DocumentReader::read()} reads them back as this same document: one that read once reads again.
      *
      * Not canonical: canonical order sorts parameters and drops repeated values, which would move what a
      * pointer names. {@see contentHash()} is the answer that ignores how a document was written.

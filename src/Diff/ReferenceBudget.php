@@ -8,6 +8,7 @@ use Docuccino\Core\Document\Parameter;
 use Docuccino\Core\Document\PathItem;
 use Docuccino\Core\Document\ResponseObject;
 use Docuccino\Core\Document\UirDocument;
+use Docuccino\Core\Support\CompactJson;
 
 /**
  * How much a diff may read through one document's references. The differ reads a shared node once per
@@ -62,21 +63,13 @@ final class ReferenceBudget
         }
     }
 
-    /** $value's size as compact JSON, with floats written as every host writes them. */
+    /** $value's size as compact JSON, the measure the reader's node budget reads too. */
     private static function size(mixed $value): int
     {
         if ($value instanceof UirDocument || $value instanceof PathItem || $value instanceof Parameter || $value instanceof ResponseObject) {
             $value = $value->toArray();
         }
 
-        $previous = ini_set('serialize_precision', '-1');
-
-        try {
-            return strlen((string) json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR));
-        } finally {
-            if (is_string($previous)) {
-                ini_set('serialize_precision', $previous);
-            }
-        }
+        return CompactJson::length($value);
     }
 }
