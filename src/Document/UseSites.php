@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Document;
 
-use Docuccino\Core\Contract\Refs;
+use Docuccino\Core\Contract\RefHops;
 
 /**
  * Where a USE of a shared response or parameter keeps its own `x-docuccino` — the use's id, provenance
@@ -58,7 +58,9 @@ final class UseSites
      */
     public static function lift(array $document): array
     {
-        return self::eachOperation($document, static fn (array $operation): array => self::liftOperation($operation, $document));
+        $refs = new RefHops($document);
+
+        return self::eachOperation($document, static fn (array $operation): array => self::liftOperation($operation, $refs));
     }
 
     /**
@@ -72,15 +74,16 @@ final class UseSites
      */
     public static function lower(array $document): array
     {
-        return self::eachOperation($document, static fn (array $operation): array => self::lowerOperation($operation, $document));
+        $refs = new RefHops($document);
+
+        return self::eachOperation($document, static fn (array $operation): array => self::lowerOperation($operation, $refs));
     }
 
     /**
      * @param  array<array-key, mixed>  $operation
-     * @param  array<string, mixed>  $document
      * @return array<array-key, mixed>
      */
-    private static function liftOperation(array $operation, array $document): array
+    private static function liftOperation(array $operation, RefHops $refs): array
     {
         $extension = is_array($operation['x-docuccino'] ?? null) ? $operation['x-docuccino'] : [];
         $uses = is_array($extension[self::KEY] ?? null) ? $extension[self::KEY] : [];
@@ -100,7 +103,7 @@ final class UseSites
 
         $parameters = is_array($operation['parameters'] ?? null) ? $operation['parameters'] : [];
         foreach ($parameters as $index => $parameter) {
-            $key = self::isUse($parameter) ? self::parameterKey($parameter, $document) : null;
+            $key = self::isUse($parameter) ? self::parameterKey($parameter, $refs) : null;
             if ($key === null) {
                 continue;
             }
@@ -134,10 +137,9 @@ final class UseSites
 
     /**
      * @param  array<array-key, mixed>  $operation
-     * @param  array<string, mixed>  $document
      * @return array<array-key, mixed>
      */
-    private static function lowerOperation(array $operation, array $document): array
+    private static function lowerOperation(array $operation, RefHops $refs): array
     {
         $extension = $operation['x-docuccino'] ?? null;
         $uses = is_array($extension) ? ($extension[self::KEY] ?? null) : null;
@@ -160,7 +162,7 @@ final class UseSites
         $byLocation = is_array($uses['parameters'] ?? null) ? $uses['parameters'] : [];
         $parameters = is_array($operation['parameters'] ?? null) ? $operation['parameters'] : [];
         foreach ($parameters as $index => $parameter) {
-            $key = is_array($parameter) && is_string($parameter['$ref'] ?? null) ? self::parameterKey($parameter, $document) : null;
+            $key = is_array($parameter) && is_string($parameter['$ref'] ?? null) ? self::parameterKey($parameter, $refs) : null;
             if ($key === null) {
                 continue;
             }
@@ -214,17 +216,17 @@ final class UseSites
     }
 
     /**
-     * The `in` and `name` of the parameter a `$ref` resolves to, following a chain of them, or null where
-     * it resolves to nothing this document defines.
+     * The `in` and `name` of the parameter a `$ref` resolves to, following a chain of them — each hop once
+     * for the whole document, however many operations use it — or null where it resolves to nothing this
+     * document defines.
      *
      * @param  array<array-key, mixed>  $parameter
-     * @param  array<string, mixed>  $document
      * @return array{string, string}|null
      */
-    private static function parameterKey(array $parameter, array $document): ?array
+    private static function parameterKey(array $parameter, RefHops $refs): ?array
     {
         /** @var array<string, mixed> $parameter */
-        [$target, , $dangling] = Refs::follow($document, $parameter, []);
+        [$target, , $dangling] = $refs->follow($parameter, []);
 
         if ($dangling !== null || ! is_string($target['in'] ?? null) || ! is_string($target['name'] ?? null)) {
             return null;

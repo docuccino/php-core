@@ -29,8 +29,9 @@ enum ReadFailure: string
     case TooDeep = 'too-deep';
 
     /**
-     * A document whose node index expands far past its own size — paths sharing one path item, each
-     * listing that item's parameters for every operation — refused rather than indexed.
+     * A document whose node index expands far past its own size — in nodes, as paths sharing one path item
+     * that lists its parameters for every operation do, or in the text they spell, as many nodes under one
+     * long name do — refused rather than indexed.
      */
     case NodeExpansion = 'node-expansion';
 }

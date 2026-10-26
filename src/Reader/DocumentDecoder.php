@@ -4,13 +4,17 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Reader;
 
+use DateMalformedStringException;
 use DateTimeInterface;
 use Docuccino\Core\Canonical\CanonicalJsonSerializer;
 use Docuccino\Core\Contract\Pointer;
+use Error;
 use JsonException;
 use stdClass;
 use Symfony\Component\Yaml\Exception\ParseException;
 use Symfony\Component\Yaml\Yaml;
+use Throwable;
+use TypeError;
 
 /**
  * Bytes to an object graph — every map a {@see stdClass}, every sequence a list — so `{}` and `[]` stay
@@ -47,6 +51,9 @@ final class DocumentDecoder
     private const int MIN_TEXT = 1_048_576;
 
     private const string BOM = "\u{FEFF}";
+
+    /** Why a mapping key starting with a NUL byte is refused, in the words later symfony/yaml releases use. */
+    private const string NUL_KEY = 'Mapping keys starting with a NUL byte are not supported.';
 
     private const int YAML_FLAGS = Yaml::PARSE_OBJECT_FOR_MAP | Yaml::PARSE_EXCEPTION_ON_INVALID_TYPE | Yaml::PARSE_DATETIME;
 
@@ -98,7 +105,7 @@ final class DocumentDecoder
                 // that said JSON is taken at its word.
                 if ($declared === null) {
                     try {
-                        return [$this->admitted(Yaml::parse($bytes, self::YAML_FLAGS), strlen($bytes)), Syntax::Yaml];
+                        return [$this->admitted(self::yaml($bytes), strlen($bytes)), Syntax::Yaml];
                     } catch (ParseException) {
                         // Report it as the JSON it looked like.
                     }
@@ -119,7 +126,7 @@ final class DocumentDecoder
         }
 
         try {
-            $parsed = Yaml::parse($bytes, self::YAML_FLAGS);
+            $parsed = self::yaml($bytes);
         } catch (ParseException $exception) {
             $line = $exception->getParsedLine();
 
@@ -132,6 +139,29 @@ final class DocumentDecoder
         }
 
         return [$this->admitted($parsed, strlen($bytes)), Syntax::Yaml];
+    }
+
+    /**
+     * symfony/yaml's reading of $bytes. Releases before 7.4.21, and 8.0, throw something other than a
+     * {@see ParseException} for three kinds of text, and each is thrown here as one, so it is refused like
+     * any other text the parser cannot read: a TypeError for a merge key inside a flow mapping
+     * (`{<<: *base}`), an Error for a mapping key starting with a NUL byte, and, in 7.0 alone, the date's
+     * own exception for one it matched and could not construct. Anything else goes on as it was thrown.
+     *
+     * @throws ParseException
+     */
+    private static function yaml(string $bytes): mixed
+    {
+        try {
+            return Yaml::parse($bytes, self::YAML_FLAGS);
+        } catch (Throwable $exception) {
+            throw match (true) {
+                $exception instanceof TypeError && str_starts_with($exception->getMessage(), 'Unsupported operand types: array + ') => new ParseException('A merge key (<<) inside a flow mapping is not supported; write that mapping in block style.', previous: $exception),
+                $exception instanceof DateMalformedStringException => new ParseException('A date could not be parsed as it is an invalid date.', previous: $exception),
+                $exception instanceof Error && str_starts_with($exception->getMessage(), 'Cannot access property starting with "\0"') => new ParseException(self::NUL_KEY, previous: $exception),
+                default => $exception,
+            };
+        }
     }
 
     /**
@@ -224,6 +254,12 @@ final class DocumentDecoder
 
             $object = new stdClass;
             foreach (is_array($value) ? $value : get_object_vars($value) as $name => $member) {
+                // A name no object can hold. Only YAML hands one over, and only from a flow mapping: from a
+                // block one, the releases that do not refuse it fail while parsing ({@see yaml()}).
+                if (str_starts_with((string) $name, "\0")) {
+                    throw new UnreadableDocumentException(ReadFailure::Syntax, 'The document is not valid YAML: '.self::NUL_KEY);
+                }
+
                 $this->spell((string) $name);
                 $this->path[] = $name;
                 $object->{$name} = $this->copy($member);
