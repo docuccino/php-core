@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Reader;
 
+use Docuccino\Core\Canonical\CanonicalJsonSerializer;
 use Docuccino\Core\Document\NodeIdentity;
 use Docuccino\Core\SpecValidation\OpenApiMetaSchema;
 use stdClass;
@@ -49,6 +50,7 @@ final class Inspector
             $generator,
             property_exists($graph, 'uir') || property_exists($graph, '$schema') || self::major($generator?->specVersion) < 2,
             self::uirVersion(self::specVersion($graph)),
+            self::info($graph->info ?? null),
         );
     }
 
@@ -104,6 +106,25 @@ final class Inspector
         $string = static fn (string $member): ?string => is_string($generator->{$member} ?? null) ? $generator->{$member} : null;
 
         return new DocumentGenerator($string('name'), $string('version'), $string('specVersion'), $string('schema'));
+    }
+
+    private static function info(mixed $info): DocumentInfo
+    {
+        if (! $info instanceof stdClass) {
+            return new DocumentInfo;
+        }
+
+        return new DocumentInfo(self::text($info->title ?? null), self::text($info->version ?? null));
+    }
+
+    /** A string as written, a number as the document's JSON spells it ({@see DocumentInfo}), else null. */
+    private static function text(mixed $value): ?string
+    {
+        return match (true) {
+            is_string($value) => $value,
+            is_int($value), is_float($value) => rtrim((new CanonicalJsonSerializer)->serialize($value), "\n"),
+            default => null,
+        };
     }
 
     /** The major version $version names; PHP_INT_MAX where it names none, so "below 2" never fires on nothing. */

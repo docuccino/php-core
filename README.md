@@ -61,6 +61,7 @@ use Docuccino\Core\Reader\DocumentReader;
 $document = (new DocumentReader())->read($bytes, 'application/yaml');
 
 $document->inspect()->capability;    // Capability::Full, ::Identities or ::Plain
+$document->inspect()->info->version; // what `info` says: '1.4.0', or null where it states none
 $document->validate()->isValid();    // OpenAPI meta-schema, plus the extension schema for a full document
 $document->nodes();                  // one DocumentNode per operation, parameter, response and schema
 $document->contentHash();

@@ -15,6 +15,9 @@ namespace Docuccino\Core\Reader;
  * is published under (`2.1` for a `specVersion` of `2.1.0`): its generator's `specVersion`, or the root
  * `uir` an artifact written before UIR 2.0 carries. It is the version {@see ReadDocument::validate()}
  * picks the extension's schema by, and null where the document states none that reads as one.
+ *
+ * `info` is the title and version the document's `info` states ({@see DocumentInfo}), read with
+ * everything else here when the document is, so nothing decodes it again to ask.
  */
 final readonly class DocumentInspection
 {
@@ -30,6 +33,7 @@ final readonly class DocumentInspection
         public ?DocumentGenerator $generator,
         public bool $legacy,
         public ?string $uirVersion = null,
+        public DocumentInfo $info = new DocumentInfo,
     ) {}
 
     public function carries(ExtensionMember $member): bool

@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Docuccino\Core\Reader\Capability;
 use Docuccino\Core\Reader\DocumentFinding;
 use Docuccino\Core\Reader\DocumentGenerator;
+use Docuccino\Core\Reader\DocumentInfo;
 use Docuccino\Core\Reader\DocumentReader;
 use Docuccino\Core\Reader\ExtensionMember;
 use Docuccino\Core\Reader\FindingSource;
@@ -16,7 +17,7 @@ use Docuccino\Core\Support\JsonValue;
 
 /*
  * What a document states about itself: its OpenAPI version, how much of the extension it carries, who
- * wrote it, and whether it predates UIR 2.0.
+ * wrote it, whether it predates UIR 2.0, and the title and version its info gives it.
  */
 
 it('reads each capability off the goldens that stand for it', function (string $golden, Capability $capability, ?string $format): void {
@@ -140,6 +141,63 @@ it('writes the generator as values a store can hold, one member per property', f
         ->and(array_keys($generator->toArray()))->toBe(array_map(
             static fn (ReflectionParameter $parameter): string => $parameter->getName(),
             (new ReflectionMethod(DocumentGenerator::class, '__construct'))->getParameters(),
+        ));
+});
+
+it('reads the title and version a document states in its info, and nothing it does not state as text', function (string $text, ?string $title, ?string $version): void {
+    $info = (new DocumentReader)->read($text)->inspect()->info;
+
+    expect($info)->toEqual(new DocumentInfo($title, $version));
+})->with([
+    'both as JSON strings' => ['{"openapi":"3.2.0","info":{"title":"Orders","version":"1.4.0"},"paths":{}}', 'Orders', '1.4.0'],
+    'both as YAML strings' => ["openapi: 3.2.0\ninfo:\n  title: Orders API\n  version: '2.0'\npaths: {}\n", 'Orders API', '2.0'],
+    'a YAML date, which the reader keeps as the text it was written as' => ["openapi: 3.2.0\ninfo:\n  title: Orders\n  version: 2026-10-01\npaths: {}\n", 'Orders', '2026-10-01'],
+    'text kept as written, space and all' => ['{"openapi":"3.2.0","info":{"title":"  Orders ","version":""},"paths":{}}', '  Orders ', ''],
+    'no version' => ['{"openapi":"3.2.0","info":{"title":"Orders"},"paths":{}}', 'Orders', null],
+    'no title' => ['{"openapi":"3.2.0","info":{"version":"1"},"paths":{}}', null, '1'],
+    'a version of null' => ['{"openapi":"3.2.0","info":{"title":"Orders","version":null},"paths":{}}', 'Orders', null],
+    'a version of true' => ['{"openapi":"3.2.0","info":{"title":"Orders","version":true},"paths":{}}', 'Orders', null],
+    'a version that is a list' => ['{"openapi":"3.2.0","info":{"title":"Orders","version":["1"]},"paths":{}}', 'Orders', null],
+    'a version that is a map' => ['{"openapi":"3.2.0","info":{"title":"Orders","version":{"major":1}},"paths":{}}', 'Orders', null],
+    'a title that is a map' => ['{"openapi":"3.2.0","info":{"title":{},"version":"1"},"paths":{}}', null, '1'],
+    'an info that is a list' => ['{"openapi":"3.2.0","info":["Orders","1"],"paths":{}}', null, null],
+    'an info that is text' => ['{"openapi":"3.2.0","info":"Orders 1","paths":{}}', null, null],
+    'no info at all' => ['{"openapi":"3.2.0","paths":{}}', null, null],
+]);
+
+it('gives a number in the info as the text the document is read as', function (string $written, string $spelt): void {
+    // YAML reads an unquoted version as a number; OpenAPI asks for a string, and a version is too often
+    // written that way to read as none. The text is the one the document's JSON spells the number with —
+    // stated here rather than asked of the inspection — so `1.0`, which YAML reads as the number one, is `1`.
+    $read = (new DocumentReader)->read("openapi: 3.2.0\ninfo:\n  title: {$written}\n  version: {$written}\npaths: {}\n");
+
+    expect($read->inspect()->info)->toEqual(new DocumentInfo($spelt, $spelt))
+        ->and($read->json())->toContain("\"title\": {$spelt},\n")
+        ->and($read->json())->toContain("\"version\": {$spelt}\n");
+})->with([
+    'an integer' => ['2', '2'],
+    'a decimal' => ['1.5', '1.5'],
+    'a decimal YAML reads as an integer value' => ['1.0', '1'],
+    'a negative' => ['-3', '-3'],
+    'an exponent' => ['1e3', '1000'],
+]);
+
+it('reads the info of a full artifact as its JSON states it', function (): void {
+    $bytes = (string) file_get_contents(golden('workbench-content.uir.json'));
+    /** @var array{info: array{title: string, version: string}} $decoded */
+    $decoded = json_decode($bytes, true, flags: JSON_THROW_ON_ERROR);
+
+    expect((new DocumentReader)->read($bytes)->inspect()->info)->toEqual(new DocumentInfo($decoded['info']['title'], $decoded['info']['version']));
+});
+
+it('writes the info as values a store can hold, one member per property', function (): void {
+    $info = new DocumentInfo('Orders', '1.4.0');
+
+    expect($info->toArray())->toBe(['title' => 'Orders', 'version' => '1.4.0'])
+        ->and((new DocumentInfo)->toArray())->toBe(['title' => null, 'version' => null])
+        ->and(array_keys($info->toArray()))->toBe(array_map(
+            static fn (ReflectionParameter $parameter): string => $parameter->getName(),
+            (new ReflectionMethod(DocumentInfo::class, '__construct'))->getParameters(),
         ));
 });
 
