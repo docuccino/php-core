@@ -42,7 +42,15 @@ Compare two documents over their identities, and classify what moved:
 use Docuccino\Core\Diff\DocumentDiffer;
 
 $changes = (new DocumentDiffer())->diff($oldDocument, $newDocument);
+
+foreach ($changes->changes as $change) {
+    $change->path;                   // 'GET /pets/{id} responses 200 application/json schema.properties.name'
+    $change->subject?->toArray();    // ['kind' => 'operation', 'method' => 'GET', 'path' => '/pets/{id}']
+}
 ```
+
+A change's `subject` is what it is about — an operation, a component, a page — as members, so changes
+group without taking `path` apart, where a dot in a component name reads like a step into it.
 
 Read a document someone else wrote — a full artifact, an export, or any OpenAPI 3.x description, as
 JSON or YAML — and ask what it is, where it fails its specification, and what it holds:

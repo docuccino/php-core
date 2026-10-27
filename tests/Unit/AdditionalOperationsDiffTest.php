@@ -96,13 +96,15 @@ it('diffs a custom operation as it diffs the same operation under get', function
     $custom = $said($changes('COPY'));
 
     // Under `get`, which the rest of the suite holds to the contract: the edit is what each row says it is.
-    expect(array_combine(array_column($fixed, 'code'), array_column($fixed, 'breaking')))->toEqualCanonicalizing($codes);
+    expect(array_combine(array_column($fixed, 'code'), array_column($fixed, 'breaking')))->toEqualCanonicalizing($codes)
+        ->and(array_column($fixed, 'subject'))->each->toBe(['kind' => 'operation', 'method' => 'GET', 'path' => '/forms/{form}']);
 
-    // A custom method's are the same changes, flagged the same way, at the same nodes: its path names the
-    // method it sends where `get`'s names `GET`, and with no identity to pair on its key is where it is
-    // written. Identities are the operation's own either way.
+    // A custom method's are the same changes, flagged the same way, at the same nodes: its path and its
+    // subject name the method it sends where `get`'s name `GET`, and with no identity to pair on its key is
+    // where it is written. Identities are the operation's own either way.
     $expected = array_map(static function (array $change) use ($ids): array {
         $change['path'] = 'COPY'.substr($change['path'], strlen('GET'));
+        $change['subject'] = ['kind' => 'operation', 'method' => 'COPY', 'path' => '/forms/{form}'];
         if (! $ids) {
             $change['id'] = '_additionalOperations/COPY'.substr($change['id'], strlen('_GET'));
         }

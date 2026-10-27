@@ -102,6 +102,9 @@ final class SchemaComparator
      */
     private array $open = [];
 
+    /** What the walk's changes are about: the caller's to name, as `$path` and `$id` are. */
+    private ?ChangeSubject $subject = null;
+
     /**
      * The two documents' component buckets, or null for a caller comparing two loose schemas — which is
      * every caller that has no document to resolve against, and for which a pointer is the whole of what
@@ -116,14 +119,16 @@ final class SchemaComparator
      * Two Schema Objects at one position. `mixed`, because a Schema Object may be a BOOLEAN at every
      * position OpenAPI puts one — a media type's `schema` as much as an `items` inside it.
      *
-     * A caller with both documents in hand passes their resolvers, and gets a walk of its own so the
-     * open-pair set of one position never reaches the next.
+     * A caller with both documents in hand passes their resolvers, and one that knows what the position is
+     * on passes that as `$subject`. Every call is a walk of its own, so neither the open-pair set nor the
+     * subject of one position reaches the next.
      *
      * @return list<Change>
      */
-    public function compare(mixed $old, mixed $new, string $path, string $id, bool $request, ?ComponentRefs $oldRefs = null, ?ComponentRefs $newRefs = null): array
+    public function compare(mixed $old, mixed $new, string $path, string $id, bool $request, ?ComponentRefs $oldRefs = null, ?ComponentRefs $newRefs = null, ?ChangeSubject $subject = null): array
     {
-        $walk = $oldRefs === null || $newRefs === null ? $this : new self($oldRefs, $newRefs);
+        $walk = $oldRefs === null || $newRefs === null ? new self($this->oldRefs, $this->newRefs) : new self($oldRefs, $newRefs);
+        $walk->subject = $subject;
 
         return $walk->compareSubschema($old, $new, $path, $id, $request);
     }
@@ -1043,7 +1048,7 @@ final class SchemaComparator
         foreach ($changes as $change) {
             $out[] = $change->breaking || $change->code === 'schema.annotation-changed'
                 ? $change
-                : new Change($change->kind, $change->target, $change->id, $change->path, true, $change->code, $change->fields);
+                : new Change($change->kind, $change->target, $change->id, $change->path, true, $change->code, $change->fields, $change->subject);
         }
 
         return $out;
@@ -1177,7 +1182,7 @@ final class SchemaComparator
     {
         $fields = $field === null ? [] : [new FieldChange($field, $old, $new)];
 
-        return new Change($kind, ChangeTarget::Schema, $id, $path, $breaking, $code, $fields);
+        return new Change($kind, ChangeTarget::Schema, $id, $path, $breaking, $code, $fields, $this->subject);
     }
 
     /**

@@ -8,6 +8,9 @@ namespace Docuccino\Core\Diff;
  * A single semantic change between two documents: what kind of change, on which target node
  * (identified by its stable `x-docuccino.id` where available), a human-readable path, whether it is
  * a breaking change, a stable classification `code`, and any field-level detail.
+ *
+ * `subject` is what the change is about — the operation, component, page or path item its `path` opens
+ * with — as members. {@see DocumentDiffer} states one on every change; null only on one built without.
  */
 final readonly class Change
 {
@@ -22,6 +25,7 @@ final readonly class Change
         public bool $breaking,
         public string $code,
         public array $fields = [],
+        public ?ChangeSubject $subject = null,
     ) {}
 
     /**
@@ -34,6 +38,7 @@ final readonly class Change
             'target' => $this->target->value,
             'id' => $this->id,
             'path' => $this->path,
+            'subject' => $this->subject?->toArray(),
             'breaking' => $this->breaking,
             'code' => $this->code,
         ];

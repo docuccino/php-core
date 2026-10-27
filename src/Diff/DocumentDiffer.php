@@ -21,7 +21,7 @@ use Docuccino\Core\Support\Json;
  * diffed by one machinery, at a fixed method or a custom one ({@see PathOperations}) — their
  * parameters/responses/request bodies, named component schemas, security schemes and content pages,
  * delegating field-level schema comparison to {@see SchemaComparator}, and flags each {@see Change}
- * breaking or not.
+ * breaking or not. Each names its subject ({@see ChangeSubject}) off the side its path is read from.
  *
  * Responses, parameters, request bodies, path items and SCHEMAS are read through {@see ComponentRefs} on
  * both sides, so where one lives — inline or hoisted into `components` — is not itself a change, while a
@@ -48,7 +48,7 @@ use Docuccino\Core\Support\Json;
  * Every node's id is read through {@see NodeIdentity}, which knows both forms an artifact can carry, and
  * keyed through {@see IdentityKeys}, which owns what happens when two nodes claim one key.
  *
- * @phpstan-type OperationEntry array{path: string, method: string, op: Operation, shared: list<Parameter>}
+ * @phpstan-type OperationEntry array{path: string, method: string, op: Operation, shared: list<Parameter>, subject: ChangeSubject}
  */
 final class DocumentDiffer
 {
@@ -150,11 +150,12 @@ final class DocumentDiffer
         $newUnresolved = $this->unresolvedPathItems($new, $newRefs);
 
         foreach (Arr::sortedUnion(array_keys($oldUnresolved), array_keys($newUnresolved)) as $path) {
-            $oldRef = $oldUnresolved[$path] ?? null;
-            $newRef = $newUnresolved[$path] ?? null;
+            [$oldRef, $oldSubject] = $oldUnresolved[$path] ?? [null, null];
+            [$newRef, $newSubject] = $newUnresolved[$path] ?? [null, null];
+            $subject = $newSubject ?? $oldSubject;
 
             if (! UnresolvedRef::same($oldRef, $newRef)) {
-                $changes[] = new Change(ChangeKind::Changed, ChangeTarget::Operation, 'pathItem:'.$path, $path, self::unresolvedBreaks($oldRef, $newRef), 'pathItem.unresolved-ref', [new FieldChange('$ref', $oldRef?->ref, $newRef?->ref)]);
+                $changes[] = new Change(ChangeKind::Changed, ChangeTarget::Operation, 'pathItem:'.$path, $path, self::unresolvedBreaks($oldRef, $newRef), 'pathItem.unresolved-ref', [new FieldChange('$ref', $oldRef?->ref, $newRef?->ref)], $subject);
             }
         }
 
@@ -170,9 +171,9 @@ final class DocumentDiffer
             $inNew = array_key_exists($key, $newOps);
 
             if (! $inNew) {
-                $changes[] = new Change(ChangeKind::Removed, ChangeTarget::Operation, $key, $this->display($oldOps[$key]), true, 'operation.removed');
+                $changes[] = new Change(ChangeKind::Removed, ChangeTarget::Operation, $key, $this->display($oldOps[$key]), true, 'operation.removed', subject: $oldOps[$key]['subject']);
             } elseif (! $inOld) {
-                $changes[] = new Change(ChangeKind::Added, ChangeTarget::Operation, $key, $this->display($newOps[$key]), false, 'operation.added');
+                $changes[] = new Change(ChangeKind::Added, ChangeTarget::Operation, $key, $this->display($newOps[$key]), false, 'operation.added', subject: $newOps[$key]['subject']);
             } else {
                 $this->diffOperationPair($key, $oldOps[$key], $newOps[$key], $oldRefs, $newRefs, $changes, $pairing);
             }
@@ -187,22 +188,23 @@ final class DocumentDiffer
     private function diffOperationPair(string $id, array $old, array $new, ComponentRefs $oldRefs, ComponentRefs $newRefs, array &$changes, Pairing $pairing): void
     {
         $path = $this->display($new);
+        $subject = $new['subject'];
         $oldOp = $old['op'];
         $newOp = $new['op'];
 
-        $this->scalarChange($changes, ChangeTarget::Operation, $id, $path, 'operation.operationId-changed', 'operationId', $oldOp->operationId, $newOp->operationId);
-        $this->scalarChange($changes, ChangeTarget::Operation, $id, $path, 'operation.summary-changed', 'summary', $oldOp->summary, $newOp->summary);
-        $this->scalarChange($changes, ChangeTarget::Operation, $id, $path, 'operation.description-changed', 'description', $oldOp->description, $newOp->description);
-        $this->scalarChange($changes, ChangeTarget::Operation, $id, $path, 'operation.deprecated-changed', 'deprecated', $oldOp->deprecated, $newOp->deprecated);
+        $this->scalarChange($changes, ChangeTarget::Operation, $id, $path, $subject, 'operation.operationId-changed', 'operationId', $oldOp->operationId, $newOp->operationId);
+        $this->scalarChange($changes, ChangeTarget::Operation, $id, $path, $subject, 'operation.summary-changed', 'summary', $oldOp->summary, $newOp->summary);
+        $this->scalarChange($changes, ChangeTarget::Operation, $id, $path, $subject, 'operation.description-changed', 'description', $oldOp->description, $newOp->description);
+        $this->scalarChange($changes, ChangeTarget::Operation, $id, $path, $subject, 'operation.deprecated-changed', 'deprecated', $oldOp->deprecated, $newOp->deprecated);
 
         if ($oldOp->tags !== $newOp->tags) {
-            $changes[] = new Change(ChangeKind::Changed, ChangeTarget::Operation, $id, $path, false, 'operation.tags-changed', [new FieldChange('tags', $oldOp->tags, $newOp->tags)]);
+            $changes[] = new Change(ChangeKind::Changed, ChangeTarget::Operation, $id, $path, false, 'operation.tags-changed', [new FieldChange('tags', $oldOp->tags, $newOp->tags)], $subject);
         }
 
-        $this->diffSecurity($id, $path, $oldOp, $newOp, $changes);
-        $this->diffParameters($id, $path, $old, $new, $oldRefs, $newRefs, $changes, $pairing);
-        $this->diffResponses($id, $path, $oldOp, $newOp, $oldRefs, $newRefs, $changes);
-        $this->diffRequestBody($id, $path, $oldOp, $newOp, $oldRefs, $newRefs, $changes);
+        $this->diffSecurity($id, $path, $subject, $oldOp, $newOp, $changes);
+        $this->diffParameters($id, $path, $subject, $old, $new, $oldRefs, $newRefs, $changes, $pairing);
+        $this->diffResponses($id, $path, $subject, $oldOp, $newOp, $oldRefs, $newRefs, $changes);
+        $this->diffRequestBody($id, $path, $subject, $oldOp, $newOp, $oldRefs, $newRefs, $changes);
     }
 
     /**
@@ -212,20 +214,20 @@ final class DocumentDiffer
      *
      * @param  list<Change>  $changes
      */
-    private function diffSecurity(string $opId, string $path, Operation $old, Operation $new, array &$changes): void
+    private function diffSecurity(string $opId, string $path, ChangeSubject $subject, Operation $old, Operation $new, array &$changes): void
     {
         $oldReqs = self::securityRequirementKeys($old);
         $newReqs = self::securityRequirementKeys($new);
 
         foreach (array_keys($newReqs) as $key) {
             if (! array_key_exists($key, $oldReqs)) {
-                $changes[] = new Change(ChangeKind::Added, ChangeTarget::Operation, $opId, $path.' security', true, 'operation.security-added', [new FieldChange('security', null, $newReqs[$key])]);
+                $changes[] = new Change(ChangeKind::Added, ChangeTarget::Operation, $opId, $path.' security', true, 'operation.security-added', [new FieldChange('security', null, $newReqs[$key])], $subject);
             }
         }
 
         foreach (array_keys($oldReqs) as $key) {
             if (! array_key_exists($key, $newReqs)) {
-                $changes[] = new Change(ChangeKind::Removed, ChangeTarget::Operation, $opId, $path.' security', false, 'operation.security-removed', [new FieldChange('security', $oldReqs[$key], null)]);
+                $changes[] = new Change(ChangeKind::Removed, ChangeTarget::Operation, $opId, $path.' security', false, 'operation.security-removed', [new FieldChange('security', $oldReqs[$key], null)], $subject);
             }
         }
     }
@@ -259,7 +261,7 @@ final class DocumentDiffer
      * @param  OperationEntry  $new
      * @param  list<Change>  $changes
      */
-    private function diffParameters(string $opId, string $path, array $old, array $new, ComponentRefs $oldRefs, ComponentRefs $newRefs, array &$changes, Pairing $pairing): void
+    private function diffParameters(string $opId, string $path, ChangeSubject $subject, array $old, array $new, ComponentRefs $oldRefs, ComponentRefs $newRefs, array &$changes, Pairing $pairing): void
     {
         [$oldParams, $newParams] = IdentityKeys::pairLeftoversByStructure(
             $this->parameterEntries($old, $oldRefs, $pairing),
@@ -272,14 +274,14 @@ final class DocumentDiffer
 
             if (! $inNew) {
                 $param = $oldParams[$key];
-                $changes[] = new Change(ChangeKind::Removed, ChangeTarget::Parameter, self::nodeId(self::parameterId($param), $opId, $key), $path.' parameters '.self::paramLabel($param), true, 'parameter.removed');
+                $changes[] = new Change(ChangeKind::Removed, ChangeTarget::Parameter, self::nodeId(self::parameterId($param), $opId, $key), $path.' parameters '.self::paramLabel($param), true, 'parameter.removed', subject: $subject);
             } elseif (! $inOld) {
                 $param = $newParams[$key];
                 $breaking = self::requires($param);
                 $code = $breaking ? 'parameter.added-required' : 'parameter.added';
-                $changes[] = new Change(ChangeKind::Added, ChangeTarget::Parameter, self::nodeId(self::parameterId($param), $opId, $key), $path.' parameters '.self::paramLabel($param), $breaking, $code);
+                $changes[] = new Change(ChangeKind::Added, ChangeTarget::Parameter, self::nodeId(self::parameterId($param), $opId, $key), $path.' parameters '.self::paramLabel($param), $breaking, $code, subject: $subject);
             } else {
-                $this->diffParameterPair($opId, $path, $key, $oldParams[$key], $newParams[$key], $oldRefs, $newRefs, $changes);
+                $this->diffParameterPair($opId, $path, $subject, $key, $oldParams[$key], $newParams[$key], $oldRefs, $newRefs, $changes);
             }
         }
     }
@@ -297,18 +299,18 @@ final class DocumentDiffer
     /**
      * @param  list<Change>  $changes
      */
-    private function diffParameterPair(string $opId, string $path, string $key, Parameter $old, Parameter $new, ComponentRefs $oldRefs, ComponentRefs $newRefs, array &$changes): void
+    private function diffParameterPair(string $opId, string $path, ChangeSubject $subject, string $key, Parameter $old, Parameter $new, ComponentRefs $oldRefs, ComponentRefs $newRefs, array &$changes): void
     {
         $id = self::nodeId(self::parameterId($new), $opId, $key);
         $paramPath = $path.' parameters '.self::paramLabel($new);
 
         if (! self::requires($old) && self::requires($new)) {
-            $changes[] = new Change(ChangeKind::Changed, ChangeTarget::Parameter, $id, $paramPath, true, 'parameter.became-required', [new FieldChange('required', $old->required, $new->required)]);
+            $changes[] = new Change(ChangeKind::Changed, ChangeTarget::Parameter, $id, $paramPath, true, 'parameter.became-required', [new FieldChange('required', $old->required, $new->required)], $subject);
         } elseif (self::requires($old) && ! self::requires($new)) {
-            $changes[] = new Change(ChangeKind::Changed, ChangeTarget::Parameter, $id, $paramPath, false, 'parameter.became-optional', [new FieldChange('required', $old->required, $new->required)]);
+            $changes[] = new Change(ChangeKind::Changed, ChangeTarget::Parameter, $id, $paramPath, false, 'parameter.became-optional', [new FieldChange('required', $old->required, $new->required)], $subject);
         }
 
-        $this->scalarChange($changes, ChangeTarget::Parameter, $id, $paramPath, 'parameter.description-changed', 'description', $old->description, $new->description);
+        $this->scalarChange($changes, ChangeTarget::Parameter, $id, $paramPath, $subject, 'parameter.description-changed', 'description', $old->description, $new->description);
 
         // A boolean travels to the comparator as itself: `false` is the one schema value compared as
         // itself, and flattening it to `[]` reads "nothing is valid" as "anything is". An ABSENT schema
@@ -316,7 +318,7 @@ final class DocumentDiffer
         $oldSchema = is_bool($old->schema) ? $old->schema : $old->schema?->toArray() ?? [];
         $newSchema = is_bool($new->schema) ? $new->schema : $new->schema?->toArray() ?? [];
 
-        foreach ($this->schemas->compare($oldSchema, $newSchema, $paramPath.' schema', $id, request: true, oldRefs: $oldRefs, newRefs: $newRefs) as $change) {
+        foreach ($this->schemas->compare($oldSchema, $newSchema, $paramPath.' schema', $id, request: true, oldRefs: $oldRefs, newRefs: $newRefs, subject: $subject) as $change) {
             $changes[] = $change;
         }
     }
@@ -324,7 +326,7 @@ final class DocumentDiffer
     /**
      * @param  list<Change>  $changes
      */
-    private function diffResponses(string $opId, string $path, Operation $old, Operation $new, ComponentRefs $oldRefs, ComponentRefs $newRefs, array &$changes): void
+    private function diffResponses(string $opId, string $path, ChangeSubject $subject, Operation $old, Operation $new, ComponentRefs $oldRefs, ComponentRefs $newRefs, array &$changes): void
     {
         $oldResponses = array_map($oldRefs->resolveResponse(...), $old->responses);
         $newResponses = array_map($newRefs->resolveResponse(...), $new->responses);
@@ -335,12 +337,12 @@ final class DocumentDiffer
 
             if (! $inNew) {
                 $response = $oldResponses[$status];
-                $changes[] = new Change(ChangeKind::Removed, ChangeTarget::Response, self::nodeId(self::responseId($response), $opId, $status), $path.' responses '.$status, true, 'response.removed');
+                $changes[] = new Change(ChangeKind::Removed, ChangeTarget::Response, self::nodeId(self::responseId($response), $opId, $status), $path.' responses '.$status, true, 'response.removed', subject: $subject);
             } elseif (! $inOld) {
                 $response = $newResponses[$status];
-                $changes[] = new Change(ChangeKind::Added, ChangeTarget::Response, self::nodeId(self::responseId($response), $opId, $status), $path.' responses '.$status, false, 'response.added');
+                $changes[] = new Change(ChangeKind::Added, ChangeTarget::Response, self::nodeId(self::responseId($response), $opId, $status), $path.' responses '.$status, false, 'response.added', subject: $subject);
             } else {
-                $this->diffResponsePair($opId, $path, $status, $oldResponses[$status], $newResponses[$status], $oldRefs, $newRefs, $changes);
+                $this->diffResponsePair($opId, $path, $subject, $status, $oldResponses[$status], $newResponses[$status], $oldRefs, $newRefs, $changes);
             }
         }
     }
@@ -348,12 +350,12 @@ final class DocumentDiffer
     /**
      * @param  list<Change>  $changes
      */
-    private function diffResponsePair(string $opId, string $path, string $status, ResponseObject $old, ResponseObject $new, ComponentRefs $oldRefs, ComponentRefs $newRefs, array &$changes): void
+    private function diffResponsePair(string $opId, string $path, ChangeSubject $subject, string $status, ResponseObject $old, ResponseObject $new, ComponentRefs $oldRefs, ComponentRefs $newRefs, array &$changes): void
     {
         $id = self::nodeId(self::responseId($new), $opId, $status);
         $responsePath = $path.' responses '.$status;
 
-        $this->scalarChange($changes, ChangeTarget::Response, $id, $responsePath, 'response.description-changed', 'description', $old->description, $new->description);
+        $this->scalarChange($changes, ChangeTarget::Response, $id, $responsePath, $subject, 'response.description-changed', 'description', $old->description, $new->description);
 
         $oldContent = self::contentSchemas($old->content);
         $newContent = self::contentSchemas($new->content);
@@ -365,11 +367,11 @@ final class DocumentDiffer
 
             if (! $inNew) {
                 // Dropping a media type a response used to offer breaks consumers negotiating it.
-                $changes[] = new Change(ChangeKind::Removed, ChangeTarget::Response, $id, $mediaPath, true, 'response.content-removed');
+                $changes[] = new Change(ChangeKind::Removed, ChangeTarget::Response, $id, $mediaPath, true, 'response.content-removed', subject: $subject);
             } elseif (! $inOld) {
-                $changes[] = new Change(ChangeKind::Added, ChangeTarget::Response, $id, $mediaPath, false, 'response.content-added');
+                $changes[] = new Change(ChangeKind::Added, ChangeTarget::Response, $id, $mediaPath, false, 'response.content-added', subject: $subject);
             } else {
-                foreach ($this->schemas->compare($oldContent[$media], $newContent[$media], $mediaPath.' schema', $id, request: false, oldRefs: $oldRefs, newRefs: $newRefs) as $change) {
+                foreach ($this->schemas->compare($oldContent[$media], $newContent[$media], $mediaPath.' schema', $id, request: false, oldRefs: $oldRefs, newRefs: $newRefs, subject: $subject) as $change) {
                     $changes[] = $change;
                 }
             }
@@ -384,13 +386,13 @@ final class DocumentDiffer
      *
      * @param  list<Change>  $changes
      */
-    private function diffRequestBody(string $opId, string $path, Operation $old, Operation $new, ComponentRefs $oldRefs, ComponentRefs $newRefs, array &$changes): void
+    private function diffRequestBody(string $opId, string $path, ChangeSubject $subject, Operation $old, Operation $new, ComponentRefs $oldRefs, ComponentRefs $newRefs, array &$changes): void
     {
         [$oldContent, $oldRef] = self::requestBody($old, $oldRefs);
         [$newContent, $newRef] = self::requestBody($new, $newRefs);
 
         if (! UnresolvedRef::same($oldRef, $newRef)) {
-            $changes[] = new Change(ChangeKind::Changed, ChangeTarget::Operation, $opId, $path.' requestBody', self::unresolvedBreaks($oldRef, $newRef), 'requestBody.unresolved-ref', [new FieldChange('$ref', $oldRef?->ref, $newRef?->ref)]);
+            $changes[] = new Change(ChangeKind::Changed, ChangeTarget::Operation, $opId, $path.' requestBody', self::unresolvedBreaks($oldRef, $newRef), 'requestBody.unresolved-ref', [new FieldChange('$ref', $oldRef?->ref, $newRef?->ref)], $subject);
 
             return;
         }
@@ -400,7 +402,7 @@ final class DocumentDiffer
                 continue;
             }
 
-            foreach ($this->schemas->compare($oldContent[$media], $newContent[$media], $path.' requestBody '.$media.' schema', $opId, request: true, oldRefs: $oldRefs, newRefs: $newRefs) as $change) {
+            foreach ($this->schemas->compare($oldContent[$media], $newContent[$media], $path.' requestBody '.$media.' schema', $opId, request: true, oldRefs: $oldRefs, newRefs: $newRefs, subject: $subject) as $change) {
                 $changes[] = $change;
             }
         }
@@ -452,19 +454,19 @@ final class DocumentDiffer
                 // whatever still declares it, so a removal whose name the new document declares resolves.
                 $dangling = $newReach->reaches($entry['name']) && ! isset($declared[$entry['name']]);
                 $code = $dangling ? 'schema.removed-still-referenced' : 'schema.removed';
-                $changes[] = new Change(ChangeKind::Removed, ChangeTarget::Schema, $key, 'components.schemas.'.$entry['name'], $dangling, $code);
+                $changes[] = new Change(ChangeKind::Removed, ChangeTarget::Schema, $key, 'components.schemas.'.$entry['name'], $dangling, $code, subject: ChangeSubject::schema($entry['name']));
             } elseif (! $inOld) {
                 $entry = $newSchemas[$key];
-                $changes[] = new Change(ChangeKind::Added, ChangeTarget::Schema, $key, 'components.schemas.'.$entry['name'], false, 'schema.added');
+                $changes[] = new Change(ChangeKind::Added, ChangeTarget::Schema, $key, 'components.schemas.'.$entry['name'], false, 'schema.added', subject: ChangeSubject::schema($entry['name']));
             } else {
                 $entry = $newSchemas[$key];
                 $unreachable = ! $oldReach->reaches($oldSchemas[$key]['name']) && ! $newReach->reaches($entry['name']);
                 $requestOnly = $oldDirection->requestOnly($oldSchemas[$key]['name']) && $newDirection->requestOnly($entry['name']);
 
-                foreach ($this->schemas->compare($oldSchemas[$key]['schema'], $entry['schema'], 'components.schemas.'.$entry['name'], $key, request: $requestOnly, oldRefs: $oldRefs, newRefs: $newRefs) as $change) {
+                foreach ($this->schemas->compare($oldSchemas[$key]['schema'], $entry['schema'], 'components.schemas.'.$entry['name'], $key, request: $requestOnly, oldRefs: $oldRefs, newRefs: $newRefs, subject: ChangeSubject::schema($entry['name'])) as $change) {
                     if ($unreachable && $change->breaking) {
                         $unreferenced['components.schemas.'.$entry['name']] = true;
-                        $change = new Change($change->kind, $change->target, $change->id, $change->path, false, $change->code, $change->fields);
+                        $change = new Change($change->kind, $change->target, $change->id, $change->path, false, $change->code, $change->fields, $change->subject);
                     }
 
                     $changes[] = $change;
@@ -501,18 +503,19 @@ final class DocumentDiffer
 
         foreach (Arr::sortedUnion(array_keys($oldSchemes), array_keys($newSchemes)) as $name) {
             $path = 'components.securitySchemes.'.$name;
+            $subject = ChangeSubject::securityScheme($name);
             $inOld = array_key_exists($name, $oldSchemes);
             $inNew = array_key_exists($name, $newSchemes);
 
             if (! $inNew) {
                 // Only what the NEW document still asks for can be left unsatisfiable. A scheme dropped
                 // along with the requirements naming it is an API that stopped asking, which breaks nobody.
-                $changes[] = new Change(ChangeKind::Removed, ChangeTarget::SecurityScheme, self::schemeId($oldSchemes[$name], $name), $path, $newRequired->requires($name), 'securityScheme.removed');
+                $changes[] = new Change(ChangeKind::Removed, ChangeTarget::SecurityScheme, self::schemeId($oldSchemes[$name], $name), $path, $newRequired->requires($name), 'securityScheme.removed', subject: $subject);
             } elseif (! $inOld) {
-                $changes[] = new Change(ChangeKind::Added, ChangeTarget::SecurityScheme, self::schemeId($newSchemes[$name], $name), $path, false, 'securityScheme.added');
+                $changes[] = new Change(ChangeKind::Added, ChangeTarget::SecurityScheme, self::schemeId($newSchemes[$name], $name), $path, false, 'securityScheme.added', subject: $subject);
             } else {
                 $required = $oldRequired->requires($name) || $newRequired->requires($name);
-                $this->diffSecuritySchemePair($name, $path, $oldSchemes[$name], $newSchemes[$name], $required, $changes, $unreferenced);
+                $this->diffSecuritySchemePair($name, $path, $subject, $oldSchemes[$name], $newSchemes[$name], $required, $changes, $unreferenced);
             }
         }
     }
@@ -523,13 +526,13 @@ final class DocumentDiffer
      * @param  list<Change>  $changes
      * @param  array<string, true>  $unreferenced
      */
-    private function diffSecuritySchemePair(string $name, string $path, array $old, array $new, bool $required, array &$changes, array &$unreferenced): void
+    private function diffSecuritySchemePair(string $name, string $path, ChangeSubject $subject, array $old, array $new, bool $required, array &$changes, array &$unreferenced): void
     {
         $id = self::schemeId($new, $name);
 
-        $this->scalarChange($changes, ChangeTarget::SecurityScheme, $id, $path, 'securityScheme.summary-changed', 'summary', $old['summary'] ?? null, $new['summary'] ?? null);
-        $this->scalarChange($changes, ChangeTarget::SecurityScheme, $id, $path, 'securityScheme.description-changed', 'description', $old['description'] ?? null, $new['description'] ?? null);
-        $this->scalarChange($changes, ChangeTarget::SecurityScheme, $id, $path, 'securityScheme.deprecated-changed', 'deprecated', $old['deprecated'] ?? null, $new['deprecated'] ?? null);
+        $this->scalarChange($changes, ChangeTarget::SecurityScheme, $id, $path, $subject, 'securityScheme.summary-changed', 'summary', $old['summary'] ?? null, $new['summary'] ?? null);
+        $this->scalarChange($changes, ChangeTarget::SecurityScheme, $id, $path, $subject, 'securityScheme.description-changed', 'description', $old['description'] ?? null, $new['description'] ?? null);
+        $this->scalarChange($changes, ChangeTarget::SecurityScheme, $id, $path, $subject, 'securityScheme.deprecated-changed', 'deprecated', $old['deprecated'] ?? null, $new['deprecated'] ?? null);
 
         $oldContract = self::schemeContract($old);
         $newContract = self::schemeContract($new);
@@ -550,7 +553,7 @@ final class DocumentDiffer
             $unreferenced[$path] = true;
         }
 
-        $changes[] = new Change(ChangeKind::Changed, ChangeTarget::SecurityScheme, $id, $path, $required, 'securityScheme.changed', $fields);
+        $changes[] = new Change(ChangeKind::Changed, ChangeTarget::SecurityScheme, $id, $path, $required, 'securityScheme.changed', $fields, $subject);
     }
 
     /**
@@ -633,15 +636,19 @@ final class DocumentDiffer
             $inNew = array_key_exists($key, $newPages);
 
             if (! $inNew) {
-                $changes[] = new Change(ChangeKind::Removed, ChangeTarget::ContentPage, $key, 'pages '.self::pageSlug($oldPages[$key]), false, 'page.removed');
+                $slug = self::pageSlug($oldPages[$key]);
+                $changes[] = new Change(ChangeKind::Removed, ChangeTarget::ContentPage, $key, 'pages '.$slug, false, 'page.removed', subject: ChangeSubject::page($slug));
             } elseif (! $inOld) {
-                $changes[] = new Change(ChangeKind::Added, ChangeTarget::ContentPage, $key, 'pages '.self::pageSlug($newPages[$key]), false, 'page.added');
+                $slug = self::pageSlug($newPages[$key]);
+                $changes[] = new Change(ChangeKind::Added, ChangeTarget::ContentPage, $key, 'pages '.$slug, false, 'page.added', subject: ChangeSubject::page($slug));
             } else {
                 $oldPage = $oldPages[$key];
                 $newPage = $newPages[$key];
-                $pagePath = 'pages '.self::pageSlug($newPage);
-                $this->scalarChange($changes, ChangeTarget::ContentPage, $key, $pagePath, 'page.title-changed', 'title', $oldPage['title'] ?? null, $newPage['title'] ?? null);
-                $this->scalarChange($changes, ChangeTarget::ContentPage, $key, $pagePath, 'page.content-changed', 'content', $oldPage['content'] ?? null, $newPage['content'] ?? null);
+                $slug = self::pageSlug($newPage);
+                $pagePath = 'pages '.$slug;
+                $subject = ChangeSubject::page($slug);
+                $this->scalarChange($changes, ChangeTarget::ContentPage, $key, $pagePath, $subject, 'page.title-changed', 'title', $oldPage['title'] ?? null, $newPage['title'] ?? null);
+                $this->scalarChange($changes, ChangeTarget::ContentPage, $key, $pagePath, $subject, 'page.content-changed', 'content', $oldPage['content'] ?? null, $newPage['content'] ?? null);
             }
         }
     }
@@ -649,22 +656,22 @@ final class DocumentDiffer
     /**
      * @param  list<Change>  $changes
      */
-    private function scalarChange(array &$changes, ChangeTarget $target, string $id, string $path, string $code, string $field, mixed $old, mixed $new): void
+    private function scalarChange(array &$changes, ChangeTarget $target, string $id, string $path, ChangeSubject $subject, string $code, string $field, mixed $old, mixed $new): void
     {
         if ($old !== $new) {
-            $changes[] = new Change(ChangeKind::Changed, $target, $id, $path, false, $code, [new FieldChange($field, $old, $new)]);
+            $changes[] = new Change(ChangeKind::Changed, $target, $id, $path, false, $code, [new FieldChange($field, $old, $new)], $subject);
         }
     }
 
     /**
-     * @param  array<string, UnresolvedRef>  $skip  paths no comparison can be made at ({@see diffOperations()})
+     * @param  array<string, array{0: UnresolvedRef, 1: ChangeSubject}>  $skip  paths no comparison can be made at ({@see diffOperations()})
      * @return list<array{0: ?string, 1: string, 2: string, 3: OperationEntry}>
      */
     private function operationEntries(UirDocument $document, ComponentRefs $refs, Pairing $pairing, array $skip): array
     {
         $out = [];
 
-        foreach ($this->operations($document, $refs) as [$op, $method, $written, $path, $shared]) {
+        foreach ($this->operations($document, $refs) as [$op, $method, $written, $path, $shared, $subject]) {
             if (isset($skip[$path])) {
                 continue;
             }
@@ -673,7 +680,7 @@ final class DocumentDiffer
                 $pairing === Pairing::Identity ? self::operationId($op) : null,
                 '_'.$written.' '.$path,
                 self::fingerprint($op->toArray()),
-                ['path' => $path, 'method' => $method, 'op' => $op, 'shared' => $shared],
+                ['path' => $path, 'method' => $method, 'op' => $op, 'shared' => $shared, 'subject' => $subject],
             ];
         }
 
@@ -694,17 +701,18 @@ final class DocumentDiffer
      * Each with the method a client sends, which is what a change's path names, and where it is written
      * below the item, which is what keys it when there is no identity to pair on ({@see PathOperations}).
      *
-     * @return list<array{0: Operation, 1: string, 2: string, 3: string, 4: list<Parameter>}>
+     * @return list<array{0: Operation, 1: string, 2: string, 3: string, 4: list<Parameter>, 5: ChangeSubject}>
      */
     private function operations(UirDocument $document, ComponentRefs $refs): array
     {
         $out = [];
 
-        foreach (self::pathItems($document) as $path => $item) {
+        foreach (self::pathItems($document) as $path => [$item, $webhook]) {
             [$item] = $refs->resolvePathItem($item);
 
             foreach (PathOperations::of($item) as [$method, $written, $op]) {
-                $out[] = [$op, $method, $written, $path, $item->parameters];
+                $subject = $webhook === null ? ChangeSubject::operation($method, $path) : ChangeSubject::webhookOperation($method, $webhook);
+                $out[] = [$op, $method, $written, $path, $item->parameters, $subject];
             }
         }
 
@@ -715,20 +723,21 @@ final class DocumentDiffer
      * A webhook is an operation the API promises to CALL, which is as much a published contract as one it
      * answers, so it is walked with the paths rather than beside them. It is named by a key instead of a
      * URI, and `webhooks.` keeps that key out of the space a path template occupies — a path always begins
-     * with `/`.
+     * with `/`. A change's subject names the webhook by itself ({@see ChangeSubject}), so the key is never
+     * read back.
      *
-     * @return array<string, PathItem>
+     * @return array<string, array{0: PathItem, 1: ?string}> each item with the webhook it is the item of, null for a path
      */
     private static function pathItems(UirDocument $document): array
     {
         $out = [];
 
         foreach ($document->paths ?? [] as $template => $item) {
-            $out[(string) $template] = $item;
+            $out[(string) $template] = [$item, null];
         }
 
         foreach ($document->webhooks ?? [] as $name => $item) {
-            $out['webhooks.'.$name] = $item;
+            $out['webhooks.'.$name] = [$item, (string) $name];
         }
 
         return $out;
@@ -750,19 +759,20 @@ final class DocumentDiffer
     }
 
     /**
-     * Path → the pointer that reached no path item, for every path either document spells with one.
+     * Path → the pointer that reached no path item, and the item as a subject, for every path either document
+     * spells with one.
      *
-     * @return array<string, UnresolvedRef>
+     * @return array<string, array{0: UnresolvedRef, 1: ChangeSubject}>
      */
     private function unresolvedPathItems(UirDocument $document, ComponentRefs $refs): array
     {
         $out = [];
 
-        foreach (self::pathItems($document) as $path => $item) {
+        foreach (self::pathItems($document) as $path => [$item, $webhook]) {
             [, $ref] = $refs->resolvePathItem($item);
 
             if ($ref !== null) {
-                $out[$path] = $ref;
+                $out[$path] = [$ref, $webhook === null ? ChangeSubject::pathItem($path) : ChangeSubject::webhookPathItem($webhook)];
             }
         }
 
