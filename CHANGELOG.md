@@ -7,6 +7,13 @@ User-facing changes to `docuccino/core` — features, fixes, performance work an
 taken from the commit messages scoped `core`. Entries begin after v0.1.2; older history is in
 the [repository](https://github.com/docuccino/docuccino) git log.
 
+## v0.23.2
+
+### Features
+
+- inspecting a document reads the title and version its info states ([#679](https://github.com/docuccino/docuccino/pull/679))
+- name what every diff change is about, so changes group without taking their path apart ([#678](https://github.com/docuccino/docuccino/pull/678))
+
 ## v0.23.1
 
 ### Features
