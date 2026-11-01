@@ -7,6 +7,12 @@ User-facing changes to `docuccino/core` — features, fixes, performance work an
 taken from the commit messages scoped `core`. Entries begin after v0.1.2; older history is in
 the [repository](https://github.com/docuccino/docuccino) git log.
 
+## v0.23.4
+
+### Bug fixes
+
+- an Arazzo description fails on the rules its schema can't state ([#705](https://github.com/docuccino/docuccino/pull/705))
+
 ## v0.23.3
 
 ### Features
