@@ -6,6 +6,7 @@ namespace Docuccino\Core\Reader;
 
 use Docuccino\Core\Canonical\CanonicalJsonSerializer;
 use Docuccino\Core\Reader\Arazzo\ArazzoDescription;
+use Docuccino\Core\Reader\Arazzo\ArazzoRules;
 use Docuccino\Core\Reader\Arazzo\ArazzoVersion;
 use Docuccino\Core\Reader\Arazzo\DescriptionBuilder;
 use Docuccino\Core\SpecValidation\ArazzoMetaSchema;
@@ -56,9 +57,10 @@ final readonly class ReadArazzo
     }
 
     /**
-     * Every place the description fails the Arazzo schema for its version, and every `$components`
-     * reference that resolves to nothing, cut at $max findings, each {@see FindingSource::Arazzo} and placed
-     * in the text as {@see ReadDocument::validate()} places its own. A version with no schema here is one
+     * Every place the description fails the Arazzo schema for its version, every rule Arazzo states that
+     * the schema cannot (unique names and ids, and a step or workflow named that exists: {@see ArazzoRules}),
+     * and every `$components` reference that resolves to nothing, cut at $max findings, each
+     * {@see FindingSource::Arazzo} and placed in the text as {@see ReadDocument::validate()} places its own. A version with no schema here is one
      * finding rather than a check against another version's.
      *
      * Whether a step's operation exists in the description its source names is not asked: that is a
@@ -72,7 +74,7 @@ final readonly class ReadArazzo
 
         $findings = [];
         $truncated = false;
-        foreach ([...$this->schemaFindings(), ...(new DescriptionBuilder($this->document))->unresolved()] as $finding) {
+        foreach ([...$this->schemaFindings(), ...(new DescriptionBuilder($this->document))->unresolved(), ...ArazzoRules::check($this->document)] as $finding) {
             if (SchemaFindings::isOverflow($finding)) {
                 $truncated = true;
             } else {

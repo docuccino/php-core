@@ -240,6 +240,53 @@ it('finds a components reference that names nothing, and leaves it out of the wo
         ->and($step->outcomes)->toBe([]);
 });
 
+it('finds the rules Arazzo states that its schema cannot: unique names and ids, and steps and workflows named that exist', function (): void {
+    $yaml = <<<'YAML'
+        arazzo: 1.1.0
+        info: {title: Rules, version: '1'}
+        sourceDescriptions:
+          - {name: api, url: ./api.yaml}
+          - {name: api, url: ./other.yaml}
+        workflows:
+          - workflowId: one
+            dependsOn: [two, missing]
+            steps:
+              - stepId: first
+                operationId: a
+                onSuccess:
+                  - {name: on, type: goto, stepId: nowhere}
+                onFailure:
+                  - {name: elsewhere, type: goto, workflowId: '$sourceDescriptions.api.other'}
+              - stepId: first
+                workflowId: gone
+          - workflowId: one
+            steps:
+              - {stepId: only, operationId: b}
+          - workflowId: two
+            failureActions:
+              - {name: back, type: goto, stepId: only}
+            steps:
+              - {stepId: only, operationId: c}
+        components:
+          successActions:
+            next: {name: next, type: goto, workflowId: absent}
+        YAML;
+
+    $findings = (new ArazzoReader)->read($yaml)->validate()->findings;
+
+    expect(array_map(arazzoFindingRow(...), $findings))->toBe([
+        ['/sourceDescriptions/1/name', 'name', ['line' => 5, 'column' => 6]],
+        ['/workflows/1/workflowId', 'workflowId', ['line' => 18, 'column' => 5]],
+        ['/workflows/0/dependsOn/1', 'workflowId', ['line' => 8, 'column' => 22]],
+        ['/workflows/0/steps/1/stepId', 'stepId', ['line' => 16, 'column' => 9]],
+        ['/workflows/0/steps/0/onSuccess/0/stepId', 'stepId', ['line' => 13, 'column' => 36]],
+        ['/workflows/0/steps/1/workflowId', 'workflowId', ['line' => 17, 'column' => 9]],
+        ['/components/successActions/next/workflowId', 'workflowId', ['line' => 28, 'column' => 36]],
+    ])->and($findings[0]->message)->toBe('"api" is already the name of an earlier source description; each must be unique.')
+        ->and($findings[4]->message)->toBe('"nowhere" names no step in this workflow.')
+        ->and($findings[5]->message)->toBe('"gone" names no workflow in this description.');
+});
+
 it('reports a version it has no schema for as the one finding, rather than check it against another', function (?string $declared, string $pointer): void {
     $read = (new ArazzoReader)->read(($declared === null ? '' : "arazzo: {$declared}\n")."info: {title: T, version: '1'}\n");
     $findings = $read->validate()->findings;
