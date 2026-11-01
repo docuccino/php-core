@@ -21,12 +21,15 @@ use Docuccino\Core\SpecValidation\EmittedSpecCheck;
  *
  * Output flows through the shared canonical serializer, so 3.2 emission is byte-deterministic and,
  * with default options, round-trips losslessly against the x-docuccino-stripped UIR — bar the one
- * member the UIR carries more loosely than any OpenAPI version accepts ({@see ServerVariables}).
+ * member the UIR carries more loosely than any OpenAPI version accepts ({@see ServerVariables}), and a
+ * document read at 3.0, which is restated in 3.2's meaning ({@see OpenApi30Upgrade}).
  *
  * @internal
  */
 final readonly class OpenApi32Emitter implements ReportingEmitter
 {
+    private const string VERSION = '3.2.0';
+
     /**
      * The members outside a schema that hold one: a parameter's, a header's and a media type's `schema`,
      * and 3.2's `itemSchema`. `components.schemas` is the name map that holds them.
@@ -50,9 +53,10 @@ final readonly class OpenApi32Emitter implements ReportingEmitter
     }
 
     /**
-     * 3.2 is the UIR's own OAS version, so nothing is downlevelled. What it can still report is a
-     * document member no OpenAPI version accepts as written ({@see ServerVariables} is the only one),
-     * and any way the artifact fails its own published schema ({@see EmittedSpecCheck}).
+     * 3.2 is the UIR's own OAS version, so nothing is downlevelled. What it can still report is what a
+     * document read at 3.0 meant ({@see OpenApi30Upgrade}), a document member no OpenAPI version accepts
+     * as written ({@see ServerVariables}), and any way the artifact fails its own published schema
+     * ({@see EmittedSpecCheck}).
      */
     public function emitWithReport(UirDocument $document, EmitOptions $options = new EmitOptions): EmitResult
     {
@@ -60,7 +64,7 @@ final readonly class OpenApi32Emitter implements ReportingEmitter
         $diagnostics = [];
 
         $canonical = $this->canonicalizer->canonicalize(
-            ServerVariables::complete($this->toOpenApiArray($document, $options), $diagnostics),
+            ServerVariables::complete($this->toOpenApiArray($document, $diagnostics, $options), $diagnostics),
         );
 
         // Checked in the carrier it is WRITTEN in, so the YAML writer answers for its own bytes.
@@ -73,13 +77,17 @@ final readonly class OpenApi32Emitter implements ReportingEmitter
     }
 
     /**
-     * The pure OpenAPI 3.2 array (pre-canonicalisation), reused by the 3.1 downlevel emitter.
+     * The pure OpenAPI 3.2 array (pre-canonicalisation), reused by the 3.1 downlevel emitter. A document
+     * read at 3.0 is restated in 3.2's meaning first ({@see OpenApi30Upgrade}), so every emitter chaining
+     * off this one reads the same thing.
      *
+     * @param  list<Diagnostic>  $diagnostics
+     * @param  bool  $for30  whether the array is headed for a 3.0 artifact ({@see OpenApi30Upgrade::upgrade()})
      * @return array<string, mixed>
      */
-    public function toOpenApiArray(UirDocument $document, EmitOptions $options = new EmitOptions): array
+    public function toOpenApiArray(UirDocument $document, array &$diagnostics, EmitOptions $options = new EmitOptions, bool $for30 = false): array
     {
-        $array = $document->toArray();
+        $array = OpenApi30Upgrade::upgrade($document->toArray(), $diagnostics, $for30);
 
         // A compatibility strip, not dead code: UIR 2.0 writes neither member, but the adapter's
         // VIEWER hydrates a committed artifact and re-emits it, and one written before 2.0 carries
@@ -88,6 +96,9 @@ final readonly class OpenApi32Emitter implements ReportingEmitter
         // them. The viewer is the whole of that reach, which is what this comment used to overstate:
         // the diff commands hydrate a committed artifact too, and never emit one.
         unset($array['$schema'], $array['uir']);
+
+        // A document read at 3.0 or 3.1 is published as 3.2, so it says so.
+        $array['openapi'] = self::VERSION;
 
         /** @var array<string, mixed> $stripped */
         $stripped = $this->strip($array, $options);

@@ -225,14 +225,21 @@ it('classifies each composition and conditional keyword in both directions', fun
         ['schema.any-of-branch-removed'], ['schema.any-of-branch-removed!'],
     ],
     // The starkest shape of the same defect: read branch-by-branch this was two non-breaking findings
-    // while every string over three characters had started being rejected. The `type` leaving the root
+    // while every string of four to nine characters had started being rejected. The `type` leaving the root
     // is a widening of its own — nothing at the root states the instance type any more — so on a
     // response it gates too, and on a request the union arriving is what carries the finding.
     'oneOf: keyword arrived over a plain type' => [
         ['type' => 'string'],
-        ['oneOf' => [['type' => 'string', 'maxLength' => 3]]],
+        ['oneOf' => [['type' => 'string', 'maxLength' => 3], ['type' => 'string', 'minLength' => 10]]],
         ['schema.one-of-branch-added!', 'schema.type-removed'],
         ['schema.one-of-branch-added!', 'schema.type-removed!'],
+    ],
+    // One branch, though, is exactly that branch — exactly one of one schema is that schema — so the
+    // whole edit is the `maxLength` arriving, and nothing about the type moved.
+    'oneOf: one branch arrived over a plain type' => [
+        ['type' => 'string'],
+        ['oneOf' => [['type' => 'string', 'maxLength' => 3]]],
+        ['schema.refinement-narrowed!'], ['schema.refinement-narrowed!'],
     ],
     'oneOf: keyword left' => [
         ['oneOf' => [['$ref' => '#/components/schemas/A'], ['$ref' => '#/components/schemas/B']]],

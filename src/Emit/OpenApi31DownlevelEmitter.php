@@ -277,14 +277,15 @@ final readonly class OpenApi31DownlevelEmitter implements ReportingEmitter
      * needs the 3.2-only constructs gone before its own restrictions apply.
      *
      * @param  list<Diagnostic>  $diagnostics
+     * @param  bool  $for30  whether the array is headed for a 3.0 artifact ({@see OpenApi30Upgrade::upgrade()})
      * @return array<string, mixed>
      */
-    public function toOpenApiArray(UirDocument $document, array &$diagnostics, EmitOptions $options = new EmitOptions): array
+    public function toOpenApiArray(UirDocument $document, array &$diagnostics, EmitOptions $options = new EmitOptions, bool $for30 = false): array
     {
         // The 3.2 emitter's own array is pre-`ServerVariables` — the Postman emitter reads it too, and a
         // collection answers a defaultless variable its own way — so the OpenAPI answer is applied here,
         // where 3.0 inherits it by chaining off this method.
-        $oas32 = ServerVariables::complete($this->oas32->toOpenApiArray($document, $options), $diagnostics);
+        $oas32 = ServerVariables::complete($this->oas32->toOpenApiArray($document, $diagnostics, $options, $for30), $diagnostics);
 
         return $this->downlevel($oas32, $diagnostics);
     }

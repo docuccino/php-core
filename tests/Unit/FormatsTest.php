@@ -260,6 +260,29 @@ it('says which formats publish an OpenAPI description with the extension strippe
 });
 
 /**
+ * A plain OpenAPI artifact states the version its format names, whatever version the document was read
+ * at. The OpenAPI Specification makes `openapi` the version "that the OpenAPI document uses" and the
+ * member tooling SHOULD interpret the document by, so an `openapi-3.2` artifact that still says `3.0.3`
+ * tells every reader to parse it as 3.0, and fails the 3.2 schema it is checked against. The rule is
+ * read off the format id here rather than off any emitter, so all three formats answer to one statement
+ * of it.
+ */
+it('states the version its format names, whatever version the document was read at', function (string $format, string $source): void {
+    $document = UirDocument::fromArray([
+        'openapi' => $source,
+        'info' => ['title' => 'API', 'version' => '1.0.0'],
+        'paths' => ['/widgets' => ['get' => ['operationId' => 'widgets.index', 'responses' => ['200' => ['description' => 'ok']]]]],
+    ]);
+
+    $result = Formats::emit($format, $document, new EmitOptions);
+    $emitted = json_decode($result->output, true, flags: JSON_THROW_ON_ERROR);
+    $named = preg_quote(substr($format, strlen('openapi-')), '/');
+
+    expect(is_array($emitted) ? $emitted['openapi'] ?? null : null)->toMatch('/^'.$named.'\.\d+$/')
+        ->and(array_map(static fn (Diagnostic $d): string => $d->code, $result->report->diagnostics))->not->toContain('document.openapi-invalid');
+})->with(fn (): array => Formats::plainOpenApi())->with(['3.0.3', '3.1.0', '3.1.1', '3.2.0']);
+
+/**
  * The two artifact columns agree row for row, and until now nothing said so — two guards covering two
  * columns cover their two columns and say nothing about whether they answer alike.
  *

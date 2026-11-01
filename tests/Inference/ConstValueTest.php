@@ -55,8 +55,23 @@ it('leaves an unchained descriptor serialization byte-identical (no chain key)',
         ->and($value->chain)->toBe([]);
 });
 
-it('is a no-op to chain a call onto a non-descriptor', function (): void {
-    expect(ConstValue::scalar('x')->withChainedCall('only', [])->isScalar())->toBeTrue();
+it('is a no-op to chain a call onto a value that is neither a call nor a new', function (): void {
+    expect(ConstValue::scalar('x')->withChainedCall('only', [])->isScalar())->toBeTrue()
+        ->and(ConstValue::array([])->withChainedCall('only', [])->chain)->toBe([]);
+});
+
+it('carries chained calls on an instance, renders them, and round-trips', function (): void {
+    // `(new Enum(Status::class))->only([...])` is the same rule as the factory form, so the narrowing has
+    // to survive on the object as it does on the descriptor. An unchained instance keeps its old bytes.
+    $value = ConstValue::instance('Illuminate\\Validation\\Rules\\Enum', [ConstValue::scalar('App\\Enums\\Status')])
+        ->withChainedCall('only', [ConstValue::array([ConstValue::scalar('Active')])]);
+
+    expect($value->isInstance())->toBeTrue()
+        ->and($value->class)->toBe('Illuminate\\Validation\\Rules\\Enum')
+        ->and($value->chain)->toHaveCount(1)
+        ->and($value->render())->toBe("(new Enum('App\\Enums\\Status'))->only(['Active'])")
+        ->and(ConstValue::fromArray($value->toArray())->toArray())->toBe($value->toArray())
+        ->and(ConstValue::instance('App\\Rules\\Iban', [])->toArray())->not->toHaveKey('chain');
 });
 
 it('round-trips an array of mixed const values', function (): void {
@@ -119,4 +134,19 @@ it('renders and round-trips a spread sitting in a descriptor argument list', fun
 
     expect($value->render())->toBe("Rule::in('any', ...<unplaceable factory arg>)")
         ->and(ConstValue::fromArray($value->toArray())->toArray())->toBe($value->toArray());
+});
+
+it('keeps an enum case whole, with its enum, rather than as its name or its value', function (): void {
+    // Which value a case stands for is the reader's framework's to say, so the fold keeps both halves.
+    $value = ConstValue::enumCase('App\\Enums\\Status', 'Draft');
+
+    expect($value->isCase())->toBeTrue()
+        ->and($value->isScalar())->toBeFalse()
+        ->and($value->class)->toBe('App\\Enums\\Status')
+        ->and($value->caseName())->toBe('Draft')
+        ->and($value->render())->toBe('Status::Draft')
+        ->and($value->toArray())->toBe(['kind' => 'case', 'class' => 'App\\Enums\\Status', 'case' => 'Draft'])
+        ->and(ConstValue::fromArray($value->toArray())->toArray())->toBe($value->toArray())
+        ->and(ConstValue::scalar('Draft')->caseName())->toBeNull()
+        ->and($value->withChainedCall('only', [])->toArray())->toBe($value->toArray());
 });

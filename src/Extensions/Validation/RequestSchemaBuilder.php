@@ -39,6 +39,23 @@ final class RequestSchemaBuilder
         return new ValidationField($node, $this, $path);
     }
 
+    /**
+     * The field a path's trailing `*` segment descends from — the list `tags.*` is an element of, or the
+     * body itself for a bare `*` — or null where the last segment names a member instead.
+     */
+    public function containerOf(string $path): ?ValidationField
+    {
+        $segments = FieldPath::segments($path);
+        if (end($segments) !== '*') {
+            return null;
+        }
+
+        // A last segment of `*` is the written `.*` after the container's own path, escapes and all.
+        return count($segments) === 1
+            ? new ValidationField($this->root, $this, '')
+            : $this->field(substr($path, 0, -2));
+    }
+
     public function markMultipart(): void
     {
         $this->multipart = true;

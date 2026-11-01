@@ -1113,19 +1113,32 @@ it('reads a pointer carrying nothing but annotations as the shape it names', fun
         ->toBe(['schema.annotation-changed', 'schema.annotation-changed', 'schema.added']);
 });
 
-it('leaves a pointer that is not the whole schema compared as written', function (): void {
-    // The recorded limit, pinned rather than left silent. Under 2020-12 a keyword beside a `$ref` still
-    // applies, so the position describes the INTERSECTION of the two and no merge states it; declining to
-    // flatten is the degraded answer, and what it costs is that the move is reported keyword by keyword.
-    // Docuccino spells a hoisted shape as the pointer alone, so nothing it publishes reaches this.
+it('compares a pointer that is not the whole schema in two parts, never flattened', function (): void {
+    // Under 2020-12 a keyword beside a `$ref` still applies, so the position describes the INTERSECTION of
+    // the two and no merge states it. It holds wherever both parts do, so the component is read through
+    // as a bare pointer is and the keyword beside it is compared on its own: the hoisted body is the
+    // inline one, and the floor arriving is the one narrowing.
     $out = diffOf(
+        diffInlineErrorSchema(diffErrorBody()),
+        diffSharedErrorSchema(diffErrorBody(), pointer: ['minProperties' => 1]),
+    );
+
+    expect(array_map(static fn (Change $c): string => $c->code.' @'.$c->path, $out->changes))->toBe([
+        'schema.refinement-narrowed @GET /api/v1/forms responses 404 application/json schema.minProperties',
+        'schema.refinement-narrowed @GET /api/v1/forms/{id} responses 404 application/json schema.minProperties',
+        'schema.added @components.schemas.NotFound',
+    ]);
+
+    // The recorded limit, pinned rather than left silent: the inline side has no keywords beside a
+    // pointer, so one that only restates the component reads as arriving. That over-reports, which costs
+    // the author a look, and never hides a break.
+    $restated = diffOf(
         diffInlineErrorSchema(diffErrorBody()),
         diffSharedErrorSchema(diffErrorBody(), pointer: ['type' => 'object']),
     );
 
-    expect($out->isEmpty())->toBeFalse()
-        ->and(array_map(static fn (Change $c): string => $c->code, $out->changes))
-        ->toContain('schema.property-removed');
+    expect(array_map(static fn (Change $c): string => $c->code, $restated->changes))
+        ->toBe(['schema.type-added', 'schema.type-added', 'schema.added']);
 });
 
 /**
@@ -1268,12 +1281,11 @@ it('lets the outermost pointer of a chain write the annotations the position pub
         ->toBe(['The error body', 'The error body']);
 });
 
-it('leaves a chain through a target that is not the whole schema compared as written', function (): void {
+it('reads a chain through a target that is not the whole schema in two parts', function (): void {
     // The 2020-12 limit, one name in: a keyword beside a `$ref` still applies, so the middle of the chain
-    // is an INTERSECTION no merge states and the resolution stops there rather than flattening to the
-    // half it could write. What the position then publishes is the pointer and the keyword, both — and
-    // pinning that is what proves the stop is a decline rather than a silent loss, since the pre-fix
-    // merge dropped the inner name on the floor.
+    // is an INTERSECTION no merge states and the resolution never flattens it to the half it could write.
+    // It is compared in two parts instead: the inner pointer followed to the body, which is the inline
+    // one, and the floor beside it arriving — the one thing at that 404 that narrowed.
     $intersection = diffChainedErrorSchema();
     $intersection['components']['schemas']['NotFound']['minProperties'] = 1;
 
@@ -1282,13 +1294,7 @@ it('leaves a chain through a target that is not the whole schema compared as wri
     expect(array_map(static fn (Change $c): string => $c->code.' @'.$c->path, $out->changes))
         ->toBe([
             'schema.refinement-narrowed @GET /api/v1/forms responses 404 application/json schema.minProperties',
-            'schema.property-removed @GET /api/v1/forms responses 404 application/json schema.properties.code',
-            'schema.property-removed @GET /api/v1/forms responses 404 application/json schema.properties.message',
-            'schema.type-removed @GET /api/v1/forms responses 404 application/json schema.type',
             'schema.refinement-narrowed @GET /api/v1/forms/{id} responses 404 application/json schema.minProperties',
-            'schema.property-removed @GET /api/v1/forms/{id} responses 404 application/json schema.properties.code',
-            'schema.property-removed @GET /api/v1/forms/{id} responses 404 application/json schema.properties.message',
-            'schema.type-removed @GET /api/v1/forms/{id} responses 404 application/json schema.type',
             'schema.added @components.schemas.NotFound',
             'schema.added @components.schemas.Problem',
         ])

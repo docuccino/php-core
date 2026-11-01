@@ -127,7 +127,7 @@ final readonly class CollectionEmitter implements ReportingEmitter
         // Default options on purpose: a collection is a view of the PUBLISHED contract, so it must read
         // exactly the array the OpenAPI artifact does. Passing the caller's through would let
         // `mockFakerKey` inject hint members into the schemas the example factory then reads.
-        $oas = $this->oas32->toOpenApiArray($document, new EmitOptions);
+        $oas = $this->oas32->toOpenApiArray($document, $diagnostics, new EmitOptions);
 
         $components = Arr::stringKeyed(is_array($oas['components'] ?? null) ? $oas['components'] : []);
         $info = Arr::stringKeyed(is_array($oas['info'] ?? null) ? $oas['info'] : []);

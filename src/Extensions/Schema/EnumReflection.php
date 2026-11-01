@@ -24,6 +24,15 @@ use Throwable;
  */
 final class EnumReflection
 {
+    /** @var array<string, list<ReflectionEnumUnitCase>> each enum's cases, read once: a declared enum never changes */
+    private static array $cases = [];
+
+    /** @var array<string, array<string, string|int>> each enum's {@see values()} by case name */
+    private static array $byName = [];
+
+    /** @var array<string, ?string> each enum's {@see file()} */
+    private static array $files = [];
+
     /**
      * The case values a backed enum exposes (its backing values) or, for a pure enum, its case
      * names — in declaration order.
@@ -33,6 +42,27 @@ final class EnumReflection
     public static function values(string $fqcn): array
     {
         return array_map(self::caseValue(...), self::cases($fqcn));
+    }
+
+    /**
+     * The value {@see values()} lists for the one case named `$case`, or null where the enum has no such
+     * case or is not reflectable.
+     */
+    public static function valueOf(string $fqcn, string $case): string|int|null
+    {
+        if (! isset(self::$byName[$fqcn])) {
+            $cases = self::cases($fqcn);
+
+            if ($cases === []) {
+                return null;
+            }
+
+            foreach ($cases as $reflected) {
+                self::$byName[$fqcn][$reflected->getName()] = self::caseValue($reflected);
+            }
+        }
+
+        return self::$byName[$fqcn][$case] ?? null;
     }
 
     /**
@@ -90,6 +120,10 @@ final class EnumReflection
      */
     public static function file(string $fqcn): ?string
     {
+        if (array_key_exists($fqcn, self::$files)) {
+            return self::$files[$fqcn];
+        }
+
         if (! enum_exists($fqcn)) {
             return null;
         }
@@ -100,7 +134,7 @@ final class EnumReflection
             return null;
         }
 
-        return $file !== false ? $file : null;
+        return self::$files[$fqcn] = $file !== false ? $file : null;
     }
 
     /**
@@ -108,12 +142,16 @@ final class EnumReflection
      */
     private static function cases(string $fqcn): array
     {
+        if (isset(self::$cases[$fqcn])) {
+            return self::$cases[$fqcn];
+        }
+
         if (! enum_exists($fqcn)) {
             return [];
         }
 
         try {
-            return array_values((new ReflectionEnum($fqcn))->getCases());
+            return self::$cases[$fqcn] = array_values((new ReflectionEnum($fqcn))->getCases());
         } catch (Throwable) {
             return [];
         }

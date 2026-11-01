@@ -336,6 +336,24 @@ it('classifies every nullability edit in both directions', function (array $old,
         ['type' => ['string', 'null'], 'nullable' => true],
         [], [],
     ],
+    // 2020-12 spells the same edit in the type union alone, with no keyword on either side: it is the
+    // same null admitted or withdrawn, so it is the same finding, not the silence of a keyword unwritten.
+    'a null admitted in the type union' => [
+        ['type' => 'string'],
+        ['type' => ['string', 'null']],
+        ['schema.nullable-widened'], ['schema.nullable-widened!'],
+    ],
+    'a null withdrawn from the type union' => [
+        ['type' => ['string', 'null']],
+        ['type' => 'string'],
+        ['schema.nullable-narrowed!'], ['schema.nullable-narrowed!'],
+    ],
+    // The null stayed, so what moved is the rest of the set and the type comparison's alone.
+    'a type union that grew beside its null' => [
+        ['type' => ['string', 'null']],
+        ['type' => ['string', 'integer', 'null']],
+        ['schema.type-widened'], ['schema.type-widened!'],
+    ],
     // A value nothing can read as a boolean is not a null admitted or withdrawn.
     'a nullable nothing can read' => [
         ['type' => 'string', 'nullable' => true],
@@ -348,6 +366,17 @@ it('classifies every nullability edit in both directions', function (array $old,
         [], [],
     ],
 ]);
+
+it('says what a null admitted in the type union would have said as `nullable`', function (): void {
+    // No side wrote the keyword, so the fields carry its meaning rather than two absences.
+    $changes = (new SchemaComparator)->compare(['type' => 'string'], ['type' => ['string', 'null']], 'S', 'sch:v1:0000000000000000', false);
+
+    expect($changes)->toHaveCount(1)
+        ->and($changes[0]->path)->toBe('S.nullable')
+        ->and($changes[0]->fields[0]->field)->toBe('nullable')
+        ->and($changes[0]->fields[0]->old)->toBeFalse()
+        ->and($changes[0]->fields[0]->new)->toBeTrue();
+});
 
 it('classifies an identity and a dialect edit in both directions', function (array $old, array $new, array $onRequest, array $onResponse): void {
     expect(schemaDiffCodes($old, $new, request: true))->toBe($onRequest, 'request')

@@ -73,8 +73,8 @@ final class ExampleAudit
             // example was held to a contract that was never there.
             if (! $this->schema->has($schemaSegments)) {
                 $uncheckable[] = new ExampleUncheckable(
-                    Pointer::of($exampleSegments),
-                    Pointer::of($schemaSegments),
+                    $this->index->writtenPointer($exampleSegments),
+                    $this->index->writtenPointer($schemaSegments),
                     $label,
                     'the contract puts no schema beside it',
                 );
@@ -86,8 +86,8 @@ final class ExampleAudit
                 $violations = $this->schema->check($value, $schemaSegments, 'the example');
             } catch (Throwable $refused) {
                 $uncheckable[] = new ExampleUncheckable(
-                    Pointer::of($exampleSegments),
-                    Pointer::of($schemaSegments),
+                    $this->index->writtenPointer($exampleSegments),
+                    $this->index->writtenPointer($schemaSegments),
                     $label,
                     RefusedSchema::reason($refused),
                 );
@@ -101,7 +101,7 @@ final class ExampleAudit
             $checked++;
 
             if ($violations !== []) {
-                $findings[] = new ExampleFinding(Pointer::of($exampleSegments), $label, $violations);
+                $findings[] = new ExampleFinding($this->index->writtenPointer($exampleSegments), $label, $violations);
             }
         }
 

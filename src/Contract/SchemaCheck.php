@@ -503,7 +503,6 @@ final class SchemaCheck
     private function violations(ValidationError $error, array $schemaSegments, string $location): array
     {
         $formatter = new ErrorFormatter;
-        $document = $this->index->document();
 
         $violations = [];
         foreach ($this->leaves($error) as $leaf) {
@@ -515,8 +514,8 @@ final class SchemaCheck
                 location: $location,
                 pointer: $pointer,
                 message: $message,
-                schemaPointer: Pointer::of($segments),
-                provenance: ProvenanceTrail::at($document, $segments),
+                schemaPointer: $this->index->writtenPointer($segments),
+                provenance: $this->index->provenanceAt($segments),
             );
         }
 

@@ -216,7 +216,7 @@ final class ContractChecker
                 pointer: '',
                 message: $absent,
                 schemaPointer: Pointer::of($parameter->segments),
-                provenance: ProvenanceTrail::at($this->index->document(), $parameter->schemaSegments()),
+                provenance: $this->index->provenanceAt($parameter->schemaSegments()),
             )], null];
         }
 
@@ -616,7 +616,7 @@ final class ContractChecker
                 pointer: '',
                 message: 'could not be checked against the contract: '.RefusedSchema::reason($refused),
                 schemaPointer: Pointer::of($schemaSegments),
-                provenance: ProvenanceTrail::at($this->index->document(), $schemaSegments),
+                provenance: $this->index->provenanceAt($schemaSegments),
             )];
         }
     }

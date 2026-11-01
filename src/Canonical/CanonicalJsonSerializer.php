@@ -31,7 +31,7 @@ final class CanonicalJsonSerializer
      * to catch. Every author-controlled reader caps its own input already, so this is the writer refusing
      * in the one way it can be told about instead of the one it cannot.
      */
-    private const int MAX_DEPTH = 128;
+    public const int MAX_DEPTH = 128;
 
     private const int ENCODE_FLAGS = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR;
 

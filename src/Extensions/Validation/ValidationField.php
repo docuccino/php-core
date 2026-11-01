@@ -169,6 +169,12 @@ final readonly class ValidationField
         $this->node->nullable = true;
     }
 
+    /** Whether a rule admitted null ({@see markNullable()}), which {@see types()} never carries. */
+    public function isNullable(): bool
+    {
+        return $this->node->nullable;
+    }
+
     /**
      * The server reads a blank string on this field as the null the field accepts — a request pipeline
      * that turns one into null before any rule runs. `$pattern` matches every string it counts as blank,
@@ -184,6 +190,15 @@ final readonly class ValidationField
     public function refuseBlank(): void
     {
         $this->node->blankRefused = true;
+    }
+
+    /**
+     * The list this field is an element of — `tags` for `tags.*` — or null where the field is a named
+     * member. For a rule that speaks about the elements together, such as one requiring them distinct.
+     */
+    public function container(): ?self
+    {
+        return $this->builder->containerOf($this->path);
     }
 
     /** Flag the whole request as multipart (a `file`/`image` rule was seen). */

@@ -126,7 +126,8 @@ final class SchemaReading
      * here, the way `contains`' own bounds are, because the type set is the comparator's to read.
      *
      * Absent is not nullable, so the keyword arriving with `true` widens and it leaving narrows. A value
-     * that is no boolean is a change nothing can order rather than a null admitted or withdrawn.
+     * that is no boolean is a change nothing can order rather than a null admitted or withdrawn. Unwritten
+     * on both sides it says nothing, and the type union's `null` is {@see SchemaComparator}'s to read.
      *
      * @param  array<string, mixed>  $old
      * @param  array<string, mixed>  $new

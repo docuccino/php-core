@@ -18,9 +18,9 @@ use Docuccino\Core\Provenance\ClassNames;
  * on one property gets the attribute. Callers therefore run this BEFORE that reader, never after.
  *
  * A docblock tag holds text and nothing else, so `@example false` on a `bool` arrives as the string
- * `"false"` and has to be read as the type the schema states. That reading is {@see TypedExample}'s,
- * whole — a literal that does not read as its declared type publishes nothing and says so, because an
- * example is the part of a document a consumer copies into a client.
+ * `"false"` and has to be read as a value the schema accepts, through any `$ref` it carries. That
+ * reading is {@see TypedExample}'s, whole — a literal that reads as nothing the schema accepts publishes
+ * nothing and says so, because an example is the part of a document a consumer copies into a client.
  *
  * Only a NATIVE property carries one: a magic `@property` tag has no docblock of its own for a tag to
  * sit in, so a model's magic columns reach here with nothing to publish, exactly as they reach
@@ -53,6 +53,10 @@ final class DocumentedExamples
         // ({@see ClassNames}).
         $site = ClassNames::publishable($fqcn);
 
+        // What a member's `$ref` names, read so an example is held to the component behind it. Only the
+        // build's own converter registers components; any other context leaves a `$ref` unread.
+        $components = $context instanceof SchemaConverter ? $context->components()->schemas() : [];
+
         foreach ($properties as $property) {
             if ($property->example === null) {
                 continue;
@@ -66,12 +70,13 @@ final class DocumentedExamples
             /** @var array<string, mixed> $schema */
             $schema = $published[$key];
 
-            $example = TypedExample::of($property->example, $schema['type'] ?? null);
+            $example = TypedExample::against($property->example, $schema, $components);
             if ($example === null) {
-                $context->diagnostic(TypedExample::untypable(
+                $context->diagnostic(TypedExample::unreadable(
                     $site.'::$'.$property->name,
                     $property->example,
-                    $schema['type'] ?? null,
+                    $schema,
+                    $components,
                 ));
 
                 continue;

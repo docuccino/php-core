@@ -59,6 +59,7 @@ final class DiagnosticDocs
         'spatie-data' => 'package-integrations',
         'tags' => 'routes-operations-and-names',
         'timacdonald-json-api' => 'package-integrations',
+        'upgrade' => 'reading-an-openapi-30-document',
         'workflow' => 'workflows',
         'validation' => 'responses-recovered-from-your-code',
         'versioning' => 'api-versions',

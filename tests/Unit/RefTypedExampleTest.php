@@ -16,19 +16,24 @@ use Docuccino\Core\Inference\PropertyMetadata;
 use Docuccino\Core\Lint\ExampleSchemaLint;
 use Docuccino\Core\Lint\LintRuleOptions;
 use Docuccino\Core\Tests\Fixtures\DocumentedNode;
+use Docuccino\Core\Tests\Fixtures\SamplePriority;
 use Docuccino\Core\Tests\Fixtures\SampleStatus;
 use Docuccino\Core\Tests\Support\StubTypeEngine;
 
 /**
  * An authored example on a member whose type is carried by a `$ref` — an enum component, alone or inside
- * a nullable `anyOf`. The reading there used to be "the text stands as written", justified on the grounds
- * that nothing a string would violate is stated; a `$ref` to an enum states plenty, so `@example "draft"`
- * published the six characters `"draft"` against an enum of `draft`, which the document's own example
- * lint then reported. This file pins both halves at once: what gets published, and that the lint agrees.
+ * a nullable `anyOf`. A `$ref` states no `type` of its own, and reading the text against that absent
+ * `type` published it as written: `@example "draft"` as the six characters `"draft"` against an enum of
+ * `draft`, `@example null` beside a nullable enum as the four characters `null`, and `@example 2` beside
+ * an integer enum as the string `"2"` — every one of them an example the document's own lint then
+ * reported. An example is a value for the schema as a whole, so it is read against what the member
+ * admits, through the `$ref` to the component behind it. This file pins both halves at once: what gets
+ * published, and that the lint agrees.
  */
 function refTypedExamples(): array
 {
     $status = new EnumT(SampleStatus::class, ['Draft', 'Published']);
+    $priority = new EnumT(SamplePriority::class, ['Low', 'High']);
 
     $components = new ComponentRegistry;
     $engine = new StubTypeEngine(classes: [
@@ -38,9 +43,15 @@ function refTypedExamples(): array
             new PropertyMetadata('placement', UnionT::of([$status, new NullT]), null, '"published"'),
             // Unquoted, and a member: unchanged, because the text already IS the value.
             new PropertyMetadata('plain', $status, null, 'draft'),
-            // Unquoted and NOT a member. The author's mistake, which nothing here can read as anything
-            // else — the lint is what tells them, and it must go on doing so.
+            // `null` beside a nullable enum: the `{type: null}` branch accepts the null, and no case is
+            // the four characters `null`.
+            new PropertyMetadata('cleared', UnionT::of([$status, new NullT]), null, 'null'),
+            // An integer-backed enum lists numbers, so only the number is a member of it.
+            new PropertyMetadata('priority', $priority, null, '2'),
+            new PropertyMetadata('escalation', UnionT::of([$priority, new NullT]), null, '1'),
+            // Unquoted and NOT a member: no reading of the text is a value the enum lists.
             new PropertyMetadata('wrong', $status, null, 'active'),
+            new PropertyMetadata('outranked', $priority, null, '9'),
         ]),
     ]);
 
@@ -52,15 +63,36 @@ function refTypedExamples(): array
 
 it('publishes an example on a $ref-typed member as the value the enum behind it carries', function (string $property, mixed $expected): void {
     [$schemas] = refTypedExamples();
+    $member = $schemas['DocumentedNode']['properties'][$property];
 
-    expect($schemas['DocumentedNode']['properties'][$property]['example'] ?? 'nothing published')->toBe($expected);
+    // `??` would read a published null as no example at all, which is the one case here that has to be
+    // told apart from absence.
+    expect(array_key_exists('example', $member))->toBeTrue()
+        ->and($member['example'])->toBe($expected);
 })->with([
     'a bare $ref' => ['state', 'draft'],
     'a nullable anyOf around one' => ['placement', 'published'],
     'unquoted, already the value' => ['plain', 'draft'],
-    // The control, published exactly as authored so the lint has something true to report.
-    'unquoted and not a member' => ['wrong', 'active'],
+    'null, beside a nullable enum' => ['cleared', null],
+    'a number, beside an integer enum' => ['priority', 2],
+    'a number, beside a nullable integer enum' => ['escalation', 1],
 ]);
+
+it('publishes nothing where no reading is a member, and names the values the enum lists', function (): void {
+    // Publishing `active` would hand a consumer an example their own API rejects, which is worse than
+    // none; the author is told instead, with the values they can choose from.
+    [$schemas, $components] = refTypedExamples();
+    $properties = $schemas['DocumentedNode']['properties'];
+
+    $messages = array_map(static fn ($d): string => $d->message, $components->diagnostics());
+
+    expect($properties['wrong'])->not->toHaveKey('example')
+        ->and($properties['outranked'])->not->toHaveKey('example')
+        ->and($messages)->toBe([
+            'The example on '.DocumentedNode::class.'::$wrong ("active") does not read as "draft"/"published", so none is published.',
+            'The example on '.DocumentedNode::class.'::$outranked ("9") does not read as 1/2, so none is published.',
+        ]);
+});
 
 it('leaves the schema of a $ref-typed member alone while writing the example beside it', function (): void {
     // The example is written ONTO the member, so the `$ref` and the `anyOf` have to survive it: an
@@ -69,17 +101,17 @@ it('leaves the schema of a $ref-typed member alone while writing the example bes
     $properties = $schemas['DocumentedNode']['properties'];
 
     expect($properties['state']['$ref'])->toBe('#/components/schemas/SampleStatus')
-        ->and($properties['placement']['anyOf'])->toBe([
+        ->and($properties['cleared']['anyOf'])->toBe([
             ['$ref' => '#/components/schemas/SampleStatus'],
             ['type' => 'null'],
         ])
-        ->and($schemas['SampleStatus']['enum'])->toBe(['draft', 'published']);
+        ->and($schemas['SampleStatus']['enum'])->toBe(['draft', 'published'])
+        ->and($schemas['SamplePriority']['enum'])->toBe([1, 2]);
 });
 
-it('agrees with the example audit about which of them is wrong', function (): void {
-    // The pairing that matters. Three of these examples now satisfy the enum behind their `$ref`, so the
-    // lint is silent on them; the fourth does not, and it is reported — the lint doing its job, which a
-    // change that silenced it would have broken.
+it('publishes nothing the example audit then rejects', function (): void {
+    // The contract the reading answers to, stated by the validator rather than by the reader: every
+    // example it published satisfies the schema beside it, `$ref` resolved, so the lint is silent.
     [$schemas] = refTypedExamples();
 
     $document = lintDocument(['GET /api/nodes' => [
@@ -88,13 +120,18 @@ it('agrees with the example audit about which of them is wrong', function (): vo
         ]]]],
     ]]);
     $document['components'] = ['schemas' => $schemas];
+    $lint = new ExampleSchemaLint(new LintRuleOptions(enabled: true));
 
-    $findings = lintDiagnostics(new ExampleSchemaLint(new LintRuleOptions(enabled: true)), $document);
+    expect(lintDiagnostics($lint, $document))->toBe([]);
+
+    // The control, so a silent audit is not mistaken for agreement: the string `"null"` this used to
+    // publish beside the nullable enum is rejected by the same audit.
+    $document['components']['schemas']['DocumentedNode']['properties']['cleared']['example'] = 'null';
+    $findings = lintDiagnostics($lint, $document);
 
     expect($findings)->toHaveCount(1)
         ->and($findings[0]->code)->toBe('lint.example-mismatch')
-        ->and($findings[0]->message)->toContain('/components/schemas/DocumentedNode/properties/wrong/example')
-        ->and($findings[0]->message)->toContain('enum');
+        ->and($findings[0]->message)->toContain('/components/schemas/DocumentedNode/properties/cleared/example');
 });
 
 it('does not let the quoted reading leak into a member that states its type', function (): void {

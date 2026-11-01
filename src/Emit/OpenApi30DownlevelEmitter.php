@@ -220,15 +220,17 @@ final readonly class OpenApi30DownlevelEmitter implements ReportingEmitter
 
     /**
      * The 3.0 document as an array, before it is canonicalised or checked against the 3.0 meta-schema —
-     * for a caller that reads the document rather than publishing it, as the differ does to compare a 3.1
-     * or 3.2 document with a 3.0 one ({@see CommonDialect}).
+     * for a caller that reads the document rather than publishing it, as the differ does to compare any
+     * document with a 3.0 one ({@see CommonDialect}).
      *
      * @param  list<Diagnostic>  $diagnostics
+     * @param  bool  $newerReading  whether a 3.0 source is read as its 3.1 export reads it first, as a diff
+     *                              against a newer document must ({@see OpenApi30Upgrade::upgrade()})
      * @return array<string, mixed>
      */
-    public function toOpenApiArray(UirDocument $document, array &$diagnostics, EmitOptions $options = new EmitOptions): array
+    public function toOpenApiArray(UirDocument $document, array &$diagnostics, EmitOptions $options = new EmitOptions, bool $newerReading = false): array
     {
-        return $this->downlevel($this->oas31->toOpenApiArray($document, $diagnostics, $options), $diagnostics);
+        return $this->downlevel($this->oas31->toOpenApiArray($document, $diagnostics, $options, for30: ! $newerReading), $diagnostics);
     }
 
     /**

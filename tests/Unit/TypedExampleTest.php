@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use Docuccino\Core\Contract\ContractIndex;
+use Docuccino\Core\Contract\SchemaCheck;
 use Docuccino\Core\Diagnostics\Severity;
 use Docuccino\Core\Extensions\Schema\TypedExample;
 
@@ -167,8 +169,8 @@ it('reads nothing where no member of a union reads the text', function (): void 
 });
 
 it('leaves the text alone where the schema declares no type it knows', function (mixed $type): void {
-    // Nothing a string would violate is stated, so the text stands — a `$ref` or an `anyOf` may well
-    // accept it, and the example audit over the finished document is what holds that case to its schema.
+    // Nothing a string would violate is stated, so the text stands, and the example audit over the
+    // finished document is what holds that case to its schema.
     expect(TypedExample::of('as written', $type))->toBe(['as written']);
 })->with([
     'no type at all' => [null],
@@ -180,17 +182,17 @@ it('leaves the text alone where the schema declares no type it knows', function 
 ]);
 
 /*
- * The one exception to "the text stands as written" where no type is stated. A member whose type is
- * carried by a `$ref` — an enum component, alone or inside a nullable `anyOf` — is a real constraint, and
- * `"draft"` beside it published the six characters `"draft"` against an enum of `draft`: an example the
- * document's own lint then reported as a mismatch, correctly. Every reading such a member could accept is
- * the string the literal quotes and never the quotes, so the quotes are the author writing JSON.
+ * The one exception to "the text stands as written" where no type is stated — a `$ref` to a component
+ * not registered yet, say, which may well be an enum: `"draft"` beside one published the six characters
+ * `"draft"` against an enum of `draft`, an example the document's own lint then reported as a mismatch,
+ * correctly. Every reading such a member could accept is the string the literal quotes and never the
+ * quotes, so the quotes are the author writing JSON.
  */
 it('reads a quoted JSON string literal as the string it quotes where no type is stated', function (mixed $type, string $text, string $expected): void {
     expect(TypedExample::of($text, $type))->toBe([$expected]);
 })->with([
-    'a $ref to a string-backed enum' => [null, '"standard"', 'standard'],
-    'a nullable anyOf around one' => [null, '"hybrid"', 'hybrid'],
+    'no type at all' => [null, '"standard"', 'standard'],
+    'an empty list of types' => [[], '"hybrid"', 'hybrid'],
     'padded, since whitespace around a docblock tag is layout' => [null, "  \"draft\"\t", 'draft'],
     'a value carrying the characters JSON escapes' => [null, '"a \"quoted\" word"', 'a "quoted" word'],
     'an escape sequence, read as the character it names' => [null, '"a\\/b"', 'a/b'],
@@ -291,6 +293,16 @@ it('names the property, the text and the declared type when it publishes nothing
         ->and($diagnostic->help)->toContain('@example 7');
 });
 
+it('says on a validation field that a generated example may stand in for the refused one', function (): void {
+    // A field's own rules earn it an example where they pin a value, so on a field "none is published"
+    // can be false: the refused text is what is not published. Same code and help as everywhere else.
+    $field = TypedExample::unreadableOnField('status', 'active', ['type' => 'string', 'enum' => ['draft', 'published']]);
+    $docblock = TypedExample::unreadable('field "status"', 'active', ['type' => 'string', 'enum' => ['draft', 'published']]);
+
+    expect($field->message)->toBe('The example on field "status" ("active") does not read as "draft"/"published", so it is not published; where the field\'s rules pin a value, an example generated from them is published instead.')
+        ->and([$field->severity, $field->code, $field->help])->toBe([$docblock->severity, $docblock->code, $docblock->help]);
+});
+
 it('spells a union and an unknown type in the message the same way it reads them', function (mixed $type, string $reads): void {
     expect(TypedExample::untypable('field "x"', 'n/a', $type)->message)->toContain('does not read as '.$reads);
 })->with([
@@ -326,4 +338,166 @@ it('still reads a genuine list as a list beside an id-keyed object', function ()
     // The other half: `type: array` must not start taking objects just because they look like lists.
     expect(TypedExample::of('{"0": "a"}', 'array'))->toBeNull()
         ->and(json_encode(TypedExample::of('["a"]', 'array')[0] ?? null))->toBe('["a"]');
+});
+
+/*
+ * An example is a value for the schema as a whole. A `$ref`, an `anyOf` or a `oneOf` states no `type` of
+ * its own, and reading against that absent `type` published `@example null` beside a nullable enum as the
+ * string `"null"` — rejected by every branch, the null one included. Each row here reads against every
+ * branch the schema admits; {@see typedExampleDocument()} is what holds the answer to the schema.
+ */
+function typedExampleComponents(): array
+{
+    return [
+        'Status' => ['type' => 'string', 'enum' => ['draft', 'published']],
+        'Priority' => ['type' => 'integer', 'enum' => [1, 2]],
+        'Loop' => ['$ref' => '#/components/schemas/Loop'],
+    ];
+}
+
+/** A document carrying `$schema` as a component of its own, for the validator to hold a reading to. */
+function typedExampleDocument(array $schema): ContractIndex
+{
+    return ContractIndex::fromArray([
+        'openapi' => '3.2.0',
+        'info' => ['title' => 't', 'version' => '1'],
+        'paths' => [],
+        'components' => ['schemas' => [...typedExampleComponents(), 'Subject' => $schema]],
+    ]);
+}
+
+dataset('readings against a whole schema', [
+    // The reported shape: a nullable enum, as the type chain publishes it.
+    'null beside a nullable $ref' => [['anyOf' => [['$ref' => '#/components/schemas/Status'], ['type' => 'null']]], 'null', null],
+    'a member beside a nullable $ref' => [['anyOf' => [['$ref' => '#/components/schemas/Status'], ['type' => 'null']]], 'draft', 'draft'],
+    'a quoted member beside a nullable $ref' => [['anyOf' => [['$ref' => '#/components/schemas/Status'], ['type' => 'null']]], '"draft"', 'draft'],
+    // A `$ref` to an integer enum lists numbers, so the number is the member.
+    'a number beside an integer $ref' => [['$ref' => '#/components/schemas/Priority'], '2', 2],
+    'null beside a nullable integer $ref' => [['oneOf' => [['$ref' => '#/components/schemas/Priority'], ['type' => 'null']]], 'null', null],
+    // The `anyof` nullable policy's spelling of `integer|null` and `boolean|null`.
+    'a number beside an anyOf of integer and null' => [['anyOf' => [['type' => 'integer'], ['type' => 'null']]], '7', 7],
+    'null beside an anyOf of integer and null' => [['anyOf' => [['type' => 'integer'], ['type' => 'null']]], 'null', null],
+    'a boolean beside an anyOf of boolean and null' => [['anyOf' => [['type' => 'boolean'], ['type' => 'null']]], 'true', true],
+    'a boolean beside a oneOf of boolean and string' => [['oneOf' => [['type' => 'boolean'], ['type' => 'string']]], 'false', false],
+    'a number beside a type list' => [['type' => ['number', 'null']], '0.5', 0.5],
+    // Where several readings are accepted the most specific type wins, so `7` is the number beside a
+    // union that would take the string too — but a value the enum does not list is not a reading of it.
+    'a member number beside an integer enum or a string' => [['anyOf' => [['$ref' => '#/components/schemas/Priority'], ['type' => 'string']]], '2', 2],
+    'a non-member number beside an integer enum or a string' => [['anyOf' => [['$ref' => '#/components/schemas/Priority'], ['type' => 'string']]], '7', '7'],
+    // An inline value list is read the same way as one behind a `$ref`.
+    'a quoted member of an inline enum' => [['type' => 'string', 'enum' => ['draft', 'published']], '"draft"', 'draft'],
+    'a constant' => [['type' => 'integer', 'const' => 3], '3', 3],
+    'a value list with no type' => [['enum' => [1, 'one']], '1', 1],
+    'a string in a value list with no type' => [['enum' => [1, 'one']], 'one', 'one'],
+    'an integral literal in a number enum' => [['type' => 'number', 'enum' => [1, 2.5]], '1', 1.0],
+]);
+
+it('reads a literal against every branch a schema admits', function (array $schema, string $text, mixed $expected): void {
+    expect(TypedExample::against($text, $schema, typedExampleComponents()))->toBe([$expected]);
+})->with('readings against a whole schema');
+
+it('publishes nothing its schema rejects', function (array $schema, string $text, mixed $expected): void {
+    // The rule stated by the validator the example audit runs, not by the reader: what the reader
+    // answers is a value the schema accepts, `$ref`s resolved.
+    $read = TypedExample::against($text, $schema, typedExampleComponents());
+
+    expect($read)->not->toBeNull()
+        ->and((new SchemaCheck(typedExampleDocument($schema)))->check($read[0] ?? null, ['components', 'schemas', 'Subject'], 'the example'))
+        ->toBe([]);
+})->with('readings against a whole schema');
+
+it('reads the same whichever order a union lists its branches in', function (array $schema, string $text, mixed $expected): void {
+    foreach (['anyOf', 'oneOf'] as $keyword) {
+        if (isset($schema[$keyword])) {
+            $schema[$keyword] = array_reverse($schema[$keyword]);
+        }
+    }
+
+    expect(TypedExample::against($text, $schema, typedExampleComponents()))->toBe([$expected]);
+})->with('readings against a whole schema');
+
+it('reads null beside 3.0\'s nullable', function (array $schema, string $text, mixed $expected): void {
+    // `nullable: true` admits null beside a type or around a reference. The 2020-12 validator above does
+    // not read it, so these rows are held to the reading alone.
+    expect(TypedExample::against($text, $schema, typedExampleComponents()))->toBe([$expected]);
+})->with([
+    'a nullable integer' => [['type' => 'integer', 'nullable' => true], 'null', null],
+    'a nullable integer, read as one' => [['type' => 'integer', 'nullable' => true], '7', 7],
+    'a nullable reference' => [['allOf' => [['$ref' => '#/components/schemas/Priority']], 'nullable' => true], 'null', null],
+    'a nullable reference, read as a member' => [['allOf' => [['$ref' => '#/components/schemas/Priority']], 'nullable' => true], '1', 1],
+]);
+
+it('reads nothing where no reading is a value the schema accepts', function (array $schema, string $text): void {
+    $components = typedExampleComponents();
+
+    expect(TypedExample::against($text, $schema, $components))->toBeNull();
+
+    // Nor could anything have been published: the text as written, and the value it decodes to where it
+    // is JSON, are both rejected by the schema.
+    $check = new SchemaCheck(typedExampleDocument($schema));
+    $decoded = json_decode($text, true);
+    $json = json_last_error() === JSON_ERROR_NONE;
+
+    expect($check->check($text, ['components', 'schemas', 'Subject'], 'the example'))->not->toBe([])
+        ->and(! $json || $check->check($decoded, ['components', 'schemas', 'Subject'], 'the example') !== [])
+        ->toBeTrue();
+})->with([
+    'a word no case is' => [['anyOf' => [['$ref' => '#/components/schemas/Status'], ['type' => 'null']]], 'active'],
+    'a number no case is' => [['$ref' => '#/components/schemas/Priority'], '9'],
+    'a word beside an integer enum' => [['$ref' => '#/components/schemas/Priority'], 'high'],
+    'another constant' => [['type' => 'integer', 'const' => 3], '4'],
+    // The null type alone does not make null a member: the value list refuses it.
+    'null beside a value list that leaves it out' => [['type' => ['string', 'null'], 'enum' => ['a', 'b']], 'null'],
+]);
+
+it('leaves the text as written where a branch states nothing it can read', function (array $schema): void {
+    // What such a branch accepts is unknowable here, and the example audit over the finished document is
+    // what holds it — the validator above cannot, since the component is not there to resolve.
+    expect(TypedExample::against('as written', $schema, typedExampleComponents()))->toBe(['as written']);
+})->with([
+    'an unregistered $ref' => [['$ref' => '#/components/schemas/Missing']],
+    'a component that names only itself' => [['$ref' => '#/components/schemas/Loop']],
+    'an allOf of several' => [['allOf' => [['$ref' => '#/components/schemas/Status'], ['description' => 'x']]]],
+    'an empty schema' => [[]],
+    'an unregistered $ref beside a null branch' => [['anyOf' => [['$ref' => '#/components/schemas/Missing'], ['type' => 'null']]]],
+]);
+
+it('still reads null beside an unregistered $ref, where the null branch takes it', function (): void {
+    $schema = ['anyOf' => [['$ref' => '#/components/schemas/Missing'], ['type' => 'null']]];
+
+    expect(TypedExample::against('null', $schema, typedExampleComponents()))->toBe([null]);
+});
+
+it('names the values a refused example could have been', function (array $schema, string $reads): void {
+    $diagnostic = TypedExample::unreadable('field "x"', 'n/a', $schema, typedExampleComponents());
+
+    expect($diagnostic->code)->toBe('docblock.example-untypable')
+        ->and($diagnostic->message)->toBe('The example on field "x" ("n/a") does not read as '.$reads.', so none is published.');
+})->with([
+    'a nullable enum' => [['anyOf' => [['$ref' => '#/components/schemas/Status'], ['type' => 'null']]], '"draft"/"published"/null'],
+    'an integer enum' => [['$ref' => '#/components/schemas/Priority'], '1/2'],
+    'a type union' => [['anyOf' => [['type' => 'integer'], ['type' => 'boolean']]], 'integer/boolean'],
+    'a long list, cut short' => [['enum' => ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']], '"a"/"b"/"c"/"d"/"e"/"f" (and 2 more)'],
+]);
+
+it('reads a component reached by many paths once, and one reached from itself as open', function (): void {
+    // Each level is a union of the next level twice, so the paths to the bottom double at every level.
+    // Read once per path, 24 levels are 2^24 readings of the bottom; read once per component, 25.
+    $components = ['Level24' => ['type' => 'integer', 'enum' => [1]]];
+
+    for ($level = 0; $level < 24; $level++) {
+        $next = ['$ref' => '#/components/schemas/Level'.($level + 1)];
+        $components['Level'.$level] = ['anyOf' => [$next, $next]];
+    }
+
+    $top = ['$ref' => '#/components/schemas/Level0'];
+
+    expect(TypedExample::against('1', $top, $components))->toBe([1])
+        ->and(TypedExample::against('2', $top, $components))->toBeNull()
+        ->and(TypedExample::unreadable('field "x"', '2', $top, $components)->message)->toContain('does not read as 1,');
+
+    // The bottom naming the top again is a component that refers to itself, which states nothing.
+    $components['Level24'] = ['anyOf' => [['type' => 'integer', 'enum' => [1]], $top]];
+
+    expect(TypedExample::against('2', $top, $components))->toBe(['2']);
 });

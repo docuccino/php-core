@@ -230,10 +230,9 @@ final readonly class ComponentRefs
      * Only a BARE pointer is followed — `$ref` plus, at most, the annotation keywords
      * ({@see SchemaKeywords::isAnnotationOnly()}) and the identity the diff pairs nodes by. Under
      * 2020-12 every keyword beside a `$ref` still applies, so the schema at such a position is the
-     * INTERSECTION of the two and neither side of a merge states it; declining is the degraded-but-true
-     * answer, and it costs nothing a Docuccino document publishes, which spells a hoisted shape as the
-     * pointer alone. The annotations that are followed override the target's, which is the merge every
-     * resolver here performs.
+     * INTERSECTION of the two, which no merge states: this declines, and the comparator compares the
+     * pointer and its siblings apart. The annotations that are followed override the target's, which is
+     * the merge every resolver here performs.
      *
      * ONE HOP PER CALL, like every resolver above — and unlike them a chain is followed, by RE-ENTRY
      * rather than by a loop here. The referring node's pointer is dropped BEFORE the merge, so where the
@@ -281,17 +280,27 @@ final readonly class ComponentRefs
      *
      * @param  array<string, mixed>  $schema
      */
-    private static function isBarePointer(array $schema): bool
+    public static function isBarePointer(array $schema): bool
     {
-        foreach (array_keys($schema) as $keyword) {
-            if ($keyword === '$ref' || $keyword === 'x-docuccino' || SchemaKeywords::isAnnotationOnly($keyword)) {
-                continue;
-            }
+        return self::siblings($schema) === [];
+    }
 
-            return false;
-        }
+    /**
+     * The members beside a pointer that constrain the value: all but the `$ref`, its annotations and the
+     * identity.
+     *
+     * @param  array<string, mixed>  $schema
+     * @return array<string, mixed>
+     */
+    public static function siblings(array $schema): array
+    {
+        return array_filter($schema, static fn (string $keyword): bool => $keyword !== '$ref' && ! self::isAside($keyword), ARRAY_FILTER_USE_KEY);
+    }
 
-        return true;
+    /** Whether a Schema Object member says nothing about the value: an annotation, or the identity. */
+    public static function isAside(string $keyword): bool
+    {
+        return $keyword === 'x-docuccino' || SchemaKeywords::isAnnotationOnly($keyword);
     }
 
     /**

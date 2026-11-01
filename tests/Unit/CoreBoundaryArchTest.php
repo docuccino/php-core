@@ -466,8 +466,14 @@ it('freezes the rule-transformer field façade at the methods it means to promis
         // Which blank strings a framework reads as a field's null is the adapter's to state, and in any
         // rule order: a third-party presence rule owes the same two answers ours gives.
         'admitBlank',
+        // A rule at a `*` that speaks about the elements together owes its keyword to the list, and a
+        // third-party one has no other way to reach it than this.
+        'container',
         'get',
         'has',
+        // The counterpart of `isRequired()`: `types()` never carries the null, so a rule reading what the
+        // field accepts — a stated example, say — has no other way to learn it admits one.
+        'isNullable',
         'isRequired',
         'markMultipart',
         'markNullable',

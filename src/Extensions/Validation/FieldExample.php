@@ -78,7 +78,7 @@ final class FieldExample
     public static function attach(FieldNode $node, RepresentationPolicy $policy = new RepresentationPolicy, string $path = ''): array
     {
         // An author's own example (a `#[RuleSchema]` example rule, say) is the contract as they stated
-        // it; it is never second-guessed here, and the example audit is what holds it to the schema.
+        // it, already read against the field when it was set; the example audit holds it to the rest.
         if (array_key_exists('example', $node->keywords)) {
             return [];
         }

@@ -9,6 +9,7 @@ use Docuccino\Core\Extensions\Contracts\SchemaContext;
 use Docuccino\Core\Extensions\Schema\ComponentRegistry;
 use Docuccino\Core\Extensions\Schema\SchemaConverter;
 use Docuccino\Core\Extensions\Validation\DefaultValidationRulesToSchema;
+use Docuccino\Core\Extensions\Validation\RequestSchemaBuilder;
 use Docuccino\Core\Extensions\Validation\RuleSet;
 use Docuccino\Core\Extensions\Validation\ValidationField;
 use Docuccino\Core\Extensions\Validation\ValidationRule;
@@ -185,6 +186,28 @@ it('leaves a closed object closed when a `*` child names its values', function (
 
     expect($schema['properties']['settings'])->toBe(['type' => 'object', 'additionalProperties' => false]);
 });
+
+it('reaches the list a trailing `*` descends from, and nothing from a named member', function (string $path, ?array $at): void {
+    // The container is marked and then found in the built body, so a wrong one shows up as the mark
+    // published somewhere else rather than as a path compared with itself.
+    $builder = new RequestSchemaBuilder;
+    $builder->field($path)->container()?->set('description', 'the list');
+
+    $built = $builder->build(new RepresentationPolicy);
+    $marked = $at === null ? null : array_reduce($at, static fn (mixed $node, string $key): mixed => is_array($node) ? ($node[$key] ?? null) : null, $built);
+
+    expect(is_array($marked) ? $marked['description'] ?? null : null)->toBe($at === null ? null : 'the list')
+        ->and(substr_count((string) json_encode($built), 'the list'))->toBe($at === null ? 0 : 1);
+})->with([
+    'a list' => ['tags.*', ['properties', 'tags']],
+    'a list inside a list' => ['m.*.*', ['properties', 'm', 'items']],
+    'a list inside objects in a list' => ['a.*.b.*', ['properties', 'a', 'items', 'properties', 'b']],
+    'the body itself' => ['*', []],
+    'a list whose own name holds an escaped dot' => ['a\.b.*', ['properties', 'a.b']],
+    'a named member' => ['tags', null],
+    'a member of the objects in a list' => ['lines.*.sku', null],
+    'a name ending in an escaped dot and a star' => ['a\.*', null],
+]);
 
 it('expresses nullable per the representation policy', function (): void {
     $driver = new DefaultValidationRulesToSchema(fakeTransformers());
