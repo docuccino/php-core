@@ -18,6 +18,12 @@ use Docuccino\Core\Tests\Fixtures\PinnedRequestClass;
 use Docuccino\Core\Tests\Fixtures\SampleStatus;
 use Docuccino\Core\TypeGrammar\ImportContext;
 use Docuccino\Core\TypeGrammar\TypeStringParser;
+use PHPStan\PhpDocParser\Ast\Type\FullyQualifiedNameNode;
+use PHPStan\PhpDocParser\Ast\Type\GenericTypeNode;
+use PHPStan\PhpDocParser\Ast\Type\IdentifierTypeNode;
+use PHPStan\PhpDocParser\Ast\Type\NameNode;
+use PHPStan\PhpDocParser\Ast\Type\RelativeNameNode;
+use PHPStan\PhpDocParser\Ast\Type\TypeNode;
 
 /**
  * Covers every branch of the phpdoc type-grammar → {@see DType} mapping the attribute layer relies on
@@ -426,6 +432,27 @@ it('keeps a user generic as a parameterised ClassT', function (): void {
         ->and($result->typeArgs)->toHaveCount(2)
         ->and($result->typeArgs[1])->toEqual(new ClassT('App\\Models\\User'));
 });
+
+/**
+ * phpdoc-parser 2.4 lets a generic's base be a `NameNode` as well as an `IdentifierTypeNode`. Its own parser
+ * still writes the identifier, but a name node is the same name, so it must resolve to the class the parser's
+ * own answer for that text names: fully qualified stays put, relative goes through the imports.
+ */
+it('reads a generic base the same whichever node carries the name', function (): void {
+    $imports = ImportContext::forFile(dirname(__DIR__).'/Fixtures/ImportSample.php');
+    $parser = new TypeStringParser;
+    $map = new ReflectionMethod(TypeStringParser::class, 'map');
+    $generic = static fn (TypeNode $base): GenericTypeNode => new GenericTypeNode($base, [new IdentifierTypeNode('int')]);
+
+    // A name node stores a qualified name without its backslash, so it is read as written or `\ArrayObject`
+    // would land in the file's namespace.
+    expect($map->invoke($parser, $generic(new FullyQualifiedNameNode('ArrayObject')), $imports))
+        ->toEqual($parser->parse('\\ArrayObject<int>', $imports))
+        ->toEqual(new ClassT('ArrayObject', [ScalarT::int()]))
+        ->and($map->invoke($parser, $generic(new RelativeNameNode('Models\\User')), $imports))
+        ->toEqual($parser->parse('Models\\User<int>', $imports))
+        ->toEqual(new ClassT('App\\Models\\User', [ScalarT::int()]));
+})->skip(! interface_exists(NameNode::class), 'Name nodes arrived in phpstan/phpdoc-parser 2.4.');
 
 it('maps a keyed array shape with optional and numeric keys', function (): void {
     $result = parseType('array{id: int, name?: string, 0: bool}');

@@ -134,7 +134,9 @@ final class TypeStringParser
 
     private function mapGeneric(GenericTypeNode $node, ?ImportContext $imports): DType
     {
-        $base = strtolower($node->type->name);
+        // The base as written, keyword or class name, whichever node the grammar carries it in.
+        $name = (string) $node->type;
+        $base = strtolower($name);
 
         // A bounded or masked int is still an int, and the bounds document nothing — so settle these
         // before the arguments are mapped, since `int<0, max>` carries a `max` that means nothing alone.
@@ -157,7 +159,7 @@ final class TypeStringParser
             };
         }
 
-        return new ClassT($this->resolveClass($node->type->name, $imports), array_values($args));
+        return new ClassT($this->resolveClass($name, $imports), array_values($args));
     }
 
     /** `array-key`, spelled out: the key `V[]` and the one-argument `array<V>` leave implicit. */

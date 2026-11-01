@@ -295,9 +295,25 @@ it('refuses a merge the parser reads otherwise than YAML, saying how to write it
     'an anchored list of maps' => ["x:\n  <<: &l\n    - {a: 1}\n", 5],
     // YAML merges the map; the parser reads `<<` as a key holding null.
     'an anchored map on the merge key\'s line' => ["x:\n  <<: &m {a: 1}\n", 5],
-    // YAML merges a map with a 0 key; the parser reads it as a list of maps.
-    'a map with a 0 key' => ["x:\n  <<: {0: {a: 1}}\n", 5],
-    'a block map with a 0 key' => ["x:\n  <<:\n    0: {a: 1}\n", 5],
+]);
+
+it('reads a merge of a map with a 0 key as YAML does, or refuses it where the parser reads a list of maps', function (string $yaml, int $line) use ($head): void {
+    // YAML merges the map, so /x holds the member 0. Releases before 7.4.22 and 8.1.10 merge the map under it.
+    $misreads = property_exists(Yaml::parse($yaml, Yaml::PARSE_OBJECT_FOR_MAP)->x, 'a');
+
+    try {
+        $read = (new DocumentReader)->read($head.$yaml);
+        expect($misreads)->toBeFalse()
+            ->and(json_encode(json_decode($read->json(), flags: JSON_THROW_ON_ERROR)->x, JSON_THROW_ON_ERROR))->toBe('{"0":{"a":1},"b":2}');
+    } catch (UnreadableDocumentException $exception) {
+        expect($misreads)->toBeTrue()
+            ->and($exception->failure)->toBe(ReadFailure::Syntax)
+            ->and($exception->reason)->toBe('The document merges into the map at /x in a way symfony/yaml reads otherwise than YAML does. Write each map to merge in place, as <<: *map or <<: [*first, *second].')
+            ->and($exception->parsedLine)->toBe($line);
+    }
+})->with([
+    'in flow style' => ["x:\n  <<: {0: {a: 1}}\n  b: 2\n", 5],
+    'in block style' => ["x:\n  <<:\n    0: {a: 1}\n  b: 2\n", 5],
 ]);
 
 it('reads every merge YAML and the parser agree on as the JSON it stands for', function (string $yaml, array $merged) use ($head): void {
