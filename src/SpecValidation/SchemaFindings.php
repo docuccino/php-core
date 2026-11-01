@@ -64,7 +64,10 @@ final class SchemaFindings
         $findings = [];
 
         // Grouped by pointer, in the order opis first meets each, so the findings at one position read
-        // together; every group is the list of what the formatter below returned.
+        // together; every group is the list of what the formatter below returned. A finding met again — the
+        // same rule broken at the same place, which opis reports once for each `oneOf` branch that reaches
+        // it — is listed once.
+        $seen = [];
         foreach ($formatter->formatKeyed(
             $error,
             static fn (OpisValidationError $e): Finding => new Finding(
@@ -76,7 +79,8 @@ final class SchemaFindings
             static fn (OpisValidationError $e): string => self::pointer($e->data()->fullPath()),
         ) as $group) {
             foreach ((array) $group as $finding) {
-                if ($finding instanceof Finding) {
+                if ($finding instanceof Finding && ! isset($seen[(string) $finding])) {
+                    $seen[(string) $finding] = true;
                     $findings[] = $finding;
                 }
             }

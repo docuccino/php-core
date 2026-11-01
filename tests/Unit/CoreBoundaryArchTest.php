@@ -22,7 +22,9 @@ use Docuccino\Core\Draft\ParameterDraft;
 use Docuccino\Core\Draft\ResponseDraft;
 use Docuccino\Core\Draft\SchemaDraft;
 use Docuccino\Core\Extensions\Validation\ValidationField;
+use Docuccino\Core\Reader\ArazzoReader;
 use Docuccino\Core\Reader\DocumentReader;
+use Docuccino\Core\Reader\ReadArazzo;
 use Docuccino\Core\Reader\ReadDocument;
 use Docuccino\Core\Tests\Fixtures\Boundary\DocblockLeakProbe;
 use Docuccino\Core\TypeGrammar\ImportContext;
@@ -261,6 +263,7 @@ it('never hands a public API consumer a type marked @internal', function (): voi
         // that quietly shrank to the others.
         'Docuccino\Core\Draft\SchemaDraft',
         'Docuccino\Core\Reader\ReadDocument',
+        'Docuccino\Core\Reader\Arazzo\ArazzoDescription',
     );
 
     // One expectation per name, because `not->toContain(a, b)` passes the moment ONE of them is
@@ -284,6 +287,7 @@ it('never hands a public API consumer a type marked @internal', function (): voi
         'Docuccino\Core\Reader\JsonPositions',
         'Docuccino\Core\Reader\YamlPositions',
         'Docuccino\Core\Reader\PointerTrie',
+        'Docuccino\Core\Reader\Arazzo\DescriptionBuilder',
     ] as $marked) {
         expect($surface)->not->toContain($marked);
     }
@@ -416,6 +420,8 @@ it('freezes the document reader at the methods it means to promise', function ()
     $promised = [
         DocumentReader::class => ['read'],
         ReadDocument::class => ['contentHash', 'inspect', 'json', 'nodes', 'position', 'uir', 'validate'],
+        ArazzoReader::class => ['read'],
+        ReadArazzo::class => ['declaredVersion', 'description', 'json', 'position', 'positions', 'syntax', 'validate', 'version'],
     ];
 
     foreach ($promised as $class => $methods) {
@@ -432,7 +438,8 @@ it('freezes the document reader at the methods it means to promise', function ()
     }
 
     // Constructing a read document is the reader's job, and says so.
-    expect(coreMarkedInternal((new ReflectionMethod(ReadDocument::class, '__construct'))->getDocComment()))->toBeTrue();
+    expect(coreMarkedInternal((new ReflectionMethod(ReadDocument::class, '__construct'))->getDocComment()))->toBeTrue()
+        ->and(coreMarkedInternal((new ReflectionMethod(ReadArazzo::class, '__construct'))->getDocComment()))->toBeTrue();
 });
 
 /**

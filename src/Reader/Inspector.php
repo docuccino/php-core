@@ -51,6 +51,7 @@ final class Inspector
             property_exists($graph, 'uir') || property_exists($graph, '$schema') || self::major($generator?->specVersion) < 2,
             self::uirVersion(self::specVersion($graph)),
             self::info($graph->info ?? null),
+            is_string($graph->arazzo ?? null) ? $graph->arazzo : null,
         );
     }
 

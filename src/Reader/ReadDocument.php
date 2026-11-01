@@ -77,7 +77,10 @@ final readonly class ReadDocument
             }
         }
 
-        return new DocumentValidation($this->placed(array_slice($findings, 0, $max)), $truncated || count($findings) > $max);
+        return new DocumentValidation(
+            (new SourceMap($this->source))->placed($this->inspection->syntax, array_slice($findings, 0, $max)),
+            $truncated || count($findings) > $max,
+        );
     }
 
     /**
@@ -141,36 +144,6 @@ final readonly class ReadDocument
     public function uir(): UirDocument
     {
         return UirDocument::fromArray($this->document);
-    }
-
-    /**
-     * $findings, each with where its pointer is written, all placed in one pass over the text.
-     *
-     * @param  list<DocumentFinding>  $findings
-     * @return list<DocumentFinding>
-     */
-    private function placed(array $findings): array
-    {
-        if ($findings === []) {
-            return [];
-        }
-
-        $positions = (new SourceMap($this->source))->positions(
-            $this->inspection->syntax,
-            array_map(static fn (DocumentFinding $finding): string => $finding->pointer, $findings),
-        );
-
-        return array_map(
-            static fn (DocumentFinding $finding): DocumentFinding => new DocumentFinding(
-                $finding->source,
-                $finding->pointer,
-                $finding->keyword,
-                $finding->message,
-                $finding->schemaPointer,
-                $positions[$finding->pointer] ?? null,
-            ),
-            $findings,
-        );
     }
 
     /**

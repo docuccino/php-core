@@ -1,0 +1,109 @@
+arazzo: 1.1.0
+info:
+  title: Applying for a vacancy
+  summary: From candidate to application.
+  version: 2.0.0
+sourceDescriptions:
+  - name: applications
+    url: ./applications.openapi.yaml
+    type: openapi
+  - name: candidates
+    url: https://example.com/candidates.json
+workflows:
+  - workflowId: applyForVacancy
+    summary: Apply for a vacancy
+    inputs:
+      $ref: '#/components/inputs/application'
+    parameters:
+      - name: X-Tenant
+        in: header
+        value: $inputs.tenant
+      - reference: $components.parameters.locale
+    failureActions:
+      - reference: $components.failureActions.unavailable
+    steps:
+      - stepId: createCandidate
+        description: Create candidate
+        operationId: $sourceDescriptions.candidates.createCandidate
+        parameters:
+          - name: X-Tenant
+            in: header
+            value: acme
+          - reference: $components.parameters.locale
+            value: fr
+        requestBody:
+          contentType: application/json
+          payload:
+            email: $inputs.email
+          replacements:
+            - target: /name
+              value: $inputs.name
+        successCriteria:
+          - condition: $statusCode == 201
+          - context: $response.body
+            condition: $.id
+            type:
+              type: jsonpath
+              version: rfc9535
+        onSuccess:
+          - name: submit
+            type: goto
+            stepId: submitApplication
+        onFailure:
+          - name: exists
+            type: goto
+            stepId: findCandidate
+            criteria:
+              - condition: $statusCode == 409
+          - name: busy
+            type: retry
+            retryAfter: 5
+            retryLimit: 3
+            criteria:
+              - condition: $statusCode == 503
+        outputs:
+          candidateId: $response.body#/id
+      - stepId: findCandidate
+        operationPath: '{$sourceDescriptions.candidates.url}#/paths/~1candidates/get'
+        onSuccess:
+          - name: screen
+            type: goto
+            workflowId: screen
+        onFailure:
+          - name: unavailable
+            type: end
+      - stepId: submitApplication
+        workflowId: screen
+        parameters:
+          - name: candidateId
+            value: $steps.createCandidate.outputs.candidateId
+    outputs:
+      candidateId: $steps.createCandidate.outputs.candidateId
+  - workflowId: screen
+    dependsOn:
+      - applyForVacancy
+    steps:
+      - stepId: shortlist
+        operationId: shortlist
+        x-note: an extension anywhere is allowed
+components:
+  inputs:
+    application:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+  parameters:
+    locale:
+      name: Accept-Language
+      in: header
+      value: en
+  failureActions:
+    unavailable:
+      name: unavailable
+      type: retry
+      retryAfter: 0.5
+      retryLimit: 1
+      criteria:
+        - condition: $statusCode == 503

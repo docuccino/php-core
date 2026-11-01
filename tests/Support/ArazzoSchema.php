@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Tests\Support;
 
+use Docuccino\Core\SpecValidation\ArazzoMetaSchema;
 use Docuccino\Core\SpecValidation\SchemaFindings;
 use Opis\JsonSchema\Validator;
 use RuntimeException;
@@ -25,13 +26,13 @@ use stdClass;
  * different URL and a deliberate step to adopt, never something upstream can change underneath the
  * digest.
  *
- * Not listed in `php/core/NOTICE`, which covers what the PACKAGE redistributes: `/tests` is
- * `export-ignore`d, so an installed `vendor/docuccino/core` contains neither this file nor the schema.
+ * The package ships the schema now, to read Arazzo with ({@see ArazzoMetaSchema}, which pins it again and
+ * names it in `php/core/NOTICE`); this oracle stays the emitter's, held to its own pins.
  */
 final class ArazzoSchema
 {
-    /** The vendored file, under `php/core/tests/Fixtures`. */
-    public const string FILE = 'arazzo-1.1.schema.json';
+    /** The vendored file, under `php/core/resources/arazzo`, which {@see ArazzoMetaSchema} also reads. */
+    public const string FILE = 'arazzo-v1.1.schema.json';
 
     /** IDENTITY: the `$id` the file must declare about itself. */
     public const string PUBLISHED = 'https://spec.openapis.org/arazzo/1.1/schema/2026-04-15';
@@ -50,7 +51,7 @@ final class ArazzoSchema
 
     public static function path(): string
     {
-        return dirname(__DIR__).'/Fixtures/'.self::FILE;
+        return dirname(__DIR__, 2).'/resources/arazzo/'.self::FILE;
     }
 
     /**

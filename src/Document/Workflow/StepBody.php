@@ -14,13 +14,18 @@ use Docuccino\Core\Support\Hydrate;
  * payload is part expression by design, and an expression has no value until the workflow runs, so
  * anything this could say about the shape would be said about a body nobody has built yet.
  *
- * @internal
+ * `replacements` are Arazzo's: values set into the payload at a target (a JSON pointer or an XPath) before
+ * it is sent, each `{target, value}` as written. A declared body has none.
  */
 final readonly class StepBody
 {
+    /**
+     * @param  list<array<string, mixed>>  $replacements
+     */
     public function __construct(
         public string $contentType,
         public mixed $payload,
+        public array $replacements = [],
     ) {}
 
     /**
@@ -31,6 +36,7 @@ final readonly class StepBody
         return new self(
             contentType: Hydrate::stringOr($data['contentType'] ?? '', ''),
             payload: $data['payload'] ?? null,
+            replacements: Hydrate::listOfMaps($data['replacements'] ?? null) ?? [],
         );
     }
 
@@ -39,6 +45,12 @@ final readonly class StepBody
      */
     public function toArray(): array
     {
-        return ['contentType' => $this->contentType, 'payload' => $this->payload];
+        $out = ['contentType' => $this->contentType, 'payload' => $this->payload];
+
+        if ($this->replacements !== []) {
+            $out['replacements'] = $this->replacements;
+        }
+
+        return $out;
     }
 }

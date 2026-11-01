@@ -18,6 +18,9 @@ namespace Docuccino\Core\Reader;
  *
  * `info` is the title and version the document's `info` states ({@see DocumentInfo}), read with
  * everything else here when the document is, so nothing decodes it again to ask.
+ *
+ * `arazzo` is the Arazzo version the root declares, as written: a document with one is an Arazzo
+ * description rather than an OpenAPI one, and {@see ArazzoReader} is the way to read it.
  */
 final readonly class DocumentInspection
 {
@@ -34,6 +37,7 @@ final readonly class DocumentInspection
         public bool $legacy,
         public ?string $uirVersion = null,
         public DocumentInfo $info = new DocumentInfo,
+        public ?string $arazzo = null,
     ) {}
 
     public function carries(ExtensionMember $member): bool

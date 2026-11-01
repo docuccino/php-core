@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use Docuccino\Core\Reader\Arazzo\ArazzoVersion;
+use Docuccino\Core\Reader\Arazzo\SourceType;
 use Docuccino\Core\Reader\Capability;
 use Docuccino\Core\Reader\DocumentFinding;
 use Docuccino\Core\Reader\DocumentGenerator;
@@ -237,16 +239,19 @@ it('publishes every reader enum as values a caller may store, and changes none o
     $published = [
         Capability::class => ['plain', 'identities', 'full'],
         ExtensionMember::class => ['provenance', 'content', 'mock', 'workflows', 'diagnostics', 'uses'],
-        FindingSource::class => ['openapi', 'extension'],
+        FindingSource::class => ['openapi', 'extension', 'arazzo'],
         NodeKind::class => ['operation', 'parameter', 'response', 'schema', 'page', 'workflow'],
         ReadFailure::class => ['encoding', 'syntax', 'not-an-object', 'alias-expansion', 'unrepresentable', 'too-deep', 'node-expansion'],
         Syntax::class => ['json', 'yaml'],
+        ArazzoVersion::class => ['1.0', '1.1'],
+        SourceType::class => ['openapi', 'arazzo', 'asyncapi'],
     ];
 
     // Read off the directory, so an enum the reader adds tomorrow is a row owed rather than one skipped.
     $declared = [];
-    foreach ((array) glob(dirname(__DIR__, 3).'/src/Reader/*.php') as $file) {
-        $class = 'Docuccino\Core\Reader\\'.basename((string) $file, '.php');
+    foreach ((array) glob(dirname(__DIR__, 3).'/src/Reader/{,*/}*.php', GLOB_BRACE) as $file) {
+        $directory = basename(dirname((string) $file));
+        $class = 'Docuccino\Core\Reader\\'.($directory === 'Reader' ? '' : $directory.'\\').basename((string) $file, '.php');
         if (enum_exists($class) && (new ReflectionEnum($class))->isBacked()) {
             $declared[] = $class;
         }

@@ -16,3 +16,15 @@ This package redistributes third-party material:
   The files are redistributed byte-for-byte as published at the dated, immutable
   URIs each one declares in its own "$id", and are used only as data: Docuccino
   validates the OpenAPI documents it emits against them. They are not modified.
+
+  Arazzo Specification JSON Schemas
+  resources/arazzo/arazzo-v1.0.schema.json
+  resources/arazzo/arazzo-v1.1.schema.json
+
+  Copyright (c) OpenAPI Initiative, a Linux Foundation Collaborative Project.
+  Licensed under the Apache License, Version 2.0.
+  You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+
+  The files are redistributed byte-for-byte as published at the dated, immutable
+  URIs each one declares in its own "$id", and are used only as data: Docuccino
+  validates the Arazzo descriptions it reads against them. They are not modified.

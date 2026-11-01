@@ -63,6 +63,33 @@ final class SourceMap
         return array_map(static fn (?int $offset): ?SourcePosition => $offset === null ? null : $positions[$offset], $offsets);
     }
 
+    /**
+     * $findings, each with where its pointer is written, all placed in one pass over the text.
+     *
+     * @param  list<DocumentFinding>  $findings
+     * @return list<DocumentFinding>
+     */
+    public function placed(Syntax $syntax, array $findings): array
+    {
+        if ($findings === []) {
+            return [];
+        }
+
+        $positions = $this->positions($syntax, array_map(static fn (DocumentFinding $finding): string => $finding->pointer, $findings));
+
+        return array_map(
+            static fn (DocumentFinding $finding): DocumentFinding => new DocumentFinding(
+                $finding->source,
+                $finding->pointer,
+                $finding->keyword,
+                $finding->message,
+                $finding->schemaPointer,
+                $positions[$finding->pointer] ?? null,
+            ),
+            $findings,
+        );
+    }
+
     public function position(Syntax $syntax, string $pointer): ?SourcePosition
     {
         return $this->positions($syntax, [$pointer])[$pointer];

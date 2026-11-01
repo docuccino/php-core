@@ -12,9 +12,7 @@ use Docuccino\Core\Support\Hydrate;
  *
  * `in` is OpenAPI's own parameter location rather than a vocabulary of our own, because the parameter
  * being supplied is one the operation already declares — a location the operation has not got names
- * nothing.
- *
- * @internal
+ * nothing. A step read from Arazzo that calls a workflow passes its parameters with no location: `''`.
  */
 final readonly class StepParameter
 {

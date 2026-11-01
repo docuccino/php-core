@@ -80,6 +80,20 @@ refuses the same way: `IncomparableDocumentsException::$failure` is `DiffFailure
 for two documents whose comparison would read their shared nodes far more often than any document
 needs.
 
+An Arazzo description, 1.0 or 1.1, reads the same way, under the same bounds:
+
+```php
+use Docuccino\Core\Reader\ArazzoReader;
+
+$arazzo = (new ArazzoReader())->read($bytes, 'application/yaml');
+
+$arazzo->version();                    // ArazzoVersion::V1_1, or null where no schema ships for it
+$arazzo->validate()->findings;         // against the Arazzo schema for that version, each with its position
+$arazzo->description()->workflows;     // list<Workflow>, the model declared workflows use too
+$arazzo->description()->workflows[0]->outcomes(0); // what the first step does next, on success and failure
+$arazzo->positions(['/workflows/0/steps/1']);       // where each is written
+```
+
 ## Part of Docuccino
 
 | Package | Role |
