@@ -197,6 +197,21 @@ it('reads a flow mapping that writes over a key whose first value is null, as th
     expect($x($head."x: {a: ~, a: 1}\n"))->toBe('{"a":1}');
 });
 
+it('reads as YAML does what releases below the constraint\'s floor misread or refused', function (string $yaml, string $read) use ($head, $x): void {
+    // Nothing the reader does stands between these and the parser: they read right because every release
+    // the constraint admits reads them right, so a lower floor fails here rather than misreading quietly.
+    expect($x($head.$yaml))->toBe($read);
+})->with([
+    // Below the floor the item after the empty one became a list of its own: [["a"]].
+    'an empty item before a blank line' => ["x:\n  -\n\n  - a\n", '[null,"a"]'],
+    'an empty item before a comment' => ["x:\n  -\n  # note\n  - a\n", '[null,"a"]'],
+    // Below the floor a comma in a quoted value lost the space after it: "p,q".
+    'a quoted comma in a map inside a flow list' => ["x: [a: 'p, q', b]\n", '[{"a":"p, q"},"b"]'],
+    'a double-quoted comma in a map inside a flow list' => ["x: [a: \"p, q\", b]\n", '[{"a":"p, q"},"b"]'],
+    // Below the floor an anchor named 0 was refused as a circular reference.
+    'an alias to an anchor named 0' => ["x:\n  - &0 a\n  - *0\n", '["a","a"]'],
+]);
+
 it('reads a float tag as YAML 1.2 reads a float, and refuses one on what is not a number', function (string $tagged, string $read) use ($head, $x): void {
     try {
         expect($x($head.'x: '.$tagged."\n"))->toBe($read);

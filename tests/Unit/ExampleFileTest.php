@@ -37,6 +37,8 @@ it('decodes every format it lists', function (string $extension, string $content
     'json' => ['json', '{"id": 1, "name": "Sprocket"}', ['id' => 1, 'name' => 'Sprocket']],
     'yaml' => ['yaml', "id: 1\nname: Sprocket\n", ['id' => 1, 'name' => 'Sprocket']],
     'yml' => ['yml', "id: 1\nname: Sprocket\n", ['id' => 1, 'name' => 'Sprocket']],
+    // A byte-order mark is not content: left in, it would rename the first key.
+    'yaml saved with a byte-order mark' => ['yaml', "\u{FEFF}id: 1\nname: Sprocket\n", ['id' => 1, 'name' => 'Sprocket']],
 ]);
 
 it('lists exactly the formats it decodes', function (): void {

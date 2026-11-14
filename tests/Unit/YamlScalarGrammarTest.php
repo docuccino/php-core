@@ -181,15 +181,14 @@ it('passes the one flag it was measured to need, and no other', function (): voi
     expect(ConfigFile::FLAGS)->toBe(Yaml::PARSE_EXCEPTION_ON_INVALID_TYPE);
 });
 
-it('reads a byte-order mark as part of the first key', function (): void {
-    // Why the reader strips it: left in place the mark lands INSIDE the key's name, so `documents:`
-    // becomes a key nothing reads and the file goes quietly unapplied. No exception, no diagnostic —
-    // the parse succeeds and means something else.
+it('reads a byte-order mark that opens the text as nothing', function (): void {
+    // A mark left INSIDE the first key's name makes `documents:` a key nothing reads, and the file goes
+    // quietly unapplied: no exception, no diagnostic. Every release the constraint admits drops it, so a
+    // YAML example or overlay saved with one reads as written, as a document and the config file always did.
     $parsed = Yaml::parse("\u{FEFF}documents: {}\n");
 
     expect($parsed)->toBeArray()
-        ->and(array_keys($parsed))->toBe(["\u{FEFF}documents"])
-        ->and($parsed)->not->toHaveKey('documents');
+        ->and(array_keys($parsed))->toBe(['documents']);
 });
 
 it('reads the same values whichever line ending the file was checked out with', function (): void {

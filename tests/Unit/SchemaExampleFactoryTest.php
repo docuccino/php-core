@@ -396,8 +396,8 @@ it('keeps the example where the value provably escapes a constraining keyword', 
         '["string"]',
         null,
     ],
-    // A cap with no floor is still something to satisfy: nothing has to match, but what may match is
-    // bounded — so the one-element array carries the match rather than avoiding it.
+    // A cap with no floor: nothing has to match, and one element never exceeds a cap of 1 or more, so every
+    // one-element array meets it, `["string"]` as much as the match (JSON Schema 2020-12, §6.4.5).
     'contains bounded above with no floor' => [
         [
             'type' => 'array',
@@ -407,7 +407,7 @@ it('keeps the example where the value provably escapes a constraining keyword', 
             'maxContains' => 2,
         ],
         '["wanted"]',
-        '["string"]',
+        null,
     ],
     // One match is never fewer than a floor of 1 and never more than a cap of 1 or above.
     'contains bounded either side of the one match' => [
