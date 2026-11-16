@@ -454,6 +454,20 @@ it('names the site a shared declaration is written at, never an operation that p
         ->and($reported[0]->message)->not->toContain('/customers');
 });
 
+it('spells a shared declaration outside components as its $ref does, escaped', function (): void {
+    // A `$ref` may point anywhere in the document, and a path template is the commonest token with a
+    // `/` in it: joined unescaped, the message named `#/paths//shared/…`, which is no pointer the author
+    // wrote or could resolve.
+    $reported = IgnoredHeaderAudit::report(['paths' => [
+        '/shared' => ['get' => ['parameters' => [['name' => 'Authorization', 'in' => 'header', 'schema' => ['type' => 'string']]]]],
+        '/invoices' => ['get' => ['parameters' => [['$ref' => '#/paths/~1shared/get/parameters/0']]]],
+    ]]);
+
+    expect(implode("\n", array_map(static fn (Diagnostic $d): string => $d->message, $reported)))
+        ->toContain('#/paths/~1shared/get/parameters/0')
+        ->not->toContain('#/paths//shared');
+});
+
 it('stays silent on a shared declaration OAS reserves nothing about', function (): void {
     $paths = [];
     for ($i = 0; $i < 5; $i++) {

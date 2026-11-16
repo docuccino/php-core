@@ -28,7 +28,8 @@ it('flags an anyOf whose empty branch erases the typed contract, with its pointe
         ->and($findings[0]->severity)->toBe(Severity::Info)
         ->and($findings[0]->code)->toBe('lint.vacuous-union')
         ->and($findings[0]->message)->toContain('GET /api/positions')
-        ->and($findings[0]->message)->toContain('/responses/200/content/application/json/schema/anyOf')
+        // RFC 6901: the `/` in a media type is escaped, or the pointer names `content.application.json`.
+        ->and($findings[0]->message)->toContain('(at /responses/200/content/application~1json/schema/anyOf)')
         ->and($findings[0]->help)->toContain('lint.vacuous_union.allow');
 });
 
@@ -84,9 +85,19 @@ it('reads a property or response by what it holds, whatever it is named', functi
     'a property named x-y' => [['200' => ['content' => ['application/json' => ['schema' => ['type' => 'object', 'properties' => ['x-y' => ['anyOf' => [[], ['type' => 'string']]]]]]]]], '/properties/x-y/anyOf'],
     'the default response' => [
         ['default' => ['content' => ['application/json' => ['schema' => ['anyOf' => [[], ['type' => 'string']]]]]]],
-        '/responses/default/content/application/json/schema/anyOf',
+        '/responses/default/content/application~1json/schema/anyOf',
     ],
 ]);
+
+it('escapes a property name the way RFC 6901 does, so the pointer names one member', function () use ($on): void {
+    $document = lintDocument(['GET /api/a' => ['responses' => ['200' => ['content' => ['application/json' => ['schema' => [
+        'type' => 'object',
+        'properties' => ['a/b~c' => ['anyOf' => [[], ['type' => 'string']]]],
+    ]]]]]]]);
+
+    expect(lintDiagnostics(new VacuousUnionLint($on), $document)[0]->message)
+        ->toContain('/properties/a~1b~0c/anyOf');
+});
 
 it('says so differently when every branch is empty', function () use ($on): void {
     $document = lintDocument(['GET /api/positions' => [

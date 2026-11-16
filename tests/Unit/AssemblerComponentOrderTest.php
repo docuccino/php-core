@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-use Docuccino\Core\Draft\OperationDraft;
+use Docuccino\Core\Document\Operation;
 use Docuccino\Core\Extensions\Context\DocumentConfig;
 use Docuccino\Core\Extensions\Schema\ComponentRegistry;
 use Docuccino\Core\Pipeline\Assembler;
@@ -25,15 +25,18 @@ use Docuccino\Core\Pipeline\OperationFragment;
 function assembledComponentOrder(array $order): array
 {
     $registry = new ComponentRegistry;
+    $responses = [];
 
-    foreach ($order as $name) {
+    foreach ($order as $index => $name) {
         $registry->registerSchema($name, ['type' => 'object', 'title' => $name], 'App\\'.$name);
-        $registry->registerResponse($name, ['description' => $name]);
+        $registry->registerResponse($name, ['description' => $name, 'content' => ['application/json' => ['schema' => ['$ref' => '#/components/schemas/'.$name]]]]);
         $registry->registerSecurityScheme($name, ['type' => 'http', 'scheme' => 'bearer', 'description' => $name]);
+        // Each one used, in the same order: a component nothing reaches is not published at all.
+        $responses[(string) (200 + $index)] = ['$ref' => '#/components/responses/'.$name];
     }
 
     $result = (new Assembler('docuccino'))->assemble(
-        [new OperationFragment('/api/reports', 'get', (new OperationDraft)->freeze(), 'GET /api/reports')],
+        [new OperationFragment('/api/reports', 'get', Operation::fromArray(['responses' => $responses]), 'GET /api/reports')],
         new DocumentConfig('default', ['title' => 'T', 'version' => '1.0.0']),
         'doc:default',
         $registry,

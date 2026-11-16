@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Extensions\Validation;
 
+use Docuccino\Core\Draft\SchemaNotes;
 use Docuccino\Core\Extensions\Contracts\RuleTransformer;
 
 /**
@@ -78,6 +79,33 @@ final readonly class ValidationField
     public function set(string $keyword, mixed $value): void
     {
         $this->node->keywords[$keyword] = $value;
+    }
+
+    /**
+     * State a fact the rule enforces that no keyword can carry — "Required when …", "Must be a date after
+     * …". Published beneath the field's description, after any note an earlier rule stated, and kept
+     * apart from it: a description, whoever writes it, is prose about the field, and prose written over
+     * it later must not take the rule's facts with it.
+     */
+    public function note(string $sentence): void
+    {
+        $this->node->keywords = SchemaNotes::onto($this->node->keywords, [$sentence]);
+    }
+
+    /**
+     * Every note stated so far, in order ({@see note()}).
+     *
+     * @return list<string>
+     */
+    public function notes(): array
+    {
+        return SchemaNotes::of($this->node->keywords);
+    }
+
+    /** State one note in place of every earlier one, for a rule that restates what an earlier rule's note said. */
+    public function replaceNotes(string $sentence): void
+    {
+        $this->node->keywords = SchemaNotes::onto(SchemaNotes::without($this->node->keywords), [$sentence]);
     }
 
     public function get(string $keyword): mixed

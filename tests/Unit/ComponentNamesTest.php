@@ -300,6 +300,66 @@ it('reads the references a node makes by the walk that renames them', function (
         ->and(ComponentNames::referenced($node, 'responses'))->toBe(['E']);
 });
 
+/*
+ * An overridden `$ref` is the one field whose old value is a bare pointer, so its trail entry names a
+ * component with no `$ref` key around it. It is read and renamed like every other pointer the trail
+ * holds: otherwise the build keeps the component on a cold build and loses it on a warm one, publishes
+ * it where the trail is not carried, and leaves the trail pointing at a pre-rename name.
+ */
+it('reads an overridden $ref the trail records bare as a reference, and renames it with the rest', function (): void {
+    $node = [
+        '$ref' => '#/components/schemas/Shown',
+        'x-docuccino' => ['provenance' => [['producer' => 'attribute', 'layer' => 'attribute', 'fields' => ['$ref'], 'overrode' => [
+            ['field' => '$ref', 'value' => '#/components/schemas/Inferred', 'producer' => 'inference'],
+            // Any other field's string is a value, however much it looks like a pointer.
+            ['field' => 'description', 'value' => '#/components/schemas/Prose', 'producer' => 'inference'],
+        ]]]],
+        // Outside an `x-` member a `value` beside a `field` is the document's own data.
+        'properties' => ['field' => ['type' => 'string', 'example' => '$ref'], 'value' => ['type' => 'string']],
+    ];
+
+    expect(ComponentNames::referenced($node))->toBe(['Shown', 'Inferred'])
+        ->and(ComponentNames::rename($node, ['Inferred' => 'InferredRenamed'])['x-docuccino']['provenance'][0]['overrode'])->toBe([
+            ['field' => '$ref', 'value' => '#/components/schemas/InferredRenamed', 'producer' => 'inference'],
+            ['field' => 'description', 'value' => '#/components/schemas/Prose', 'producer' => 'inference'],
+        ]);
+});
+
+it('reaches what the document points at, through components, a discriminator mapping, a callback and a trail', function (): void {
+    $reached = ComponentNames::reached([
+        'paths' => ['/a' => ['post' => [
+            'requestBody' => ['$ref' => '#/components/requestBodies/Body'],
+            'responses' => ['200' => ['$ref' => '#/components/responses/Ok']],
+            'callbacks' => ['done' => ['{$request.body#/url}' => ['post' => [
+                'requestBody' => ['content' => ['application/json' => ['schema' => ['$ref' => '#/components/schemas/Hook']]]],
+                'responses' => ['200' => ['description' => 'OK']],
+            ]]]],
+            'x-docuccino' => ['provenance' => [['producer' => 'attribute', 'layer' => 'attribute', 'overrode' => [['field' => '$ref', 'value' => '#/components/schemas/Overridden']]]]],
+        ]]],
+        'components' => [
+            'requestBodies' => ['Body' => ['content' => ['application/json' => ['schema' => ['$ref' => '#/components/schemas/Pet/properties/kind']]]]],
+            'responses' => ['Ok' => ['description' => 'OK', 'content' => ['application/json' => ['schema' => ['$ref' => '#/components/schemas/Pets']]]]],
+            'schemas' => [
+                'Pets' => ['oneOf' => [['$ref' => '#/components/schemas/Cat']], 'discriminator' => ['propertyName' => 'kind', 'mapping' => ['dog' => '#/components/schemas/Dog']]],
+                'Cat' => ['type' => 'object'],
+                'Dog' => ['type' => 'object'],
+                'Pet' => ['type' => 'object', 'properties' => ['kind' => ['type' => 'string']]],
+                'Hook' => ['type' => 'object'],
+                'Overridden' => ['type' => 'object'],
+                'Unused' => ['type' => 'object', 'example' => ['$ref' => '#/components/schemas/Stated']],
+                'Stated' => ['type' => 'object'],
+            ],
+        ],
+    ]);
+
+    // `Unused` reaches nothing anyone reaches, and an example states a value rather than pointing at one.
+    expect(array_keys($reached['schemas']))->toEqualCanonicalizing(['Pets', 'Cat', 'Dog', 'Pet', 'Hook', 'Overridden'])
+        ->and(array_keys($reached['responses']))->toBe(['Ok'])
+        ->and(array_keys($reached['requestBodies']))->toBe(['Body'])
+        // A pointer outside `components`, or with no name, reaches nothing.
+        ->and(ComponentNames::reached(['paths' => ['/b' => ['get' => ['responses' => ['200' => ['$ref' => 'other.json#/x'], '201' => ['$ref' => '#/components/schemas/']]]]]]))->toBe([]);
+});
+
 it('rekeys a bucket through a rename map, leaving unnamed entries where they are', function (): void {
     expect(ComponentNames::rekey(['Old' => 1, 'Kept' => 2], ['Old' => 'New']))->toBe(['New' => 1, 'Kept' => 2])
         ->and(ComponentNames::rekey(['Old' => 1], []))->toBe(['Old' => 1]);

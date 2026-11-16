@@ -8,9 +8,9 @@ use Docuccino\Core\Patch\Contribution;
 
 /**
  * The description-merge invariant: prose a producer adds to an operation's description joins what is
- * already there with a `\n\n` separator rather than replacing it. Written once here — the security
- * integrations annotate a description with a requirement note, the overrides layer with a deprecation
- * reason, and all of them owe the same separator.
+ * already there with a `\n\n` separator rather than replacing it. Written once here — the overrides
+ * layer appends a deprecation reason, {@see OperationDraft::declareDescriptionNote()} a requirement
+ * note, and all of them owe the same separator.
  *
  * {@see append()} reads the resolved description and writes the joined text, so it is the shape for a
  * producer whose note is its only write. Where the description and the note are written together —

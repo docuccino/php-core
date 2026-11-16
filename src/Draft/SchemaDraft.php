@@ -51,10 +51,23 @@ final class SchemaDraft
      */
     private array $facts = [];
 
+    private readonly DescriptionNotes $descriptionNotes;
+
     public function __construct()
     {
         $this->guard = new PatchGuard;
         $this->requiredMembers = new PatchGuard;
+        $this->descriptionNotes = new DescriptionNotes;
+    }
+
+    /**
+     * Add a sentence beneath whatever description wins, such as what a member's validation enforces,
+     * rather than contesting the description itself ({@see DescriptionNotes}). `$inOwnDescription` where
+     * the description `$by` writes already states it.
+     */
+    public function declareDescriptionNote(string $note, Contribution $by, bool $inOwnDescription = false): void
+    {
+        $this->descriptionNotes->declare($note, $by, $inOwnDescription);
     }
 
     public function set(string $keyword, mixed $value, Contribution $by): PatchResult
@@ -304,6 +317,14 @@ final class SchemaDraft
     {
         $data = $this->guard->resolved();
 
+        $description = $this->descriptionNotes->joinedTo(
+            is_string($data['description'] ?? null) ? $data['description'] : null,
+            $this->guard->contributions()['description']['by'] ?? null,
+        );
+        if ($description !== null) {
+            $data['description'] = $description;
+        }
+
         $requirements = $this->requirements();
         $required = array_column($requirements, 0);
         $also = [];
@@ -337,7 +358,7 @@ final class SchemaDraft
 
         $docuccino = new NodeExtension(
             id: $this->id,
-            provenance: $this->guard->provenance(array_filter($also), $except),
+            provenance: $this->guard->provenance(array_filter($also) + $this->descriptionNotes->provenance(), $except),
             mock: $this->mock,
             rest: $this->facts === [] ? [] : ['facts' => $this->facts],
         );

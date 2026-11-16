@@ -17,8 +17,9 @@ use Docuccino\Core\Support\Hydrate;
  *
  * Filled only under {@see CallableRef::$narrowToEvery}: `$returnsParameter` names the parameter this path
  * hands back unchanged — nothing that can run first may have written its body, status or media type —
- * `$conditions` the parameter calls proven to hold on the way here, and `$typeConditions` the parameter
- * classes proven to hold or not.
+ * `$conditions` the parameter calls proven to hold on the way here, `$typeConditions` the parameter
+ * classes proven to hold or not, and `$reachedWhen` what the guards on the way here require of both where the
+ * analyser proves neither on its own — `A || B`, `! (A && B)`.
  */
 final readonly class ReturnSite
 {
@@ -33,12 +34,13 @@ final readonly class ReturnSite
         public ?string $returnsParameter = null,
         public array $conditions = [],
         public array $typeConditions = [],
+        public ?ConditionTree $reachedWhen = null,
     ) {}
 
     /** The same return path under a declaration made further out on the call path. */
     public function withComponent(?ComponentDeclaration $component): self
     {
-        return new self($this->type, $this->location, $component, $this->returnsParameter, $this->conditions, $this->typeConditions);
+        return new self($this->type, $this->location, $component, $this->returnsParameter, $this->conditions, $this->typeConditions, $this->reachedWhen);
     }
 
     /**
@@ -59,6 +61,9 @@ final readonly class ReturnSite
         if ($this->typeConditions !== []) {
             $data['typeConditions'] = array_map(static fn (TypeCondition $c): array => $c->toArray(), $this->typeConditions);
         }
+        if ($this->reachedWhen !== null) {
+            $data['reachedWhen'] = $this->reachedWhen->toArray();
+        }
 
         return $data;
     }
@@ -71,6 +76,7 @@ final readonly class ReturnSite
         $type = $data['type'] ?? [];
         $location = $data['location'] ?? [];
         $component = $data['component'] ?? null;
+        $reachedWhen = $data['reachedWhen'] ?? null;
 
         return new self(
             is_array($type) ? DType::fromArray($type) : new UnknownT('malformed return type'),
@@ -79,6 +85,7 @@ final readonly class ReturnSite
             Hydrate::stringOrNull($data['returnsParameter'] ?? null),
             Hydrate::listOf($data['conditions'] ?? null, CallCondition::fromArray(...)),
             Hydrate::listOf($data['typeConditions'] ?? null, TypeCondition::fromArray(...)),
+            is_array($reachedWhen) ? ConditionTree::fromArray($reachedWhen) : null,
         );
     }
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Pipeline;
 
+use Docuccino\Core\Contract\Pointer;
 use Docuccino\Core\Contract\Refs;
 use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
@@ -324,7 +325,7 @@ final class IgnoredHeaderAudit
      */
     private static function pointer(array $segments): string
     {
-        return '#/'.implode('/', $segments);
+        return '#'.Pointer::of($segments);
     }
 
     private static function hasContent(mixed $node): bool

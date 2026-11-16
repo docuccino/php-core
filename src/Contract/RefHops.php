@@ -33,10 +33,19 @@ final class RefHops
      */
     private array $pointers = [];
 
+    /** The bytes of pointer every walk has read off a reference or spelt for one, for a test counting the work. */
+    private static int $pointerBytes = 0;
+
     /**
      * @param  array<string, mixed>  $document
      */
     public function __construct(private readonly array $document) {}
+
+    /** {@see $pointerBytes}: a chain read afresh at each use makes it grow with the uses, not with the document. */
+    public static function pointerBytes(): int
+    {
+        return self::$pointerBytes;
+    }
 
     /**
      * The node a `$ref` chain from $node ends at, with the segments that address it, and the reference that
@@ -65,7 +74,16 @@ final class RefHops
     {
         [$node, $landed, $last, $dangling] = $this->chase($node);
 
-        return [$node, $landed === null || $last === null ? $at : ($this->pointers[$last] ??= Pointer::of($landed)), $dangling];
+        if ($landed === null || $last === null) {
+            return [$node, $at, $dangling];
+        }
+
+        if (! isset($this->pointers[$last])) {
+            $this->pointers[$last] = Pointer::of($landed);
+            self::$pointerBytes += strlen($this->pointers[$last]);
+        }
+
+        return [$node, $this->pointers[$last], $dangling];
     }
 
     /**
@@ -112,6 +130,7 @@ final class RefHops
      */
     private function land(string $ref): array|false
     {
+        self::$pointerBytes += strlen($ref);
         $segments = array_map(Pointer::unescape(...), explode('/', substr($ref, 2)));
         $resolved = $this->document;
 

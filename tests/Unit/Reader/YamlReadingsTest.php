@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Docuccino\Core\Reader\DocumentReader;
 use Docuccino\Core\Reader\ReadFailure;
+use Docuccino\Core\Reader\TextScans;
 use Docuccino\Core\Reader\UnreadableDocumentException;
 use Symfony\Component\Yaml\Exception\ParseException;
 use Symfony\Component\Yaml\Yaml;
@@ -365,14 +366,27 @@ it('reads a quoted << as the key YAML reads it as, or refuses it where the parse
     }
 });
 
-it('reads what it must mark or hold to a second reading, within a time and a memory bound', function (string $yaml, int $megabytes): void {
+it('reads what it must mark or hold to a second reading in a few passes over its text, within a time and a memory bound', function (string $yaml, int $megabytes): void {
+    // CPU seconds this process has spent: a loaded machine stretches the clock on the wall many times over.
+    $cpu = static function (): float {
+        $usage = (array) getrusage();
+
+        return array_sum(array_map(static fn (string $field): float => (float) ($usage['ru_'.$field.'.tv_sec'] ?? 0) + (float) ($usage['ru_'.$field.'.tv_usec'] ?? 0) / 1e6, ['utime', 'stime']));
+    };
+
     memory_reset_peak_usage();
     $before = memory_get_usage();
-    $started = hrtime(true);
+    $scanned = TextScans::bytes();
+    $started = $cpu();
 
     (new DocumentReader)->read($yaml);
 
-    expect((hrtime(true) - $started) / 1e9)->toBeLessThan(1.0)
+    // A parse and a search for a mark, each again for a twin, and one count of the lines before its merge keys:
+    // five passes over a text its marks make longer, however many candidates it holds. What no count sees, the
+    // parser's work and the candidate pattern's, is held to the CPU time it may take.
+    expect(TextScans::bytes() - $scanned)->toBeGreaterThanOrEqual(strlen($yaml))
+        ->and(TextScans::bytes() - $scanned)->toBeLessThanOrEqual(6 * strlen($yaml))
+        ->and($cpu() - $started)->toBeLessThan(1.0)
         ->and(memory_get_peak_usage() - $before)->toBeLessThan($megabytes * 1024 * 1024);
 })->with(static function () use ($head): array {
     return [

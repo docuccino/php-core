@@ -9,6 +9,9 @@ use Docuccino\Core\Inference\CallableRef;
 use Docuccino\Core\Inference\CallCondition;
 use Docuccino\Core\Inference\ClassMetadata;
 use Docuccino\Core\Inference\ComponentDeclaration;
+use Docuccino\Core\Inference\DType\ArrayShapeT;
+use Docuccino\Core\Inference\DType\ClassT;
+use Docuccino\Core\Inference\DType\LiteralT;
 use Docuccino\Core\Inference\DType\ScalarT;
 use Docuccino\Core\Inference\DType\UnknownT;
 use Docuccino\Core\Inference\Frame;
@@ -212,6 +215,36 @@ it('keys a thrown exception on (fqcn, status), so two statuses never dedupe into
     expect($forbidden->identityKey())->toBe('App\\X@403')
         ->and($missing->identityKey())->not->toBe($forbidden->identityKey())
         ->and($unknown->identityKey())->toBe('App\\X@null');
+});
+
+it('keys a throw carrying a response on that response too, so two carried responses never dedupe into one', function (): void {
+    // An `HttpResponseException` is sent as the response it carries and states no status of its own, so the
+    // response is what tells two of them apart.
+    $carrying = static fn (int $status): ThrownException => new ThrownException('App\\R', null, [], ThrowConfidence::Certain, ThrowDisposition::Signal, new ReturnSite(new ClassT('Illuminate\\Http\\JsonResponse', [new ArrayShapeT([]), new LiteralT($status)]), new SourceLocation('')));
+    $bare = new ThrownException('App\\R', null, [], ThrowConfidence::Certain, ThrowDisposition::Signal);
+
+    expect($carrying(423)->identityKey())->not->toBe($carrying(410)->identityKey())
+        ->and($carrying(423)->identityKey())->not->toBe($bare->identityKey())
+        ->and($carrying(423)->identityKey())->toBe($carrying(423)->identityKey());
+});
+
+it('round-trips the response a throw carries, and writes no key for a throw carrying none', function (): void {
+    $response = new ReturnSite(new ClassT('Illuminate\\Http\\JsonResponse', [new ArrayShapeT([]), new LiteralT(423)]), new SourceLocation('app/Exceptions/Mappers.php', 12));
+    $carrying = new ThrownException('App\\R', null, [], ThrowConfidence::Certain, ThrowDisposition::Signal, $response);
+    $bare = new ThrownException('App\\R', 409, [], ThrowConfidence::Certain, ThrowDisposition::Signal);
+
+    // Absent rather than null, so every serialised throw that carries nothing keeps its bytes.
+    expect($bare->toArray())->not->toHaveKey('response')
+        ->and(ThrownException::fromArray($carrying->toArray())->toArray())->toBe($carrying->toArray())
+        ->and(ThrownException::fromArray($carrying->toArray())->response?->toArray())->toBe($response->toArray());
+});
+
+it('carries a response through a translation only where the translation names one', function (): void {
+    $response = new ReturnSite(new ClassT('Illuminate\\Http\\JsonResponse'), new SourceLocation(''));
+    $thrown = new ThrownException('App\\X', 404, [], ThrowConfidence::Certain, ThrowDisposition::Signal, $response);
+
+    expect($thrown->as('App\\Y', 409)->response)->toBeNull()
+        ->and($thrown->as('App\\R', null, $response)->response)->toBe($response);
 });
 
 it('ranks every throw confidence, most certain first', function (ThrowConfidence $confidence, int $rank): void {

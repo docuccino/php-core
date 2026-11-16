@@ -65,7 +65,7 @@ final class YamlTwin
             }
 
             // Lines counted from the last `<<` on, as the parser counts them.
-            $line += (int) preg_match_all('/\r\n|\r|\n/', substr($text, $counted, $offset - $counted));
+            $line += (int) preg_match_all('/\r\n|\r|\n/', TextScans::of(substr($text, $counted, $offset - $counted)));
             $counted = $offset;
             // A quote on either side: a key quoted, or one whose quote opens with an escaped line break.
             $merges[] = [$offset > 0 && in_array($text[$offset - 1], ['"', "'"], true) || in_array($text[$offset + 2] ?? '', ['"', "'"], true), $line];

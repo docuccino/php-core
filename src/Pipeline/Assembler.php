@@ -26,6 +26,7 @@ use Docuccino\Core\Provenance\MessagePaths;
 use Docuccino\Core\Provenance\RootRelativeSourcePathResolver;
 use Docuccino\Core\Provenance\SourcePathResolver;
 use Docuccino\Core\Spec\UirSpec;
+use Docuccino\Core\Support\Fqcn;
 use Throwable;
 
 /**
@@ -87,6 +88,16 @@ final class Assembler
 
         $paths = $this->buildPaths(self::under($fragments, webhooks: false), $diagnostics);
         $webhooks = $this->buildWebhooks(self::under($fragments, webhooks: true), $diagnostics);
+
+        // Before anything is named: what no published operation reaches is not published, so a cold build
+        // agrees with a warm one, which never re-registers it. Overlays and transformers come later and
+        // keep what they leave behind.
+        $components->retain(ComponentNames::reached([
+            'paths' => $paths,
+            'webhooks' => $webhooks,
+            'components' => ['schemas' => $components->schemas(), 'responses' => $components->responses()],
+        ]));
+
         $componentSchemas = $this->buildComponents($components);
 
         $doc = [
@@ -534,18 +545,21 @@ final class Assembler
     }
 
     /**
-     * One info per tag that two different controllers landed under by default. Merging tags is not
-     * itself wrong — a tag is a display grouping, nothing is renamed and no shape is lost, and an
-     * author may well have meant `Api\UserController` and `Admin\UserController` to read as one
-     * `User` group — so this reports the merge and names the two ways out rather than splitting a
-     * grouping nobody asked to split.
+     * One info per tag that two different controllers landed under by default because they share a
+     * short name. Merging tags is not itself wrong — a tag is a display grouping, nothing is renamed and
+     * no shape is lost, and an author may well have meant `Api\UserController` and
+     * `Admin\UserController` to read as one `User` group — so this reports the merge and names the way
+     * out rather than splitting a grouping nobody asked to split.
+     *
+     * Two DIFFERENT short names meeting on one tag got there through the tag mapper, which is the
+     * author's own configuration answering the question, so that merge is not reported.
      *
      * @param  list<OperationFragment>  $fragments
      * @param  list<Diagnostic>  $diagnostics
      */
     private function reportTagCollisions(array $fragments, DocumentConfig $document, array &$diagnostics): void
     {
-        /** @var array<string, array<string, true>> $claimants */
+        /** @var array<string, array<string, array<string, true>>> $claimants tag → short name → class */
         $claimants = [];
 
         foreach ($fragments as $fragment) {
@@ -554,26 +568,33 @@ final class Assembler
 
             // Only the tag the default strategy derived: an explicit #[Group] on both controllers is
             // the author saying they belong together, and reporting that would be noise.
-            if ($tag !== null && in_array($tag, $fragment->operation->tags, true)) {
-                $claimants[$tag][$class] = true;
+            if ($class !== null && $tag !== null && in_array($tag, $fragment->operation->tags, true)) {
+                $claimants[$tag][Fqcn::short($class)][$class] = true;
             }
         }
 
         ksort($claimants);
 
-        foreach ($claimants as $tag => $classes) {
-            if (count($classes) < 2) {
+        foreach ($claimants as $tag => $byShortName) {
+            $names = [];
+            foreach ($byShortName as $classes) {
+                if (count($classes) > 1) {
+                    array_push($names, ...array_map(strval(...), array_keys($classes)));
+                }
+            }
+
+            if ($names === []) {
                 continue;
             }
 
-            $names = array_keys($classes);
             sort($names);
 
+            // The mapper sees only the short name, so `tags.map` cannot tell these apart: #[Group] can.
             $diagnostics[] = new Diagnostic(
                 severity: Severity::Info,
                 code: 'tags.name-collision',
                 message: sprintf('Tag "%s" is the default tag of distinct controllers (%s), so their operations are grouped together.', $tag, implode(', ', $names)),
-                help: 'Intended? Nothing to do. Otherwise separate them with #[Group], or rename one through the tags.map config option.',
+                help: 'Intended? Nothing to do. Otherwise give one of them a tag of its own with #[Group].',
             );
         }
     }

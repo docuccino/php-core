@@ -21,6 +21,7 @@ use Docuccino\Core\Draft\OperationDraft;
 use Docuccino\Core\Draft\ParameterDraft;
 use Docuccino\Core\Draft\ResponseDraft;
 use Docuccino\Core\Draft\SchemaDraft;
+use Docuccino\Core\Draft\SchemaNotes;
 use Docuccino\Core\Extensions\Validation\ValidationField;
 use Docuccino\Core\Reader\ArazzoReader;
 use Docuccino\Core\Reader\DocumentReader;
@@ -481,10 +482,16 @@ it('freezes the rule-transformer field façade at the methods it means to promis
         'markRequired',
         'markSometimes',
         'mayClaim',
+        // A fact a rule enforces that no keyword can say is a note, not a description, so prose written
+        // over the field later keeps it; a third-party rule stating one owes it the same channel ours use.
+        'note',
+        'notes',
         'path',
         'proposeExample',
         'refuseBlank',
         'remove',
+        // A rule restating what an earlier rule's note said, as a wire format restates a date rule's.
+        'replaceNotes',
         'set',
         // The counterpart of the converter's own `reference()`, which is already public: without it a
         // third-party transformer can mint a component and then have no way to publish a field AS one,
@@ -515,7 +522,11 @@ it('freezes the drafts an extension writes through at the methods they mean to p
     $promised = [
         DeprecationNote::class => ['marks', 'paragraph'],
         DescriptionAppender::class => ['append', 'joined'],
+        // A schema an integration hands to a draft one keyword at a time carries its notes off first, and
+        // one it publishes as an array is rendered by core; both halves are read outside `Draft/`.
+        SchemaNotes::class => ['of', 'onto', 'rendered', 'take', 'without'],
         OperationDraft::class => [
+            'declareDescriptionNote',
             'declareRequestBodyDescription',
             'declareRequestBodyExamples',
             'declareValidatesInput',
@@ -543,6 +554,7 @@ it('freezes the drafts an extension writes through at the methods they mean to p
             'validatesInput',
         ],
         ParameterDraft::class => [
+            'declareDescriptionNote',
             'declareExamples',
             'key',
             'keyFor',
@@ -581,6 +593,7 @@ it('freezes the drafts an extension writes through at the methods they mean to p
         ],
         SchemaDraft::class => [
             'assignMock',
+            'declareDescriptionNote',
             'declareShape',
             'hasProperty',
             'producerFor',

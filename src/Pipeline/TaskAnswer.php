@@ -27,12 +27,14 @@ final class TaskAnswer
      * @param  Closure(): T  $task
      * @param  resource|null  $channel  what the worker answers on, where one was started
      * @param  (Closure(bool): void)|null  $reaped  told, once the worker is reaped, whether its answer is the one used
+     * @param  (Closure(bool): void)|null  $holds  told true once the answer is made here, and false as it is let go
      */
     public function __construct(
         private readonly Closure $task,
         private ?int $pid = null,
         private mixed $channel = null,
         private readonly ?Closure $reaped = null,
+        private readonly ?Closure $holds = null,
     ) {
         $this->owner = (int) getmypid();
     }
@@ -52,6 +54,10 @@ final class TaskAnswer
             // What crossed from the worker is what the task returned, and only ever as data.
             /** @var T $made */
             $made = $frame === null ? ($this->task)() : unserialize($frame, ['allowed_classes' => false]);
+            if ($this->holds !== null) {
+                ($this->holds)(true);
+            }
+
             $this->answer = [$made];
         }
 
@@ -60,8 +66,14 @@ final class TaskAnswer
 
     public function __destruct()
     {
-        if (getmypid() === $this->owner) {
-            $this->reap(end: true, used: false);
+        if (getmypid() !== $this->owner) {
+            return;
+        }
+
+        $this->reap(end: true, used: false);
+
+        if ($this->answer !== null && $this->holds !== null) {
+            ($this->holds)(false);
         }
     }
 

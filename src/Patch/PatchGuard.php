@@ -191,7 +191,7 @@ final class PatchGuard
      * field this guard never wrote and withhold one it did, so both are named here rather than patched in
      * afterwards — one grouping decides which fields share a record.
      *
-     * @param  array<string, Contribution>  $also  published fields written elsewhere, and by whom
+     * @param  array<string, Contribution|list<Contribution>>  $also  published fields written elsewhere, and by whom
      * @param  list<string>  $except  fields written here that the node does not publish
      */
     public function provenance(array $also = [], array $except = []): Provenance
@@ -216,10 +216,15 @@ final class PatchGuard
             }
         }
 
-        foreach ($also as $field => $by) {
-            $key = $by->recordKey();
-            $groups[$key] ??= ['contribution' => $by, 'fields' => [], 'overrode' => []];
-            $groups[$key]['fields'][] = $field;
+        foreach ($also as $field => $contributors) {
+            foreach (is_array($contributors) ? $contributors : [$contributors] as $by) {
+                $key = $by->recordKey();
+                $groups[$key] ??= ['contribution' => $by, 'fields' => [], 'overrode' => []];
+                // A producer that won the field and also added to it wrote it once.
+                if (! in_array($field, $groups[$key]['fields'], true)) {
+                    $groups[$key]['fields'][] = $field;
+                }
+            }
         }
 
         $records = [];

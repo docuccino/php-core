@@ -26,7 +26,8 @@ use Docuccino\Core\Support\Fqcn;
  *   - `case`       — an enum case (`Status::Active`): the enum's FQCN in `class` and the case name in
  *     `scalar`. A case is not its name, nor its backing value: which value it stands for is the
  *     reader's to say, by the casting its framework applies, so the fold keeps the case whole;
- *   - `array`      — an array of the above (per-item recursion);
+ *   - `array`      — an array of the above (per-item recursion), with the keys written beside its items
+ *     where every one written folded ({@see $keys}), so a reader that needs them can tell a list from a map;
  *   - `spread`     — a run of values no position can be pinned to: a spread the fold could not read
  *     ({@see ArgumentSlots}), or, in a list that has nowhere to put a name, the named arguments after
  *     one. Zero or more values, none of them readable, so a reader indexing past it is reading a slot
@@ -53,6 +54,8 @@ final readonly class ConstValue
      * @param  list<ConstValue>  $args
      * @param  list<array{method: string, args: list<ConstValue>}>  $chain
      * @param  list<ConstValue>  $items
+     * @param  list<string|int|null>|null  $keys  for an array, the key written beside each item (null where none
+     *                                            was), or null where the array wrote none or one did not fold
      */
     private function __construct(
         public string $kind,
@@ -63,6 +66,7 @@ final readonly class ConstValue
         public array $items = [],
         public ?string $reason = null,
         public ?string $class = null,
+        public ?array $keys = null,
     ) {}
 
     public static function scalar(string|int|float|bool|null $value): self
@@ -117,10 +121,13 @@ final readonly class ConstValue
 
     /**
      * @param  list<ConstValue>  $items
+     * @param  list<string|int|null>|null  $keys  the key written beside each item, one per item
      */
-    public static function array(array $items): self
+    public static function array(array $items, ?array $keys = null): self
     {
-        return new self(self::KIND_ARRAY, items: $items);
+        $keyed = $keys !== null && count($keys) === count($items) && array_filter($keys, static fn (string|int|null $key): bool => $key !== null) !== [];
+
+        return new self(self::KIND_ARRAY, items: $items, keys: $keyed ? $keys : null);
     }
 
     public static function unknown(string $reason): self
@@ -193,7 +200,13 @@ final readonly class ConstValue
             self::KIND_CASE => Fqcn::short((string) $this->class).'::'.$this->scalar,
             self::KIND_ARRAY => sprintf(
                 '[%s]',
-                implode(', ', array_map(static fn (ConstValue $i): string => $i->render(), $this->items)),
+                implode(', ', array_map(
+                    fn (ConstValue $i, int $index): string => ($this->keys[$index] ?? null) === null
+                        ? $i->render()
+                        : $this->renderScalar($this->keys[$index]).' => '.$i->render(),
+                    $this->items,
+                    array_keys($this->items),
+                )),
             ),
             self::KIND_SPREAD => sprintf('...<%s>', $this->reason ?? '?'),
             default => sprintf('<unknown: %s>', $this->reason ?? '?'),
@@ -233,6 +246,8 @@ final readonly class ConstValue
             self::KIND_ARRAY => [
                 'kind' => self::KIND_ARRAY,
                 'items' => array_map(static fn (ConstValue $i): array => $i->toArray(), $this->items),
+                // Emitted only when written, so a list keeps its old bytes.
+                ...($this->keys === null ? [] : ['keys' => $this->keys]),
             ],
             self::KIND_SPREAD => ['kind' => self::KIND_SPREAD, 'reason' => $this->reason],
             default => ['kind' => self::KIND_UNKNOWN, 'reason' => $this->reason],
@@ -293,7 +308,7 @@ final readonly class ConstValue
                 is_string($data['class'] ?? null) ? $data['class'] : '',
                 is_string($data['case'] ?? null) ? $data['case'] : '',
             ),
-            self::KIND_ARRAY => self::array(self::listFrom($data['items'] ?? [])),
+            self::KIND_ARRAY => self::array(self::listFrom($data['items'] ?? []), self::keysFrom($data['keys'] ?? null)),
             self::KIND_SPREAD => self::spread(is_string($data['reason'] ?? null) ? $data['reason'] : '?'),
             default => self::unknown(is_string($data['reason'] ?? null) ? $data['reason'] : '?'),
         };
@@ -316,6 +331,18 @@ final readonly class ConstValue
         }
 
         return $value;
+    }
+
+    /**
+     * @return list<string|int|null>|null
+     */
+    private static function keysFrom(mixed $keys): ?array
+    {
+        if (! is_array($keys)) {
+            return null;
+        }
+
+        return array_values(array_map(static fn (mixed $key): string|int|null => is_string($key) || is_int($key) ? $key : null, $keys));
     }
 
     private static function scalarFrom(mixed $value): string|int|float|bool|null

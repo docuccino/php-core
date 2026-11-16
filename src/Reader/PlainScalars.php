@@ -77,7 +77,7 @@ final class PlainScalars
     public static function unusedCharacter(string $text): string
     {
         $used = [];
-        preg_match_all('/[\x{E000}-\x{F8FF}\x{F0000}-\x{FFFFD}]|\\\\(?:u|U0000)([eEfF][0-9a-fA-F]{3})|\\\\U000([fF][0-9a-fA-F]{4})/u', $text, $matches, PREG_SET_ORDER | PREG_UNMATCHED_AS_NULL);
+        preg_match_all('/[\x{E000}-\x{F8FF}\x{F0000}-\x{FFFFD}]|\\\\(?:u|U0000)([eEfF][0-9a-fA-F]{3})|\\\\U000([fF][0-9a-fA-F]{4})/u', TextScans::of($text), $matches, PREG_SET_ORDER | PREG_UNMATCHED_AS_NULL);
         foreach ($matches as $match) {
             $used[$match[1] !== null || $match[2] !== null ? (int) hexdec((string) ($match[1] ?? $match[2])) : mb_ord($match[0], 'UTF-8')] = true;
         }

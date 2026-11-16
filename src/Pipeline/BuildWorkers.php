@@ -14,6 +14,11 @@ use Throwable;
  * answers the same wherever and whenever it runs (design §3). What a worker leaves undone, for whatever reason
  * it stopped, the build does itself, so a worker may always simply stop.
  *
+ * A worker never runs the shutdown work it inherited, nor PHP's module shutdown, where some extensions hang a
+ * forked child (grpc without fork support): it ends with SIGKILL, and one that dies of a fatal error or calls
+ * `exit()` is ended by the first shutdown function the process has (`src/shutdown.php`), since PHP stops at
+ * the first one that fails and anything inherited could pre-empt a later one.
+ *
  * @internal
  */
 final class BuildWorkers
@@ -29,17 +34,23 @@ final class BuildWorkers
 
     private int $answered = 0;
 
+    /** Whether this process is a worker, which ends at its first shutdown function ({@see shutdown()}). */
+    private static bool $worker = false;
+
     /**
      * @param  Closure(): int  $limit  the most workers this build may use; 1 means build everything here
      * @param  (Closure(): void)|null  $beforeFork  run in this process before it forks: once for {@see run()}'s
      *                                              workers, and before each worker {@see later()} starts; one
      *                                              that throws leaves the build to work alone
      * @param  (Closure(): void)|null  $inWorker  run in each worker once, before it does anything else
+     * @param  (Closure(bool): void)|null  $holds  told true as one of {@see later()}'s answers is made in this
+     *                                             process, and false as that answer is let go
      */
     public function __construct(
         private readonly Closure $limit,
         private readonly ?Closure $beforeFork = null,
         private readonly ?Closure $inWorker = null,
+        private readonly ?Closure $holds = null,
     ) {}
 
     /** Workers for nobody: every operation is built where the build runs. */
@@ -83,7 +94,7 @@ final class BuildWorkers
     {
         $answer = self::forkable() && $this->live < $this->limit() - 1 ? $this->start($task) : null;
 
-        return ($answer ?? new TaskAnswer($task))->__invoke(...);
+        return ($answer ?? new TaskAnswer($task, holds: $this->holds))->__invoke(...);
     }
 
     /** How many of {@see later()}'s answers came from the worker started for each, rather than being made here. */
@@ -168,6 +179,14 @@ final class BuildWorkers
         @rmdir($directory);
     }
 
+    /** Called first at every shutdown (`src/shutdown.php`): a worker ends there, and any other process carries on. */
+    public static function shutdown(): void
+    {
+        if (self::$worker) {
+            self::end();
+        }
+    }
+
     private function limit(): int
     {
         return $this->limitAnswer ??= ($this->limit)();
@@ -213,7 +232,7 @@ final class BuildWorkers
         return new TaskAnswer($task, $pid, $ours, function (bool $used): void {
             $this->live--;
             $this->answered += $used ? 1 : 0;
-        });
+        }, $this->holds);
     }
 
     /** Whether the host settled this process for a fork; one that could not has the build work alone. */
@@ -253,16 +272,14 @@ final class BuildWorkers
     }
 
     /**
-     * Make a worker end without a word however it ends. A fatal error still runs the shutdown functions the
-     * worker inherited, so a host silences its own ({@see $inWorker}); this one runs after them and ends the
-     * worker there, before anything registered later and before module shutdown, where some extensions hang
-     * a forked child (grpc without fork support). PHP's own report of the error is turned off as well.
+     * Make a worker end without a word however it ends: PHP's own report of a fatal error is turned off, and
+     * the process is marked a worker, so its first shutdown function ends it ({@see shutdown()}).
      */
     private static function quiet(): void
     {
         ini_set('display_errors', '0');
         ini_set('log_errors', '0');
-        register_shutdown_function(self::end(...));
+        self::$worker = true;
     }
 
     /**

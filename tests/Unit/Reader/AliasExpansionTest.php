@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Docuccino\Core\Canonical\CanonicalJsonSerializer;
 use Docuccino\Core\Identity\ContentHasher;
+use Docuccino\Core\Reader\DocumentDecoder;
 use Docuccino\Core\Reader\DocumentReader;
 use Docuccino\Core\Reader\ReadFailure;
 use Docuccino\Core\Reader\Syntax;
@@ -48,17 +49,24 @@ $laughs = static function (int $fan, int $levels, string $leaf) use ($head): str
 it('refuses a document whose aliases repeat text far past its size, cheaply and before anything walks it', function (string $yaml, string $refusal): void {
     memory_reset_peak_usage();
     $before = memory_get_usage();
-    $started = hrtime(true);
+    $decoder = new DocumentDecoder;
 
     try {
-        (new DocumentReader)->read($yaml);
+        $decoder->decode($yaml, null);
         $this->fail('A document expanding to gigabytes of text was read.');
     } catch (UnreadableDocumentException $exception) {
         $limit = $refusal === 'values' ? max(10_000, strlen($yaml)) : max(1_048_576, 8 * strlen($yaml));
+        [$values, $text] = $decoder->made();
+        $made = $refusal === 'values' ? $values : $text;
+        // One value, or one string, and no string here is longer than the document holding it.
+        $past = $refusal === 'values' ? 1 : strlen($yaml);
 
         expect($exception->failure)->toBe(ReadFailure::AliasExpansion)
             ->and($exception->reason)->toContain(sprintf('expands to more than %d %s from %d bytes', $limit, $refusal, strlen($yaml)))
-            ->and((hrtime(true) - $started) / 1e9)->toBeLessThan(1.0)
+            // The copy stops at what takes it past its budget, and walks no further: what it made is what it
+            // counted, however far the document would have expanded.
+            ->and($made)->toBeGreaterThan($limit)
+            ->and($made)->toBeLessThanOrEqual($limit + $past)
             // Written out, each of these is hundreds of megabytes at least.
             ->and(memory_get_peak_usage() - $before)->toBeLessThan(16 * 1024 * 1024);
     }
@@ -293,15 +301,19 @@ it('scales the cap down with the separators its text spells, admitting exactly a
 it("refuses an alias bomb past the parser's 128 at the budgets, and a merge bomb at the cap, cheaply", function (string $yaml, string $reason): void {
     memory_reset_peak_usage();
     $before = memory_get_usage();
-    $started = hrtime(true);
+    $decoder = new DocumentDecoder;
 
     try {
-        (new DocumentReader)->read($yaml);
+        $decoder->decode($yaml, null);
         $this->fail('A document that expands far past its size was read.');
     } catch (UnreadableDocumentException $exception) {
+        [$values] = $decoder->made();
+
         expect($exception->failure)->toBe(ReadFailure::AliasExpansion)
             ->and($exception->reason)->toContain($reason)
-            ->and((hrtime(true) - $started) / 1e9)->toBeLessThan(1.0)
+            // An alias bomb is refused at the value one past the budget, and a merge bomb while it is parsed,
+            // before the copy makes any.
+            ->and($values)->toBe($reason === 'values from' ? max(10_000, strlen($yaml)) + 1 : 0)
             // With the cap lifted, the parser spends 787 MB merging the 230 KB of 20,000 merges below.
             ->and(memory_get_peak_usage() - $before)->toBeLessThan(32 * 1024 * 1024);
     }
@@ -324,15 +336,16 @@ it('refuses a merge bomb at the cap its size allows, before the parser copies mo
     // `[,,,,]`, 1 GB for 100 KB and 3.7 GB for 300 KB, and 341 MB for a 300 KB block map.
     memory_reset_peak_usage();
     $before = memory_get_usage();
-    $started = hrtime(true);
+    $decoder = new DocumentDecoder;
 
     try {
-        (new DocumentReader)->read($yaml);
+        $decoder->decode($yaml, null);
         $this->fail('A merge bomb was read.');
     } catch (UnreadableDocumentException $exception) {
+        // Refused while it is parsed, so what it cost is the parser's alone, and the copy made nothing.
         expect($exception->failure)->toBe(ReadFailure::AliasExpansion)
             ->and($exception->reason)->toContain('YAML aliases to a map or a list')
-            ->and((hrtime(true) - $started) / 1e9)->toBeLessThan(1.0)
+            ->and($decoder->made())->toBe([0, 0])
             ->and(memory_get_peak_usage() - $before)->toBeLessThan(80 * 1024 * 1024);
     }
 })->with(static function (): array {

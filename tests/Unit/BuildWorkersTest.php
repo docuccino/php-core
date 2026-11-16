@@ -209,7 +209,9 @@ it('keeps a worker to its drain while its build is there, whatever the host hook
         ->and(is_dir($claims))->toBeTrue();
 });
 
-it('stops every worker soon after its build is killed, and leaves nothing of that build behind', function (): void {
+it('stops every worker at its next job once its build is killed, and leaves nothing of that build behind', function (): void {
+    // Each job holds its worker until the build has gone, so when the build is killed each worker is in the
+    // middle of its first job, and every job built after that is one a worker took on for nobody.
     $build = null;
     $jobs = 60;
 
@@ -218,12 +220,15 @@ it('stops every worker soon after its build is killed, and leaves nothing of tha
         $scratch = $out.'/scratch';
         mkdir($scratch);
         file_put_contents($scratch.'/.gitignore', '*');
+        $build = getmypid();
 
         $units = array_map(static fn (int $job): array => [(string) $job], range(0, (int) $jobs - 1));
 
-        (new Docuccino\Core\Pipeline\BuildWorkers(static fn (): int => 2))->run(2, $units, static function (string $job) use ($out): void {
-            usleep(100000);
+        (new Docuccino\Core\Pipeline\BuildWorkers(static fn (): int => 2))->run(2, $units, static function (string $job) use ($out, $build): void {
             file_put_contents($out.'/job-'.$job, '');
+            while (posix_getppid() === $build) {
+                usleep(5000);
+            }
         }, $scratch);
         PHP, [$this->out, (string) $jobs], timeout: 20.0, meanwhile: function (int $pid) use (&$build): bool {
         if (count(glob($this->out.'/job-*') ?: []) < 2) {
@@ -235,17 +240,17 @@ it('stops every worker soon after its build is killed, and leaves nothing of tha
         posix_kill($pid, SIGKILL);
 
         return true;
-    }, settle: 10.0);
+    }, settle: 30.0);
 
     expect($build)->not->toBeNull()
-        // Every worker ended by itself, well before the work the build was killed in the middle of was done.
+        // Every worker ended by itself, having finished the job it held and started no other.
         ->and($run['settled'])->toBeTrue()
-        ->and(count(glob($this->out.'/job-*') ?: []))->toBeLessThan($jobs)
+        ->and(glob($this->out.'/job-*') ?: [])->toHaveCount(2)
         ->and(glob(sys_get_temp_dir().'/docuccino-claims-'.$build.'-*'))->toBe([])
         ->and(is_dir($this->out.'/scratch'))->toBeFalse();
 });
 
-it('ends a worker that dies of a fatal error right after the shutdown work it inherited, saying nothing', function (): void {
+it('ends a worker that dies of a fatal error before any shutdown work it inherited, saying nothing', function (): void {
     // grpc is loaded here without fork support wherever it is installed, and a forked child that reaches
     // module shutdown under it never ends — so the timeout is what this fails by on a machine that has it.
     $run = runPhp(<<<'PHP'
@@ -254,7 +259,7 @@ it('ends a worker that dies of a fatal error right after the shutdown work it in
         ini_set('error_log', $out.'/error.log');
         ini_set('display_errors', 'stderr');
 
-        // The host's own shutdown work, which every worker inherits and nothing can stop a dying one running.
+        // The host's own shutdown work, which every worker inherits: the build's to run, once.
         register_shutdown_function(static function () use ($out): void {
             file_put_contents($out.'/host-'.getmypid(), '');
         });
@@ -281,11 +286,107 @@ it('ends a worker that dies of a fatal error right after the shutdown work it in
     expect($run['exit'])->toBe(0, $run['output'])
         ->and($run['output'])->toBe('returned')
         ->and(array_keys(builtBy($this->out)))->toBe(['a', 'b', 'c'])
-        // The host's shutdown work ran in the build and in the worker that died, and nothing registered
-        // after the worker's own end did.
-        ->and(glob($this->out.'/host-*'))->toHaveCount(2)
+        // The host's shutdown work ran in the build alone: a worker is a copy of the build, so running the
+        // build's shutdown work again there is a second run of it, and the worker that died ran none.
+        ->and(glob($this->out.'/host-*'))->toHaveCount(1)
         ->and(glob($this->out.'/after-*'))->toBe([])
         ->and(is_file($this->out.'/error.log'))->toBeFalse();
+});
+
+it('ends a worker however it dies, even where the shutdown work it inherited would never end', function (string $death): void {
+    // PHP runs shutdown functions in the order they were registered and stops at the first that fails, so
+    // shutdown work registered before the build forked — a framework's error handler reporting the fatal on a
+    // full heap — could pre-empt anything a worker registers, and leave it to module shutdown, where grpc
+    // without fork support hangs a forked child. One that never returns stands in for both here: the build
+    // must still end, in its own time, and make what the worker left.
+    $run = runPhp(<<<'PHP'
+        [$out, $death] = array_slice($argv, 1);
+        $build = getmypid();
+
+        register_shutdown_function(static function () use ($build): void {
+            while (getmypid() !== $build) {
+                usleep(100000);
+            }
+        });
+
+        $die = static function () use ($death): never {
+            if ($death === 'exit') {
+                exit(0);
+            }
+
+            ini_set('memory_limit', (string) (memory_get_usage() + 4 * 1024 * 1024));
+            $hog = [];
+            while (true) {
+                $hog[] = str_repeat('x', 65536);
+            }
+        };
+
+        $workers = new Docuccino\Core\Pipeline\BuildWorkers(static fn (): int => 2);
+        $workers->run(2, [['dies'], ['a'], ['b']], static function (string $job) use ($out, $build, $die): void {
+            if ($job === 'dies' && getmypid() !== $build) {
+                $die();
+            }
+
+            file_put_contents($out.'/job-'.$job, '');
+        });
+
+        // What the worker that died left unbuilt, the build makes itself.
+        foreach (['dies', 'a', 'b'] as $job) {
+            if (! is_file($out.'/job-'.$job)) {
+                file_put_contents($out.'/job-'.$job, '');
+            }
+        }
+
+        $answer = $workers->later(static function () use ($build, $die): string {
+            if (getmypid() !== $build) {
+                $die();
+            }
+
+            return 'made here';
+        });
+
+        echo $answer(), ' ', $workers->answered();
+        PHP, [$this->out, $death], ini: ['grpc.enable_fork_support' => '0'], timeout: 60.0);
+
+    expect($run['exit'])->toBe(0, $run['exit'] === null ? 'the build never ended: '.$run['output'] : $run['output'])
+        ->and($run['output'])->toBe('made here 0')
+        ->and(array_keys(builtBy($this->out)))->toBe(['a', 'b', 'dies']);
+})->with([
+    'of a fatal error' => ['fatal'],
+    'by calling exit()' => ['exit'],
+]);
+
+it('lets every process but a worker carry on past its first shutdown function', function (): void {
+    // The hook runs first at the end of every process, so the build's own shutdown work — the framework
+    // reporting a fatal, the out-of-memory notice after it — runs behind it only if it lets the build by.
+    // Registering it again here adds a second that answers the same.
+    require dirname(__DIR__, 2).'/src/shutdown.php';
+    BuildWorkers::shutdown();
+
+    expect(posix_kill(posix_getpid(), 0))->toBeTrue();
+});
+
+it('lets a build that runs out of memory past its first shutdown function, even with no room left for a first call', function (): void {
+    // The first shutdown function every process has is the worker hook, so the build's own shutdown work runs
+    // only once that has let it by. Calling into the workers there would be a method's first call, which takes
+    // memory a build that ran out has none of, and PHP would stop at that second fatal with nothing after it run.
+    $run = runPhp(<<<'PHP'
+        Docuccino\Core\Pipeline\BuildWorkers::none();
+        register_shutdown_function(static function (): void {
+            fwrite(STDOUT, "\nshut down\n");
+        });
+        PHP."\n".fillingTheArena()."\n".<<<'PHP'
+        ini_set('memory_limit', (string) (memory_get_usage(true) + 8 * 1024 * 1024));
+        $hog = [];
+        while (true) {
+            $hog[] = str_repeat('x', 512);
+        }
+        PHP, ini: ['memory_limit' => '512M', 'display_errors' => 'stdout', 'log_errors' => '0'], timeout: 30.0);
+
+    expect($run['output'])->toContain('arena: 3')
+        ->and($run['exit'])->toBe(255)
+        ->and(substr_count($run['output'], 'Allowed memory size of'))->toBe(1, $run['output'])
+        ->and(trim($run['output']))->toEndWith('shut down');
 });
 
 it('builds alone when this machine refuses a fork, under a host that turns every warning into an exception', function (): void {
@@ -471,6 +572,26 @@ it('runs a task here when its answer is asked for, where no worker may be forked
         ->and($workers->answered())->toBe(0);
 });
 
+it('says when this process holds an answer: from the first ask until it is let go, wherever it was made', function (int $limit): void {
+    // What a caller holding one large answer at a time is held to, read from the order rather than from memory.
+    $events = [];
+    $workers = new BuildWorkers(static fn (): int => $limit, holds: static function (bool $made) use (&$events): void {
+        $events[] = $made ? 'made' : 'let go';
+    });
+
+    $answer = $workers->later(static fn (): string => (string) getmypid());
+    $unasked = $workers->later(static fn (): string => 'never asked for');
+    $events[] = 'started';
+    $where = $answer();
+    $answer();
+    $events[] = 'asked twice';
+    unset($answer, $unasked);
+
+    // An answer let go unasked was never held here, so it says nothing.
+    expect($events)->toBe(['started', 'made', 'asked twice', 'let go'])
+        ->and($where === (string) getmypid())->toBe($limit === 1);
+})->with(['made here' => 1, 'made by a worker' => 3]);
+
 it('keeps one worker fewer than its limit running, and runs the rest here', function (): void {
     $workers = new BuildWorkers(static fn (): int => 3);
     $where = static fn (): string => (string) getmypid();
@@ -573,7 +694,9 @@ it('ends and reaps a worker whose answer nobody asks for, and frees its place', 
     $workers = new BuildWorkers(static fn (): int => 2);
     $started = $this->out.'/started';
     $answer = $workers->later(static function () use ($started): string {
-        file_put_contents($started, (string) getmypid());
+        // Written aside and renamed into place, so the file is whole from the moment it can be seen.
+        file_put_contents($started.'.part', (string) getmypid());
+        rename($started.'.part', $started);
         usleep(200_000);
 
         return (string) getmypid();

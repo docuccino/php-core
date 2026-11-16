@@ -193,6 +193,12 @@ final class SchemaComparator
             return $beside;
         }
 
+        $refined = $readings ? $this->compareRefinedUnion($old, $new, $path, $id, $request) : null;
+
+        if ($refined !== null) {
+            return $refined;
+        }
+
         $parts = $readings ? $this->compareIntersection($old, $new, $path, $id, $request) : null;
 
         if ($parts !== null) {
@@ -275,6 +281,37 @@ final class SchemaComparator
             : [];
 
         return [$oldBody ?? $old, $newBody ?? $new, $pair, $moved];
+    }
+
+    /**
+     * A union refined member by member, spelled as its pointer with the refinements beside it on one side and
+     * as its members listed on the other, compared refinement by refinement; or null to compare as written.
+     * The reading is docs/design/uir-and-extensions.md §1 "Reading through a spelling".
+     *
+     * @return list<Change>|null
+     */
+    private function compareRefinedUnion(mixed $old, mixed $new, string $path, string $id, bool $request): ?array
+    {
+        if ($this->oldRefs === null || $this->newRefs === null) {
+            return null;
+        }
+
+        $before = RefinedUnion::of($old, $this->oldRefs);
+        $after = $before === null ? null : RefinedUnion::of($new, $this->newRefs);
+
+        if ($before === null || $after === null || $before->listed === $after->listed
+            || array_diff_key($before->members, $after->members) !== [] || array_diff_key($after->members, $before->members) !== []
+            || ValueKey::of($before->discriminator) !== ValueKey::of($after->discriminator)) {
+            return null;
+        }
+
+        $changes = $this->compareSubschema($before->rest, $after->rest, $path, $id, $request);
+
+        foreach ($after->members as $pointer => $member) {
+            array_push($changes, ...$this->compareSubschema($before->members[$pointer]['refinement'], $member['refinement'], $path.$member['at'], $id, $request));
+        }
+
+        return $changes;
     }
 
     /**
@@ -1243,7 +1280,7 @@ final class SchemaComparator
             return;
         }
 
-        [$pairs, $gone, $arrived] = self::pairBranches($before, $after);
+        [$pairs, $gone, $arrived] = $this->pairBranches($before, $after);
 
         foreach ($pairs as [$i, $j]) {
             foreach ($this->reclassified($this->compareSubschema($before[$i], $after[$j], $child.'.'.$j, $id, $request), $rule) as $change) {
@@ -1530,8 +1567,8 @@ final class SchemaComparator
     /**
      * Which of two lists' branches are the same branch. The ladder is
      * {@see ComponentNames}' rule applied to a list of branches: a member's own identity, then the
-     * component it names, then its content — never its position, or reordering `oneOf` would read as
-     * rewriting every branch. Where one rung matches two members on a side they pair in index order,
+     * component it names, then what it refines ({@see RefinedUnion::key()}), then its content — never its
+     * position, or reordering `oneOf` would read as rewriting every branch. Where one rung matches two members on a side they pair in index order,
      * which is immaterial while the rung is what makes them equal.
      *
      * The last rung is the only inexact one, and it is why an inline branch edited in place reads as an
@@ -1546,21 +1583,28 @@ final class SchemaComparator
      * @param  list<mixed>  $new
      * @return array{list<array{int, int}>, list<int>, list<int>}
      */
-    private static function pairBranches(array $old, array $new): array
+    private function pairBranches(array $old, array $new): array
     {
-        /** @var list<callable(mixed): ?string> $rungs */
-        $rungs = [self::identityKey(...), self::refKey(...), ValueKey::of(...)];
+        $refined = fn (?ComponentRefs $refs): Closure => static fn (mixed $branch): ?string => $refs === null ? null : RefinedUnion::key($branch, $refs);
+
+        /** @var list<array{callable(mixed): ?string, callable(mixed): ?string}> $rungs */
+        $rungs = [
+            [self::identityKey(...), self::identityKey(...)],
+            [self::refKey(...), self::refKey(...)],
+            [$refined($this->oldRefs), $refined($this->newRefs)],
+            [ValueKey::of(...), ValueKey::of(...)],
+        ];
 
         $pairs = [];
         $oldLeft = array_keys($old);
         $newLeft = array_keys($new);
 
-        foreach ($rungs as $rung) {
+        foreach ($rungs as [$oldRung, $newRung]) {
             /** @var array<string, list<int>> $waiting */
             $waiting = [];
 
             foreach ($newLeft as $j) {
-                $key = $rung($new[$j]);
+                $key = $newRung($new[$j]);
 
                 if ($key !== null) {
                     $waiting[$key][] = $j;
@@ -1571,7 +1615,7 @@ final class SchemaComparator
             $taken = [];
 
             foreach ($oldLeft as $i) {
-                $key = $rung($old[$i]);
+                $key = $oldRung($old[$i]);
 
                 if ($key === null || ($waiting[$key] ?? []) === []) {
                     $unpaired[] = $i;

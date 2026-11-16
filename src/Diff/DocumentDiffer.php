@@ -35,8 +35,9 @@ use Docuccino\Core\Support\Json;
  * added required parameter, a security scheme a requirement still names changing or going away,
  * plus the schema-level rules SchemaComparator owns. Additions, prose edits and deprecations
  * aren't — and since only modelled fields and schema structure are compared, a provenance-only
- * delta yields an empty changeset. A component nothing reaches is the one place a rule is stood
- * down; {@see diffComponentSchemas()} owns why.
+ * delta yields an empty changeset. That includes a component only provenance reaches, which each side
+ * drops before anything is compared ({@see PublishedSide}). A component nothing reaches is the one
+ * place a rule is stood down; {@see diffComponentSchemas()} owns why.
  *
  * Identities carry an algorithm version (`op:v1:…`); documents minted by different algo versions
  * can't be paired safely, so the differ throws {@see IncomparableDocumentsException} rather than
@@ -61,7 +62,7 @@ final class DocumentDiffer
 
     public function diff(UirDocument $old, UirDocument $new): Changeset
     {
-        [$old, $new] = CommonDialect::of($old, $new);
+        [$old, $new] = CommonDialect::of(PublishedSide::of($old), PublishedSide::of($new));
 
         $oldRefs = ComponentRefs::of($old);
         $newRefs = ComponentRefs::of($new);

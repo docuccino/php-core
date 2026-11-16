@@ -670,7 +670,9 @@ final class ResponseDraft
             $content = [];
             foreach ($this->content as $mediaType => $schema) {
                 [$illustration, $generated] = $this->illustration((string) $mediaType);
-                $content[$mediaType] = ['schema' => $schema->freeze()->toArray()] + $illustration;
+                // Every writer has had its turn, so the notes a schema carries go beneath whatever
+                // description won ({@see SchemaNotes}), as a request body's do when its operation freezes.
+                $content[$mediaType] = ['schema' => SchemaNotes::rendered($schema->freeze()->toArray())] + $illustration;
 
                 $filled = $this->filled((string) $mediaType, $generated);
                 if ($filled !== []) {

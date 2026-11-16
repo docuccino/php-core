@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Emit;
 
-use Docuccino\Core\Contract\Pointer;
 use Docuccino\Core\Extensions\Schema\ComponentNames;
 
 /**
@@ -34,8 +33,8 @@ final class StrandedComponents
             return $after;
         }
 
-        $reachedBefore = self::reached($before);
-        $reachedAfter = self::reached($after);
+        $reachedBefore = ComponentNames::reached($before);
+        $reachedAfter = ComponentNames::reached($after);
 
         foreach ($components as $section => $bucket) {
             if ($section === self::UNREFERENCED_SECTION || ! is_array($bucket)) {
@@ -66,54 +65,5 @@ final class StrandedComponents
         }
 
         return $after;
-    }
-
-    /**
-     * Every component the document reaches from outside `components`, by section and name. A pointer
-     * into a component reaches the component.
-     *
-     * @param  array<array-key, mixed>  $document
-     * @return array<string, array<string, true>>
-     */
-    private static function reached(array $document): array
-    {
-        $components = is_array($document['components'] ?? null) ? $document['components'] : [];
-        unset($document['components']);
-
-        $reached = [];
-        $pending = ComponentNames::references($document);
-
-        while ($pending !== []) {
-            $at = self::component((string) array_pop($pending));
-            if ($at === null || isset($reached[$at[0]][$at[1]])) {
-                continue;
-            }
-
-            $reached[$at[0]][$at[1]] = true;
-
-            $section = $components[$at[0]] ?? null;
-            $body = is_array($section) ? ($section[$at[1]] ?? null) : null;
-            if (is_array($body)) {
-                array_push($pending, ...ComponentNames::references($body));
-            }
-        }
-
-        return $reached;
-    }
-
-    /**
-     * The section and name of the component a local pointer addresses or points into.
-     *
-     * @return array{0: string, 1: string}|null
-     */
-    private static function component(string $ref): ?array
-    {
-        $segments = explode('/', $ref, 5);
-
-        if (count($segments) < 4 || $segments[0] !== '#' || $segments[1] !== 'components' || $segments[2] === '' || $segments[3] === '') {
-            return null;
-        }
-
-        return [Pointer::unescape($segments[2]), Pointer::unescape($segments[3])];
     }
 }

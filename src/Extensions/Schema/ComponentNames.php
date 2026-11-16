@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Docuccino\Core\Extensions\Schema;
 
 use Closure;
+use Docuccino\Core\Contract\Pointer;
 use Docuccino\Core\Document\DocumentMembers;
 use Docuccino\Core\Identity\Base32;
 
@@ -419,11 +420,63 @@ final class ComponentNames
     }
 
     /**
+     * Every component `$document` reaches from outside `components`, closed over what those reach in
+     * turn, by section and name. A pointer into a component reaches the component. The one reachability
+     * walk: the build keeps what it reaches ({@see ComponentRegistry::retain()}), and an emission drops
+     * what only a member it drops reached.
+     *
+     * @param  array<array-key, mixed>  $document
+     * @return array<string, array<string, true>>
+     */
+    public static function reached(array $document): array
+    {
+        $components = is_array($document['components'] ?? null) ? $document['components'] : [];
+        unset($document['components']);
+
+        $reached = [];
+        $pending = self::references($document);
+
+        while ($pending !== []) {
+            $at = self::componentAt(array_pop($pending));
+            if ($at === null || isset($reached[$at[0]][$at[1]])) {
+                continue;
+            }
+
+            $reached[$at[0]][$at[1]] = true;
+
+            $section = $components[$at[0]] ?? null;
+            $body = is_array($section) ? ($section[$at[1]] ?? null) : null;
+            if (is_array($body)) {
+                array_push($pending, ...self::references($body));
+            }
+        }
+
+        return $reached;
+    }
+
+    /**
+     * The section and name of the component a local pointer addresses or points into.
+     *
+     * @return array{0: string, 1: string}|null
+     */
+    private static function componentAt(string $ref): ?array
+    {
+        $segments = explode('/', $ref, 5);
+
+        if (count($segments) < 4 || $segments[0] !== '#' || $segments[1] !== 'components' || $segments[2] === '' || $segments[3] === '') {
+            return null;
+        }
+
+        return [Pointer::unescape($segments[2]), Pointer::unescape($segments[3])];
+    }
+
+    /**
      * Every reference under `$node` put through `$reference`, members read by {@see DocumentMembers}: a
      * value the document STATES is left whole, and a property or response only named like one is a node
      * like any other. Inside an `x-` member every `$ref` is a reference — an extension's vocabulary is
      * its own, and the provenance this product records names shapes by the components this document
-     * publishes them under.
+     * publishes them under — including the one place a trail holds a pointer with no `$ref` key: the
+     * `overrode` entry of an overridden `$ref` field, whose `value` is the pointer itself.
      *
      * @template TKey of array-key
      *
@@ -439,6 +492,12 @@ final class ComponentNames
             $member = (string) $key;
 
             if ($inNameMap === null && $member === '$ref' && is_string($value)) {
+                $node[$key] = $reference($value);
+
+                continue;
+            }
+
+            if ($extension && $member === 'value' && is_string($value) && ($node['field'] ?? null) === '$ref') {
                 $node[$key] = $reference($value);
 
                 continue;

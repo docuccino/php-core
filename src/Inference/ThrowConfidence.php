@@ -7,7 +7,8 @@ namespace Docuccino\Core\Inference;
 /**
  * How sure the engine is a {@see ThrownException} really escapes:
  *
- *   - `certain`  — a literal `throw`, or a registry hit PHPStan corroborated with a matching type;
+ *   - `certain`  — a literal `throw`, a registry hit PHPStan corroborated with a matching type, or a
+ *     declared throw every value of the call's constant argument raises;
  *   - `declared` — from a `@throws` docblock or a Larastan stub;
  *   - `likely`   — a registry rescue of an implicit bare-`Throwable` forwarder (static
  *     `Model::findOrFail`, say) that PHPStan didn't corroborate.

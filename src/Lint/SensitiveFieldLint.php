@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Lint;
 
+use Docuccino\Core\Contract\Pointer;
 use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
 use Docuccino\Core\Document\DocumentMembers;
+use Docuccino\Core\Draft\ParameterDraft;
 use Docuccino\Core\Extensions\Context\DocumentContext;
 use Docuccino\Core\Extensions\Document\UirDocumentDraft;
 use Docuccino\Core\Extensions\Ordering\ExtensionOrder;
@@ -34,7 +36,14 @@ use Docuccino\Core\Extensions\Ordering\Priorities;
  * options and registers it. Pinned to run last so the pointers it publishes are the pointers the
  * emitted document has — a body hoisted into a shared component is reported once, at the component.
  *
- * @phpstan-type LeakFinding array{name: string, pointer: string, label: string, kind: 'property'|'value'|'parameter', in: string|null}
+ * A finding's pointer is its safelist key, so it is spelled to stay put: RFC 6901-escaped, so the `/` in
+ * every path template is a token and not a separator, and with a parameter named by `in:name` where JSON
+ * Pointer could only give its position in the list. That is how OpenAPI tells one parameter from another
+ * and the spelling the differ and the explainer name one by; a position moves whenever the list is
+ * reordered, and an entry keyed on it then silences nothing, or another parameter. So a parameter's
+ * pointer is read, not resolved: `/paths/~1users/get/parameters/query:api_key/name`.
+ *
+ * @phpstan-type LeakFinding array{name: string, pointer: string, written: string, label: string, kind: 'property'|'value'|'parameter', in: string|null}
  */
 #[ExtensionOrder(priority: Priorities::LAST)]
 final class SensitiveFieldLint implements DocumentLint
@@ -63,12 +72,18 @@ final class SensitiveFieldLint implements DocumentLint
         }
 
         $findings = [];
-        $this->walk($document->toArray(), [], $findings);
+        $this->walk($document->toArray(), [], [], $findings);
 
         foreach ($findings as $finding) {
             if ($this->silenced($finding['name'], $finding['pointer'])) {
                 continue;
             }
+
+            $help = match ($finding['kind']) {
+                'value' => 'Replace the example with a placeholder or, if it is genuinely public, safelist the pointer under lint.leakage.allow.',
+                'property' => 'Take the field out of the shape that publishes it — #[Hidden] removes a property from response schemas, #[HiddenFromRequest] from a request body — or, if intentional, safelist it under lint.leakage.allow.',
+                'parameter' => 'Carry the value in a header instead: a URL is recorded in access logs, browser history and outbound Referer headers. If it really is public, safelist the name or the pointer under lint.leakage.allow.',
+            };
 
             $context->report(new Diagnostic(
                 severity: Severity::Warning,
@@ -78,11 +93,11 @@ final class SensitiveFieldLint implements DocumentLint
                     'property' => sprintf('Property "%s" (%s) looks like %s and may leak sensitive data.', $finding['name'], $finding['pointer'], $finding['label']),
                     'parameter' => sprintf('The %s parameter "%s" (%s) looks like %s and may leak sensitive data.', $finding['in'] ?? '', $finding['name'], $finding['pointer'], $finding['label']),
                 },
-                help: match ($finding['kind']) {
-                    'value' => 'Replace the example with a placeholder or, if it is genuinely public, safelist the pointer under lint.leakage.allow.',
-                    'property' => 'Take the field out of the shape that publishes it — #[Hidden] removes a property from response schemas, #[HiddenFromRequest] from a request body — or, if intentional, safelist it under lint.leakage.allow.',
-                    'parameter' => 'Carry the value in a header instead: a URL is recorded in access logs, browser history and outbound Referer headers. If it really is public, safelist the name or the pointer under lint.leakage.allow.',
-                },
+                help: $this->stale($finding) ? $help.sprintf(
+                    ' lint.leakage.allow has "%s", the spelling this pointer had before pointers were RFC 6901-escaped and parameters named by in:name, so it no longer matches. If it was written for this finding, write "%s".',
+                    $finding['written'],
+                    $finding['pointer'],
+                ) : $help,
             ));
         }
     }
@@ -94,27 +109,45 @@ final class SensitiveFieldLint implements DocumentLint
      * a key called `example` is a name, and a value member is scanned whole rather than walked for
      * property names it merely spells.
      *
-     * @param  list<string>  $path
+     * @param  list<string>  $path  the pointer's tokens, unescaped, a parameter's as {@see token()} spells it
+     * @param  list<string>  $written  the same members as written, for {@see stale()}
      * @param  list<LeakFinding>  $findings
      * @param  ?string  $inNameMap  the name map $node is, or null where its keys are keywords
      */
-    private function walk(mixed $node, array $path, array &$findings, ?string $inNameMap = null): void
+    private function walk(mixed $node, array $path, array $written, array &$findings, ?string $inNameMap = null): void
     {
         if (! is_array($node)) {
             return;
         }
 
         if ($inNameMap === null) {
-            $this->keywords($node, $path, $findings);
+            $this->keywords($node, $path, $written, $findings);
         }
 
         // A value member was scanned whole above. An `x-` member is still walked: what it publishes can
         // leak as readily as a schema does.
         foreach ($node as $key => $child) {
             if (is_array($child) && ! ($inNameMap === null && in_array((string) $key, self::VALUE_KEYS, true))) {
-                $this->walk($child, [...$path, (string) $key], $findings, DocumentMembers::nameMap((string) $key, $inNameMap));
+                $this->walk($child, [...$path, self::token($path, $key, $child)], [...$written, (string) $key], $findings, DocumentMembers::nameMap((string) $key, $inNameMap));
             }
         }
+    }
+
+    /**
+     * The token a member is spelled by below $path: its key, except for an entry of a parameter list,
+     * which is spelled by the `in:name` that makes it itself ({@see ParameterDraft::keyFor()}). An entry
+     * stating neither — a `$ref`, which no finding lands under — keeps its position, as the explainer's
+     * does. `components.parameters` is a map of names, which are stable already.
+     *
+     * @param  list<string>  $path
+     */
+    private static function token(array $path, int|string $key, mixed $member): string
+    {
+        $listed = is_int($key) && end($path) === 'parameters' && ($path[count($path) - 2] ?? null) !== 'components';
+        $in = is_array($member) ? ($member['in'] ?? null) : null;
+        $name = is_array($member) ? ($member['name'] ?? null) : null;
+
+        return $listed && is_string($in) && is_string($name) && $name !== '' ? ParameterDraft::keyFor($in, $name) : (string) $key;
     }
 
     /**
@@ -123,36 +156,32 @@ final class SensitiveFieldLint implements DocumentLint
      *
      * @param  array<mixed>  $node
      * @param  list<string>  $path
+     * @param  list<string>  $written
      * @param  list<LeakFinding>  $findings
      */
-    private function keywords(array $node, array $path, array &$findings): void
+    private function keywords(array $node, array $path, array $written, array &$findings): void
     {
         $properties = $node['properties'] ?? null;
         if (is_array($properties)) {
             foreach ($properties as $name => $schema) {
                 $label = $this->options->match((string) $name);
                 if ($label !== null) {
-                    $findings[] = [
-                        'name' => (string) $name,
-                        'pointer' => '/'.implode('/', [...$path, 'properties', (string) $name]),
-                        'label' => $label,
-                        'kind' => 'property',
-                        'in' => null,
-                    ];
+                    $findings[] = self::finding((string) $name, [...$path, 'properties', (string) $name], [...$written, 'properties', (string) $name], $label, 'property');
                 }
             }
         }
 
         $parameters = $node['parameters'] ?? null;
         if (is_array($parameters)) {
+            $at = [...$path, 'parameters'];
             foreach ($parameters as $key => $parameter) {
-                $this->scanParameter($parameter, [...$path, 'parameters', (string) $key], $findings);
+                $this->scanParameter($parameter, [...$at, self::token($at, $key, $parameter)], [...$written, 'parameters', (string) $key], $findings);
             }
         }
 
         foreach (self::VALUE_KEYS as $key) {
             if (array_key_exists($key, $node)) {
-                $this->scanValue($node[$key], $key, [...$path, $key], $findings);
+                $this->scanValue($node[$key], $key, [...$path, $key], [...$written, $key], $findings);
             }
         }
     }
@@ -169,9 +198,10 @@ final class SensitiveFieldLint implements DocumentLint
      * to read and nothing the finding could point the reader at.
      *
      * @param  list<string>  $path
+     * @param  list<string>  $written
      * @param  list<LeakFinding>  $findings
      */
-    private function scanParameter(mixed $parameter, array $path, array &$findings): void
+    private function scanParameter(mixed $parameter, array $path, array $written, array &$findings): void
     {
         if (! is_array($parameter) || isset($parameter['$ref'])) {
             return;
@@ -188,13 +218,7 @@ final class SensitiveFieldLint implements DocumentLint
 
         $label = $this->options->match($name);
         if ($label !== null) {
-            $findings[] = [
-                'name' => $name,
-                'pointer' => '/'.implode('/', [...$path, 'name']),
-                'label' => $label,
-                'kind' => 'parameter',
-                'in' => $in,
-            ];
+            $findings[] = self::finding($name, [...$path, 'name'], [...$written, 'name'], $label, 'parameter', $in);
         }
     }
 
@@ -204,13 +228,14 @@ final class SensitiveFieldLint implements DocumentLint
      * has only moved it into the build log.
      *
      * @param  list<string>  $path
+     * @param  list<string>  $written
      * @param  list<LeakFinding>  $findings
      */
-    private function scanValue(mixed $value, string $name, array $path, array &$findings): void
+    private function scanValue(mixed $value, string $name, array $path, array $written, array &$findings): void
     {
         if (is_array($value)) {
             foreach ($value as $key => $child) {
-                $this->scanValue($child, (string) $key, [...$path, (string) $key], $findings);
+                $this->scanValue($child, (string) $key, [...$path, (string) $key], [...$written, (string) $key], $findings);
             }
 
             return;
@@ -218,19 +243,43 @@ final class SensitiveFieldLint implements DocumentLint
 
         $label = is_string($value) ? CredentialShapes::label($value) : null;
         if ($label !== null) {
-            $findings[] = [
-                'name' => $name,
-                'pointer' => '/'.implode('/', $path),
-                'label' => $label,
-                'kind' => 'value',
-                'in' => null,
-            ];
+            $findings[] = self::finding($name, $path, $written, $label, 'value');
         }
+    }
+
+    /**
+     * @param  list<string>  $path
+     * @param  list<string>  $written
+     * @param  'property'|'value'|'parameter'  $kind
+     * @return LeakFinding
+     */
+    private static function finding(string $name, array $path, array $written, string $label, string $kind, ?string $in = null): array
+    {
+        return [
+            'name' => $name,
+            'pointer' => Pointer::of($path),
+            'written' => '/'.implode('/', $written),
+            'label' => $label,
+            'kind' => $kind,
+            'in' => $in,
+        ];
     }
 
     /** {@see LintSafelist} is why a safelist entry spelled `#/…` lands against the bare pointer minted above. */
     private function silenced(string $name, string $pointer): bool
     {
         return LintSafelist::matches($this->options->allow, $name, $pointer);
+    }
+
+    /**
+     * Whether an entry still spells the finding the way the pointer used to be printed — joined unescaped,
+     * a parameter by its position. Such an entry silences nothing now; this is read only so the finding
+     * names the entry and the pointer to write, rather than coming back with no word about why.
+     *
+     * @param  LeakFinding  $finding
+     */
+    private function stale(array $finding): bool
+    {
+        return $finding['written'] !== $finding['pointer'] && LintSafelist::matches($this->options->allow, $finding['written']);
     }
 }

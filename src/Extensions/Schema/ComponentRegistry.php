@@ -6,6 +6,7 @@ namespace Docuccino\Core\Extensions\Schema;
 
 use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
+use Docuccino\Core\Draft\SchemaNotes;
 use Docuccino\Core\Identity\IdentityGenerator;
 use Docuccino\Core\Support\Json;
 
@@ -112,12 +113,16 @@ final class ComponentRegistry
      * A structurally-identical re-registration of the same identity is deduped; see {@see mergesInto()}
      * for why two identities are never merged, however alike their bytes.
      *
+     * A component is published as registered, so the notes a schema carries beside its descriptions are
+     * rendered beneath them here ({@see SchemaNotes}).
+     *
      * @param  array<string, mixed>  $schema
      */
     public function registerSchema(string $name, array $schema, ?string $schemaId = null): string
     {
         $this->revision++;
         $base = self::sanitize($name);
+        $schema = SchemaNotes::rendered($schema);
 
         if ($schemaId !== null) {
             // Same identity (same class FQCN) already registered — reuse it, so one class is one
@@ -594,6 +599,34 @@ final class ComponentRegistry
         $this->revision++;
         $this->responses = $snapshot['responses'];
         $this->responseBases = $snapshot['responseBases'];
+    }
+
+    /**
+     * Keeps only the schemas and responses `$reached` names, by slot and section as
+     * {@see ComponentNames::reached()} answers. A warm build re-registers only what an operation reaches,
+     * so a body registered and then not used — overridden, restated inline, dropped — is published by a
+     * cold build alone; settling names over what is kept makes the two agree, names and collisions
+     * included. Security schemes are named by `security` rather than referenced, and are left alone.
+     *
+     * @param  array<string, array<string, true>>  $reached
+     */
+    public function retain(array $reached): void
+    {
+        $this->revision++;
+
+        $schemas = $reached['schemas'] ?? [];
+        foreach (array_keys($this->schemas) as $slot) {
+            if (! isset($schemas[$slot])) {
+                unset($this->schemas[$slot], $this->schemaIds[$slot], $this->schemaBases[$slot]);
+            }
+        }
+
+        $responses = $reached['responses'] ?? [];
+        foreach (array_keys($this->responses) as $slot) {
+            if (! isset($responses[$slot])) {
+                unset($this->responses[$slot], $this->responseBases[$slot]);
+            }
+        }
     }
 
     /**

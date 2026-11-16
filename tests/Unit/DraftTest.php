@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Docuccino\Core\Draft\OperationDraft;
+use Docuccino\Core\Draft\ParameterDraft;
 use Docuccino\Core\Draft\ResponseDraft;
 use Docuccino\Core\Draft\SchemaDraft;
 use Docuccino\Core\Draft\SchemaKeywords;
@@ -62,6 +63,109 @@ it('carries a shadowed value onto the frozen node so the emitted trail can answe
         ->and($records[0]['producer'])->toBe('attribute')
         ->and($records[0]['overrode'])->toBe([
             ['field' => 'summary', 'value' => 'Docblock loses', 'producer' => 'docblock'],
+        ]);
+});
+
+/**
+ * A fact the build proved — a requirement the route enforces, how a bound path segment resolves — is true
+ * under whatever description the author writes, so it is a sentence added beneath the winning description
+ * and not a contender for the field: a docblock or attribute must not erase it, and it must not displace
+ * the author's prose. Every draft that publishes a description owes the same answer, so each is a row.
+ */
+dataset('drafts that carry description notes', [
+    'an operation' => [static fn (): OperationDraft => new OperationDraft],
+    'a parameter' => [static fn (): ParameterDraft => new ParameterDraft('path', 'post')],
+]);
+
+it('joins a declared description note after the winning description, whichever layer wrote it', function (Closure $draft): void {
+    /** @var OperationDraft|ParameterDraft $draft */
+    $draft = $draft();
+    $inferred = Contribution::integration('sanctum-abilities');
+
+    $draft->declareDescriptionNote('Requires token ability: read', $inferred);
+    $draft->setDescription('Author prose.', Contribution::attribute());
+
+    $node = $draft->freeze();
+    $records = $node->docuccino?->provenance?->toArray() ?? [];
+    $byProducer = array_column($records, null, 'producer');
+
+    expect($node->description)->toBe("Author prose.\n\nRequires token ability: read")
+        // Each wrote part of the description, so both records say so, and neither displaced the other.
+        ->and($byProducer['attribute']['fields'])->toBe(['description'])
+        ->and($byProducer['attribute'])->not->toHaveKey('overrode')
+        ->and($byProducer['integration:sanctum-abilities']['fields'])->toBe(['description']);
+})->with('drafts that carry description notes');
+
+it('publishes the notes alone, in the order declared, when nothing writes a description', function (Closure $draft): void {
+    // Two producers at ONE layer: as a contested field the second would be shadowed by the first and its
+    // fact lost. Notes are added, so both stand.
+    /** @var OperationDraft|ParameterDraft $draft */
+    $draft = $draft();
+
+    $draft->declareDescriptionNote('Requires permission: moderate', Contribution::integration('permission'));
+    $draft->declareDescriptionNote('Requires token ability: read', Contribution::integration('sanctum-abilities'));
+
+    $node = $draft->freeze();
+    $producers = array_column($node->docuccino?->provenance?->toArray() ?? [], 'fields', 'producer');
+
+    expect($node->description)->toBe("Requires permission: moderate\n\nRequires token ability: read")
+        ->and($producers)->toBe([
+            'integration:permission' => ['description'],
+            'integration:sanctum-abilities' => ['description'],
+        ]);
+})->with('drafts that carry description notes');
+
+it('names a note and the requirement it shares a record with in one provenance record', function (): void {
+    // One producer that both required the segment and wrote its note is one record naming both fields,
+    // which is what the same producer writing both as contested fields published.
+    $parameter = new ParameterDraft('path', 'post');
+    $inference = Contribution::inference();
+
+    $parameter->setRequired(true, $inference);
+    $parameter->declareDescriptionNote('Matched on the resource\'s `slug`.', $inference);
+
+    expect($parameter->freeze()->docuccino?->provenance?->toArray())->toBe([
+        ['producer' => 'inference', 'layer' => 'inference', 'fields' => ['description', 'required']],
+    ]);
+});
+
+it('joins a note beneath a schema member\'s description, as a parameter does', function (): void {
+    // A deepObject member is the same field a flat parameter would be, so the rule it carries owes the
+    // same answer: the author's prose leads, and the rule's fact stands beneath it.
+    $member = new SchemaDraft;
+    $rules = Contribution::integration('form-request');
+
+    $member->set('type', 'string', $rules);
+    $member->declareDescriptionNote('Must be a date after from.', $rules);
+    $member->set('description', 'End of the range.', Contribution::attribute());
+
+    $frozen = $member->freeze()->toArray();
+    $byProducer = array_column($frozen['x-docuccino']['provenance'] ?? [], 'fields', 'producer');
+
+    expect($frozen['description'])->toBe("End of the range.\n\nMust be a date after from.")
+        ->and($byProducer)->toBe(['attribute' => ['description'], 'integration:form-request' => ['description', 'type']]);
+});
+
+it('publishes a schema member\'s notes alone where nothing wrote a description', function (): void {
+    $member = new SchemaDraft;
+    $member->declareDescriptionNote('Required when name is present.', Contribution::integration('form-request'));
+
+    expect($member->freeze()->toArray()['description'])->toBe('Required when name is present.');
+});
+
+it('names a producer once that both won a description and wrote a note beneath it', function (): void {
+    // An enum's own prose and the rule beside it come from one producer: it wrote the field once.
+    $parameter = new ParameterDraft('query', 'stage');
+    $rules = Contribution::integration('form-request');
+
+    $parameter->setDescription('How far through review a submission has got.', $rules);
+    $parameter->declareDescriptionNote('Required when name is present.', $rules);
+
+    $frozen = $parameter->freeze();
+
+    expect($frozen->description)->toBe("How far through review a submission has got.\n\nRequired when name is present.")
+        ->and(array_column($frozen->docuccino?->provenance?->toArray() ?? [], 'fields', 'producer'))->toBe([
+            'integration:form-request' => ['description'],
         ]);
 });
 

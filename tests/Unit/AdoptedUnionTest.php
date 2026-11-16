@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Docuccino\Core\Extensions\Validation\AdoptedUnion;
+use Opis\JsonSchema\Validator;
 
 /*
  * A declared union written over the object the rules split by a tag. Which declarations adopt the split,
@@ -36,17 +37,20 @@ it('refines the declared union by tag value with what only the rules state', fun
         'shape',
     );
 
+    // Each member the rules bound further is that member AND its refinement, in an `allOf` a generator merges
+    // a property at a time — so a bounded property is restated whole, typed, rather than as a bare bound a
+    // generator reads as `unknown`. The union stays told apart as its component is.
     expect($adopted?->schema)->toEqual([
         // The rules' own annotations stand where the declaration says nothing of its own.
         'description' => 'From the rules.',
-        '$ref' => '#/components/schemas/Shape',
-        'anyOf' => [
+        'oneOf' => [
             // A bound the declared member does not state; its prose is the declaration's to write.
-            ['properties' => ['kind' => ['const' => 'round'], 'radius' => ['minimum' => 0]]],
+            ['allOf' => [['$ref' => '#/components/schemas/Round'], ['type' => 'object', 'properties' => ['radius' => ['type' => 'number', 'minimum' => 0]]]]],
             // The declared `maximum` is the tighter, so the rules' adds nothing beside it; a member the
             // declaration lacks is the rules' to describe, and one they require it leaves optional is required.
-            ['properties' => ['kind' => ['const' => 'square'], 'label' => ['type' => 'string', 'maxLength' => 3]], 'required' => ['label']],
+            ['allOf' => [['$ref' => '#/components/schemas/Square'], ['type' => 'object', 'properties' => ['label' => ['type' => 'string', 'maxLength' => 3]], 'required' => ['label']]]],
         ],
+        'discriminator' => ['propertyName' => 'kind', 'mapping' => ['round' => '#/components/schemas/Round', 'square' => '#/components/schemas/Square']],
     ])
         // The declared `maximum` refuses a side the server takes, and the declaration admits no null
         // where the rules do; `label` is required by the rules and listed by no declared member.
@@ -98,7 +102,17 @@ it('reads a declared member through its reference to refine what is inside it', 
         'shape',
     );
 
-    expect($adopted?->schema['anyOf'][0] ?? null)->toBe(['properties' => ['kind' => ['const' => 'round'], 'centre' => ['properties' => ['x' => ['minimum' => 0]]]]]);
+    // The member's own pointer is kept and refined beside it, typed as its target is, so the refinement
+    // restates nothing of `Point` but the property it bounds.
+    expect($adopted?->schema['oneOf'][0] ?? null)->toBe(['allOf' => [
+        ['$ref' => '#/components/schemas/Round'],
+        ['type' => 'object', 'properties' => ['centre' => ['allOf' => [
+            ['$ref' => '#/components/schemas/Point'],
+            ['type' => 'object', 'properties' => ['x' => ['type' => 'integer', 'minimum' => 0]]],
+        ]]]],
+    ]])
+        // A member the rules bound no further is its bare pointer.
+        ->and($adopted?->schema['oneOf'][1] ?? null)->toBe(['$ref' => '#/components/schemas/Square']);
 });
 
 it('leaves to the declared-shape rule what it cannot adopt', function (array $declared, array $standing, array $schemas): void {
@@ -148,9 +162,10 @@ it('says why a declared tagged union does not match the rules\' one', function (
 });
 
 it('publishes what both the declaration and the rules accept where both bound a member', function (array $rule, array $declared, array $refinement, bool $narrower) use ($member, $schemas): void {
-    // Beside the `$ref` the declared member and the refinement both hold, so the published bound is the
-    // tighter of the two: a declared bound looser than the rule's gets the rule's beside it, and one tighter
-    // refuses a value the server takes — which the author is told, the declaration being what is published.
+    // The declared member and the refinement both hold, so the published bound is the tighter of the two: a
+    // declared bound looser than the rule's gives way to the rule's, two values nothing orders are both kept,
+    // and a declared bound tighter refuses a value the server takes — which the author is told, the
+    // declaration being what is published.
     $adopted = AdoptedUnion::over(
         ['$ref' => '#/components/schemas/Shape'],
         ['anyOf' => [$member('round', ['unit' => ['type' => 'string'] + $rule]), $member('square', [])]],
@@ -158,22 +173,22 @@ it('publishes what both the declaration and the rules accept where both bound a 
         'shape',
     );
 
-    $published = $adopted?->schema['anyOf'][0]['properties']['unit'] ?? [];
+    $published = $adopted?->schema['oneOf'][0]['allOf'][1]['properties']['unit'] ?? [];
 
     expect($published)->toBe($refinement)
         ->and($adopted?->wider)->toBe($narrower ? ['`shape.unit` where `kind` is round'] : []);
 })->with([
     'a declared enum missing a value the rule accepts' => [['enum' => ['cm', 'mm', 'in']], ['enum' => ['cm', 'mm']], [], true],
-    'a declared enum holding a value the rule refuses' => [['enum' => ['cm', 'mm']], ['enum' => ['cm', 'mm', 'in']], ['enum' => ['cm', 'mm']], false],
-    'two enums each refusing a value the other accepts' => [['enum' => ['mm', 'in']], ['enum' => ['cm', 'mm']], ['enum' => ['mm', 'in']], true],
+    'a declared enum holding a value the rule refuses' => [['enum' => ['cm', 'mm']], ['enum' => ['cm', 'mm', 'in']], ['allOf' => [['type' => 'string', 'enum' => ['cm', 'mm', 'in']], ['type' => 'string', 'enum' => ['cm', 'mm']]]], false],
+    'two enums each refusing a value the other accepts' => [['enum' => ['mm', 'in']], ['enum' => ['cm', 'mm']], ['allOf' => [['type' => 'string', 'enum' => ['cm', 'mm']], ['type' => 'string', 'enum' => ['mm', 'in']]]], true],
     'the same enum' => [['enum' => ['cm', 'mm']], ['enum' => ['cm', 'mm']], [], false],
-    'a declared const the rule refuses' => [['const' => 'cm'], ['const' => 'mm'], ['const' => 'cm'], true],
-    'a declared ceiling above the rule\'s' => [['maxLength' => 50], ['maxLength' => 100], ['maxLength' => 50], false],
+    'a declared const the rule refuses' => [['const' => 'cm'], ['const' => 'mm'], ['allOf' => [['type' => 'string', 'const' => 'mm'], ['type' => 'string', 'const' => 'cm']]], true],
+    'a declared ceiling above the rule\'s' => [['maxLength' => 50], ['maxLength' => 100], ['type' => 'string', 'maxLength' => 50], false],
     'a declared ceiling below the rule\'s' => [['maxLength' => 100], ['maxLength' => 50], [], true],
-    'a declared floor below the rule\'s' => [['minLength' => 2], ['minLength' => 1], ['minLength' => 2], false],
+    'a declared floor below the rule\'s' => [['minLength' => 2], ['minLength' => 1], ['type' => 'string', 'minLength' => 2], false],
     'a declared floor above the rule\'s' => [['minLength' => 1], ['minLength' => 2], [], true],
     // Two patterns nothing orders: both are true of what the server takes, and neither is called narrower.
-    'another pattern' => [['pattern' => '^[a-z]+$'], ['pattern' => '^[a-m]+$'], ['pattern' => '^[a-z]+$'], false],
+    'another pattern' => [['pattern' => '^[a-z]+$'], ['pattern' => '^[a-m]+$'], ['allOf' => [['type' => 'string', 'pattern' => '^[a-m]+$'], ['type' => 'string', 'pattern' => '^[a-z]+$']]], false],
 ]);
 
 it('offers null only where the rules accept it too', function () use ($member, $schemas): void {
@@ -202,7 +217,7 @@ it('adopts a union whose component is written as a oneOf', function () use ($mem
         'shape',
     );
 
-    expect($adopted?->schema['anyOf'][0] ?? null)->toBe(['properties' => ['kind' => ['const' => 'round'], 'radius' => ['minimum' => 0]]]);
+    expect($adopted?->schema['oneOf'][0] ?? null)->toBe(['allOf' => [['$ref' => '#/components/schemas/Round'], ['type' => 'object', 'properties' => ['radius' => ['type' => 'number', 'minimum' => 0]]]]]);
 });
 
 it('reads an empty object the rules accept in either key order', function () use ($member, $schemas): void {
@@ -226,4 +241,98 @@ it('names whether a declared field is a union it could adopt by', function (arra
     'a description alone' => [['description' => 'Anything.'], false],
     'a scalar' => [['type' => 'string'], false],
     'one member' => [['$ref' => '#/components/schemas/Round'], false],
+]);
+
+it('restates a bounded member whole, because a generator takes the member from the last allOf branch', function () use ($member, $schemas): void {
+    // Generators merge an `allOf` a property at a time, the later branch's property replacing the earlier's
+    // whole. So an inline member the rules bound is published with everything it declares — `z`, which no
+    // rule touches, included — or a client built from it would lose that member.
+    $centre = ['type' => 'object', 'properties' => ['x' => ['type' => 'integer'], 'z' => ['type' => 'string']]];
+    $adopted = AdoptedUnion::over(
+        ['$ref' => '#/components/schemas/Shape'],
+        ['anyOf' => [
+            $member('round', ['centre' => ['type' => 'object', 'properties' => ['x' => ['type' => 'integer', 'minimum' => 0], 'y' => ['type' => 'integer']], 'required' => ['y']]]),
+            $member('square', []),
+        ]],
+        $schemas(['Round' => $member('round', ['centre' => $centre + ['required' => ['z']]]), 'Square' => $member('square', [])]),
+        'shape',
+    );
+
+    expect($adopted?->schema['oneOf'][0]['allOf'][1]['properties']['centre'] ?? null)->toBe([
+        'type' => 'object',
+        'properties' => ['x' => ['type' => 'integer', 'minimum' => 0], 'z' => ['type' => 'string'], 'y' => ['type' => 'integer']],
+        'required' => ['z', 'y'],
+    ]);
+});
+
+it('gives a bounded array behind a pointer its item schema', function () use ($member, $schemas): void {
+    // A refinement typed `array` with no `items` is one no generator can build a validator for — orval's Zod
+    // for it throws on load — so the target's item schema comes along. A pointer to nothing registered keeps
+    // the refinement as the rules wrote it.
+    $adopted = AdoptedUnion::over(
+        ['$ref' => '#/components/schemas/Shape'],
+        ['anyOf' => [
+            $member('round', ['tags' => ['type' => 'array', 'items' => ['type' => 'string'], 'maxItems' => 3]]),
+            $member('square', ['size' => ['type' => 'string', 'enum' => ['s', 'm']]]),
+        ]],
+        $schemas([
+            'Round' => $member('round', ['tags' => ['$ref' => '#/components/schemas/Tags']]),
+            'Square' => $member('square', ['size' => ['$ref' => '#/components/schemas/Unregistered']]),
+        ]) + ['Tags' => ['type' => 'array', 'items' => ['type' => 'string']]],
+        'shape',
+    );
+
+    expect($adopted?->schema['oneOf'][0]['allOf'][1]['properties']['tags'] ?? null)->toBe(['allOf' => [
+        ['$ref' => '#/components/schemas/Tags'],
+        ['type' => 'array', 'maxItems' => 3, 'items' => ['type' => 'string']],
+    ]])
+        ->and($adopted?->schema['oneOf'][1]['allOf'][1]['properties']['size'] ?? null)->toBe(['allOf' => [
+            ['$ref' => '#/components/schemas/Unregistered'],
+            ['enum' => ['s', 'm']],
+        ]]);
+});
+
+it('accepts exactly what the refinements beside the union\'s pointer accepted', function (mixed $answer, bool $accepted) use ($member, $schemas): void {
+    // The members, each refined, against the union with every refinement pinned to its tag beside the
+    // pointer: both are the union intersected with the rules, so a JSON Schema validator gives one verdict.
+    $registered = $schemas([
+        'Round' => $member('round', ['radius' => ['type' => 'number'], 'unit' => ['type' => 'string', 'pattern' => '^[a-m]+$']], ['radius']),
+        'Square' => $member('square', ['side' => ['type' => 'integer', 'maximum' => 5]], ['side']),
+    ]);
+    $adopted = AdoptedUnion::over(
+        ['$ref' => '#/components/schemas/Shape'],
+        ['anyOf' => [
+            $member('round', ['radius' => ['type' => 'number', 'minimum' => 0], 'unit' => ['type' => 'string', 'pattern' => '^[a-z]+$']], ['radius']),
+            $member('square', ['side' => ['type' => 'integer', 'maximum' => 9], 'label' => ['type' => 'string', 'maxLength' => 3]], ['side', 'label']),
+        ]],
+        $registered,
+        'shape',
+    );
+    $beside = [
+        '$ref' => '#/components/schemas/Shape',
+        'anyOf' => [
+            ['properties' => ['kind' => ['const' => 'round'], 'radius' => ['minimum' => 0], 'unit' => ['pattern' => '^[a-z]+$']]],
+            ['properties' => ['kind' => ['const' => 'square'], 'label' => ['type' => 'string', 'maxLength' => 3]], 'required' => ['label']],
+        ],
+    ];
+
+    $verdict = static function (array $schema) use ($registered, $answer): bool {
+        $validator = new Validator;
+        $validator->resolver()?->registerRaw(json_decode((string) json_encode(['components' => ['schemas' => $registered], 'field' => $schema])), 'https://docuccino.test/shape.json');
+
+        return $validator->validate(json_decode((string) json_encode($answer)), (object) ['$ref' => 'https://docuccino.test/shape.json#/field'])->isValid();
+    };
+
+    expect($verdict($adopted?->schema ?? []))->toBe($accepted)
+        ->and($verdict($beside))->toBe($accepted);
+})->with([
+    'round' => [['kind' => 'round', 'radius' => 1.5, 'unit' => 'cm'], true],
+    'round, below the rules\' floor' => [['kind' => 'round', 'radius' => -1], false],
+    'round, a unit the declared pattern refuses' => [['kind' => 'round', 'radius' => 1, 'unit' => 'zz'], false],
+    'square' => [['kind' => 'square', 'side' => 4, 'label' => 'abc'], true],
+    'square, past the declared maximum' => [['kind' => 'square', 'side' => 7, 'label' => 'abc'], false],
+    'square, no label' => [['kind' => 'square', 'side' => 4], false],
+    'square, a label too long' => [['kind' => 'square', 'side' => 4, 'label' => 'abcd'], false],
+    'square, with a radius only round bounds' => [['kind' => 'square', 'side' => 4, 'label' => 'a', 'radius' => -1], true],
+    'another kind' => [['kind' => 'oval'], false],
 ]);

@@ -51,6 +51,7 @@ final class DiagnosticDocs
         'postman' => 'postman-collections',
         'query-builder' => 'package-integrations',
         'rate-limit' => 'package-integrations',
+        'response-link' => 'response-links',
         'route' => 'routes-operations-and-names',
         'route-binding' => 'routes-operations-and-names',
         'route-constraint' => 'routes-operations-and-names',

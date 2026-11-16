@@ -150,3 +150,24 @@ it('keeps an enum case whole, with its enum, rather than as its name or its valu
         ->and(ConstValue::scalar('Draft')->caseName())->toBeNull()
         ->and($value->withChainedCall('only', [])->toArray())->toBe($value->toArray());
 });
+
+it('carries the keys written beside an array\'s items, renders them, and round-trips', function (): void {
+    $value = ConstValue::array([ConstValue::scalar(10), ConstValue::scalar('a')], ['min_width', null]);
+
+    expect($value->keys)->toBe(['min_width', null])
+        ->and($value->render())->toBe("['min_width' => 10, 'a']")
+        ->and($value->toArray()['keys'])->toBe(['min_width', null])
+        ->and(ConstValue::fromArray($value->toArray())->toArray())->toBe($value->toArray());
+});
+
+it('keeps no keys for an array that wrote none, or whose keys do not line up with its items', function (array $keys): void {
+    // A list keeps the bytes it always had, and a key list that pairs with no item says nothing true.
+    $value = ConstValue::array([ConstValue::scalar('a'), ConstValue::scalar('b')], $keys);
+
+    expect($value->keys)->toBeNull()
+        ->and($value->toArray())->not->toHaveKey('keys')
+        ->and(ConstValue::fromArray(['kind' => 'array', 'items' => [], 'keys' => 'not a list'])->keys)->toBeNull();
+})->with([
+    'none written' => [[null, null]],
+    'too few' => [['a']],
+]);

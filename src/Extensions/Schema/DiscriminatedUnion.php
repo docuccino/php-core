@@ -197,6 +197,25 @@ final class DiscriminatedUnion
     }
 
     /**
+     * The discriminator a union of these members is published with, by their pointers — so a field spelling
+     * the union's members out is told apart exactly as the union's own component is.
+     *
+     * @param  list<string>  $refs
+     * @param  list<array<mixed>>  $bodies
+     * @return array{propertyName: string, mapping: array<string, string>}|null
+     */
+    public static function discriminatorOf(array $refs, array $bodies): ?array
+    {
+        $names = array_map(self::componentName(...), $refs);
+        if (in_array(null, $names, true) || count(array_unique($names)) !== count($names)) {
+            return null;
+        }
+
+        /** @var list<string> $names */
+        return self::discriminator($names, $bodies);
+    }
+
+    /**
      * @param  list<string>  $names
      * @param  list<array<mixed>>  $bodies
      * @return array{propertyName: string, mapping: array<string, string>}|null

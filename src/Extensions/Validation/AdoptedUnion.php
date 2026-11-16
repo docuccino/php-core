@@ -12,14 +12,16 @@ use Docuccino\Core\Extensions\Schema\DiscriminatedUnion;
 /**
  * A declared union adopting the tagged object the rules split under it ({@see TaggedBranches}): where a
  * `#[BodyParameter]` names a component whose members are told apart by the partition's tag, with exactly
- * the partition's values, the field publishes that component — the type a client already has — and what
- * the rules prove beyond it rides beside the `$ref` as one refinement per tag value, plus the empty object
- * a tagged member cannot describe. Beside the `$ref` the declaration and the refinement both hold, so what
- * is published is what both accept: a declared bound looser than the rules' gets the rules' beside it, and a
- * null the rules refuse is not offered.
+ * the partition's values, the field publishes that component — the type a client already has — and where
+ * the rules prove more than a member states, the field is the union's own members instead, each one the
+ * rules refine as `allOf: [member, refinement]`, plus the empty object a tagged member cannot describe.
+ * Both halves of an `allOf` hold, so what is published is what both accept: a declared bound looser than
+ * the rules' gives way to the rules', and a null the rules refuse is not offered.
  *
- * The refinements stay request-side on purpose: the component is shared with every response that sends the
- * type, and a bound the server enforces on input is no promise about output. The full rule is in
+ * The refinements stay request-side on purpose: the components are shared with every response that sends
+ * the type, and a bound the server enforces on input is no promise about output. A refinement restates the
+ * type of every position it bounds, and a property it touches whole, because generators merge an `allOf`
+ * a property at a time and read no bound on an untyped fragment. The full rule is in
  * `docs/design/uir-and-extensions.md` §Tagged request objects.
  *
  * @internal
@@ -57,7 +59,7 @@ final readonly class AdoptedUnion
         }
 
         [$branches, $empty] = $partition;
-        [$ref, $members, $nullable] = $union;
+        [$ref, $refs, $members, $nullable] = $union;
 
         $tag = self::sharedTag($branches, $members);
         if ($tag === null) {
@@ -72,27 +74,24 @@ final readonly class AdoptedUnion
         $refinements = [];
         $wider = [];
         $unlisted = [];
-        $refines = false;
         foreach ($branches as $branch) {
             $value = DiscriminatedUnion::pinned($branch)[$tag];
             $at = [];
             $missing = [];
-            $refinement = self::objectDelta($branch, $byValue[$value], $schemas, $path, $at, $missing, $tag);
+            $refinements[$value] = self::objectDelta($branch, $byValue[$value], $schemas, $path, $at, $missing, $tag);
             foreach ($at as $field) {
                 $wider[] = sprintf('`%s` where `%s` is %s', $field, $tag, $value);
             }
             foreach ($missing as $field) {
                 $unlisted[] = sprintf('`%s` where `%s` is %s', $field, $tag, $value);
             }
-            $refines = $refines || $refinement !== [];
-            $refinements[] = self::pinnedTo($tag, $value, $refinement);
         }
 
         if (self::admitsNull($standing) && ! $nullable) {
             $wider[] = sprintf('`%s`, which the rules let be null', $path);
         }
 
-        $adopted = ['$ref' => $ref] + ($refines ? ['anyOf' => $refinements] : []);
+        $adopted = array_filter($refinements) === [] ? ['$ref' => $ref] : self::members($refs, $members, $tag, $refinements, $schemas);
         // A null the declaration admits and the rules refuse is one the server answers with a 422.
         $others = [...($empty ? [DiscriminatedUnion::EMPTY_OBJECT] : []), ...($nullable && self::admitsNull($standing) ? [['type' => 'null']] : [])];
         $rest = array_diff_key($declared, ['$ref' => true, 'anyOf' => true]);
@@ -150,12 +149,13 @@ final readonly class AdoptedUnion
     }
 
     /**
-     * The declared field's union: the `$ref` it names, the bodies of the members that component is a union
-     * of, and whether the field admits null beside it — or null where it names no union of components.
+     * The declared field's union: the `$ref` it names, the pointers to the members that component is a union
+     * of and their bodies, and whether the field admits null beside it — or null where it names no union of
+     * components.
      *
      * @param  array<string, mixed>  $declared
      * @param  array<string, array<string, mixed>>  $schemas
-     * @return array{0: string, 1: list<array<mixed>>, 2: bool}|null
+     * @return array{0: string, 1: list<string>, 2: list<array<mixed>>, 3: bool}|null
      */
     private static function union(array $declared, array $schemas): ?array
     {
@@ -186,17 +186,20 @@ final readonly class AdoptedUnion
             return null;
         }
 
+        $pointers = [];
         $members = [];
         foreach ($listed as $member) {
-            $resolved = is_array($member) && count($member) === 1 && is_string($member['$ref'] ?? null) ? DiscriminatedUnion::component($member['$ref'], $schemas) : null;
-            if ($resolved === null) {
+            $pointer = is_array($member) && count($member) === 1 && is_string($member['$ref'] ?? null) ? $member['$ref'] : null;
+            $resolved = $pointer === null ? null : DiscriminatedUnion::component($pointer, $schemas);
+            if ($pointer === null || $resolved === null) {
                 return null;
             }
 
+            $pointers[] = $pointer;
             $members[] = $resolved;
         }
 
-        return [$refs[0], $members, $nullable];
+        return [$refs[0], $pointers, $members, $nullable];
     }
 
     /**
@@ -305,9 +308,9 @@ final readonly class AdoptedUnion
     /**
      * The refinements one rule schema adds to the declared schema of the same member, through its items and
      * members: one the declaration does not state, where its type does not rule it out
-     * ({@see SchemaKeywords::survivor()}), and one it states looser — beside a `$ref` both hold, so the rules'
-     * tighter bound is what the server enforces. A declared type or bound the rules accept more than is noted
-     * in `$wider`.
+     * ({@see SchemaKeywords::survivor()}), and one it states looser — in the member's `allOf` both hold, so
+     * the rules' tighter bound is what the server enforces. A declared type or bound the rules accept more
+     * than is noted in `$wider`.
      *
      * @param  array<mixed>  $rules
      * @param  array<mixed>  $declared
@@ -422,16 +425,131 @@ final readonly class AdoptedUnion
     }
 
     /**
-     * One tag value's refinement, the tag pinned so it holds of that value's members alone.
+     * The union spelled as its members, in the component's order, told apart as the component is: a member
+     * the rules refine no further is its bare pointer, and one they do is that pointer and the refinement.
      *
-     * @param  array<string, mixed>  $refinement
+     * @param  list<string>  $refs
+     * @param  list<array<mixed>>  $members
+     * @param  array<string, array<string, mixed>>  $refinements  by tag value
+     * @param  array<string, array<string, mixed>>  $schemas
      * @return array<string, mixed>
      */
-    private static function pinnedTo(string $tag, string $value, array $refinement): array
+    private static function members(array $refs, array $members, string $tag, array $refinements, array $schemas): array
     {
-        $properties = is_array($refinement['properties'] ?? null) ? $refinement['properties'] : [];
+        $branches = [];
+        foreach ($members as $i => $member) {
+            $refinement = $refinements[DiscriminatedUnion::pinned($member)[$tag]] ?? [];
+            $branches[] = $refinement === []
+                ? ['$ref' => $refs[$i]]
+                : ['allOf' => [['$ref' => $refs[$i]], self::partial($member, $refinement, $schemas)]];
+        }
 
-        return ['properties' => [$tag => ['const' => $value]] + $properties] + $refinement;
+        $discriminator = DiscriminatedUnion::discriminatorOf($refs, $members);
+
+        return ['oneOf' => $branches] + ($discriminator === null ? [] : ['discriminator' => $discriminator]);
+    }
+
+    /**
+     * A refinement written beside a pointer to `$body`, in an `allOf`: the body's type, every member the
+     * refinement touches restated whole, and its own keywords — the pointer keeps the rest.
+     *
+     * @param  array<mixed>  $body
+     * @param  array<string, mixed>  $refinement
+     * @param  array<string, array<string, mixed>>  $schemas
+     * @return array<string, mixed>
+     */
+    private static function partial(array $body, array $refinement, array $schemas): array
+    {
+        $out = array_key_exists('type', $body) ? ['type' => $body['type']] : [];
+        $declared = is_array($body['properties'] ?? null) ? $body['properties'] : [];
+        foreach ($refinement as $keyword => $value) {
+            $out[$keyword] = match ($keyword) {
+                'properties' => self::restatedMembers($declared, is_array($value) ? $value : [], $schemas),
+                'items' => self::restated(is_array($body['items'] ?? null) ? $body['items'] : null, is_array($value) ? $value : [], $schemas),
+                default => $value,
+            };
+        }
+
+        // An array with no item schema is one a generator cannot build a validator for.
+        $types = is_array($out['type'] ?? null) ? $out['type'] : [$out['type'] ?? null];
+        if (in_array('array', $types, true) && ! array_key_exists('items', $out) && is_array($body['items'] ?? null)) {
+            $out['items'] = $body['items'];
+        }
+
+        return $out;
+    }
+
+    /**
+     * A declared schema with a refinement folded in, whole: where the two bound one keyword and the rules'
+     * value is not simply the tighter, both are kept, the rules' typed alike in an `allOf` beside it. A member
+     * the declaration lacks is the rules' own schema, and a pointer keeps its target, refined beside it.
+     *
+     * @param  array<mixed>|null  $declared
+     * @param  array<mixed>  $refinement
+     * @param  array<string, array<string, mixed>>  $schemas
+     * @return array<mixed>
+     */
+    private static function restated(?array $declared, array $refinement, array $schemas): array
+    {
+        if ($declared === null) {
+            return $refinement;
+        }
+
+        $ref = $declared['$ref'] ?? null;
+        if (is_string($ref)) {
+            $body = DiscriminatedUnion::component($ref, $schemas);
+            /** @var array<string, mixed> $refinement */
+            $beside = $body === null ? $refinement : self::partial($body, $refinement, $schemas);
+
+            return ['allOf' => [$declared, $beside]];
+        }
+
+        $out = $declared;
+        $apart = [];
+        foreach ($refinement as $keyword => $value) {
+            $keyword = (string) $keyword;
+            if ($keyword === 'properties') {
+                $members = is_array($declared['properties'] ?? null) ? $declared['properties'] : [];
+                $out['properties'] = array_replace($members, self::restatedMembers($members, is_array($value) ? $value : [], $schemas));
+            } elseif ($keyword === 'items') {
+                $out['items'] = self::restated(is_array($declared['items'] ?? null) ? $declared['items'] : null, is_array($value) ? $value : [], $schemas);
+            } elseif ($keyword === 'required') {
+                $names = array_filter([...(is_array($declared['required'] ?? null) ? $declared['required'] : []), ...(is_array($value) ? $value : [])], is_string(...));
+                $out['required'] = array_values(array_unique($names));
+            } elseif (! array_key_exists($keyword, $declared) || self::tighter($keyword, $value, $declared[$keyword])) {
+                $out[$keyword] = $value;
+            } else {
+                $apart[$keyword] = $value;
+            }
+        }
+
+        return $apart === [] ? $out : ['allOf' => [$out, (array_key_exists('type', $declared) ? ['type' => $declared['type']] : []) + $apart]];
+    }
+
+    /**
+     * Each member a refinement touches, restated over the declared one of that name.
+     *
+     * @param  array<mixed>  $declared
+     * @param  array<mixed>  $refinements
+     * @param  array<string, array<string, mixed>>  $schemas
+     * @return array<mixed>
+     */
+    private static function restatedMembers(array $declared, array $refinements, array $schemas): array
+    {
+        $out = [];
+        foreach ($refinements as $name => $refinement) {
+            $mine = $declared[$name] ?? null;
+            $out[$name] = self::restated(is_array($mine) ? $mine : null, is_array($refinement) ? $refinement : [], $schemas);
+        }
+
+        return $out;
+    }
+
+    /** Whether the rules' value of a bound alone says what it and the declared one both do. */
+    private static function tighter(string $keyword, mixed $rules, mixed $declared): bool
+    {
+        return $keyword !== 'enum' && $keyword !== 'const'
+            && SchemaRefinement::move($keyword, [$keyword => $rules], [$keyword => $declared]) === RefinementMove::Widened;
     }
 
     /**

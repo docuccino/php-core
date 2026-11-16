@@ -118,6 +118,8 @@ final class DocumentDecoder
     {
         $this->mark = null;
         $this->twin = null;
+        $this->values = 0;
+        $this->text = 0;
 
         if (str_starts_with($bytes, self::BOM)) {
             $bytes = substr($bytes, strlen(self::BOM));
@@ -191,6 +193,17 @@ final class DocumentDecoder
     }
 
     /**
+     * How many values and bytes of text the last {@see decode()} made in its copy, refused or not: none where
+     * the text was refused before the copy began.
+     *
+     * @return array{int, int}
+     */
+    public function made(): array
+    {
+        return [$this->values, $this->text];
+    }
+
+    /**
      * $bytes read as YAML and copied: symfony/yaml's reading of the text with what it would misread marked
      * out ({@see PlainScalars}), held to a second reading where it could misread a merge key or a float tag
      * ({@see YamlTwin}).
@@ -243,7 +256,7 @@ final class DocumentDecoder
         }, E_USER_DEPRECATED);
 
         try {
-            $parsed = Yaml::parse($text, self::YAML_FLAGS, maxAliasesForCollections: $aliases);
+            $parsed = Yaml::parse(TextScans::of($text), self::YAML_FLAGS, maxAliasesForCollections: $aliases);
         } catch (Throwable $exception) {
             throw match (true) {
                 $exception instanceof TypeError && str_starts_with($exception->getMessage(), 'Unsupported operand types: array + ') => new ParseException('A merge key (<<) inside a flow mapping is not supported; write that mapping in block style.', previous: $exception),

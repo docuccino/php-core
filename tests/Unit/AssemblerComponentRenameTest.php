@@ -24,6 +24,7 @@ it('moves the references to a contested component, and leaves the example that s
     $operation = Operation::fromArray(['responses' => ['200' => ['description' => 'OK', 'content' => ['application/json' => [
         'schema' => ['type' => 'object', 'properties' => [
             'node' => ['$ref' => '#/components/schemas/Node'],
+            'other' => ['$ref' => '#/components/schemas/Node_2'],
             'schema' => ['type' => 'object', 'example' => $sent['schema']],
         ]],
         'example' => $sent,
@@ -43,6 +44,7 @@ it('moves the references to a contested component, and leaves the example that s
 
     expect(array_keys($document['components']['schemas']))->toBe(['ANode', 'BNode'])
         ->and($media['schema']['properties']['node'])->toBe(['$ref' => '#/components/schemas/ANode'])
+        ->and($media['schema']['properties']['other'])->toBe(['$ref' => '#/components/schemas/BNode'])
         ->and($media['example'])->toBe($sent)
         ->and($media['schema']['properties']['schema']['example'])->toBe($sent['schema']);
 });

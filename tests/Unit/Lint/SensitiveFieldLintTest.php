@@ -305,9 +305,10 @@ it('warns on a sensitive parameter name at every position a document publishes o
         ));
 })->with([
     // The pointer names the `name` member, the way a value finding points at the leaf it read: it is
-    // the member the author has to change.
-    'an operation' => ['operation', '/paths//x/get/parameters/0/name'],
-    'a path item' => ['path item', '/paths//x/parameters/0/name'],
+    // the member the author has to change. A listed parameter is named by `in:name`, a component by
+    // its name — neither by a position.
+    'an operation' => ['operation', '/paths/~1x/get/parameters/query:api_key/name'],
+    'a path item' => ['path item', '/paths/~1x/parameters/query:api_key/name'],
     'components.parameters' => ['component', '/components/parameters/ApiKey/name'],
 ]);
 
@@ -372,9 +373,156 @@ it('silences a parameter by name and by pointer, the way a property is silenced'
     expect(lintFindings(documentWithParameter('operation', 'api_key'), $options))->toBe([]);
 })->with([
     'by name' => ['api_key'],
-    'by pointer' => ['/paths//x/get/parameters/0/name'],
-    'by pointer written as a fragment' => ['#/paths//x/get/parameters/0/name'],
+    'by pointer' => ['/paths/~1x/get/parameters/query:api_key/name'],
+    'by pointer written as a fragment' => ['#/paths/~1x/get/parameters/query:api_key/name'],
 ]);
+
+// --- Pointers: escaped, and stable under a reordered parameter list --------
+
+/**
+ * The parameter list `$names` spells, all `in: query`, under a path template carrying both characters
+ * RFC 6901 escapes. Every finding's pointer is under it, so a pointer joined unescaped names some
+ * other node.
+ *
+ * @param  list<string>  $names
+ */
+function documentWithQueryParameters(array $names): array
+{
+    return ['paths' => ['/api/v1/{team~id}/users' => ['get' => ['parameters' => array_map(
+        static fn (string $name): array => ['name' => $name, 'in' => 'query', 'schema' => ['type' => 'string']],
+        $names,
+    )]]]];
+}
+
+/**
+ * The node a lint pointer names, read the way the contract states it rather than the way the lint
+ * builds it: RFC 6901 tokens, `~1` → `/` before `~0` → `~`, except that a token under a parameter
+ * list is the `in:name` OpenAPI tells a parameter apart by, and so names the entry holding that pair.
+ */
+function nodeAtLintPointer(array $document, string $pointer): mixed
+{
+    $node = $document;
+
+    foreach (array_slice(explode('/', $pointer), 1) as $token) {
+        $token = str_replace(['~1', '~0'], ['/', '~'], $token);
+
+        if (is_array($node) && array_is_list($node) && str_contains($token, ':')) {
+            [$in, $name] = explode(':', $token, 2);
+            $matches = array_values(array_filter($node, static fn (mixed $p): bool => is_array($p) && ($p['in'] ?? null) === $in && ($p['name'] ?? null) === $name));
+            $node = count($matches) === 1 ? $matches[0] : null;
+
+            continue;
+        }
+
+        $node = is_array($node) && array_key_exists($token, $node) ? $node[$token] : null;
+    }
+
+    return $node;
+}
+
+/** @return list<string> the pointer each finding names, in the order they were reported */
+function findingPointers(array $findings): array
+{
+    return array_map(static function (object $finding): string {
+        preg_match('/\((\/[^)]*)\)|at (\/\S+)/', (string) $finding->message, $match);
+
+        return ($match[1] ?? '') !== '' ? $match[1] : $match[2];
+    }, $findings);
+}
+
+it('escapes every token RFC 6901 escapes, so a pointer names the node it was minted for', function (): void {
+    // A path template always holds a `/`, a media type does too, and `~` is legal in both: joined
+    // unescaped, the first finding read `/paths//api/v1/{team~id}/users/…`, which names no node at all.
+    $document = documentWithQueryParameters(['api_key']);
+    $document['paths']['/api/v1/{team~id}/users']['post'] = ['requestBody' => ['content' => ['application/vnd.api+json' => [
+        'schema' => ['type' => 'object', 'properties' => ['pass/word' => ['type' => 'string']], 'example' => ['a~b' => 'AKIAIOSFODNN7EXAMPLE']],
+    ]]]];
+
+    $pointers = findingPointers(lintFindings($document));
+
+    expect($pointers)->toBe([
+        '/paths/~1api~1v1~1{team~0id}~1users/get/parameters/query:api_key/name',
+        '/paths/~1api~1v1~1{team~0id}~1users/post/requestBody/content/application~1vnd.api+json/schema/properties/pass~1word',
+        '/paths/~1api~1v1~1{team~0id}~1users/post/requestBody/content/application~1vnd.api+json/schema/example/a~0b',
+    ]);
+
+    // Each one lands on what it says it found, read independently of how the lint spelled it.
+    expect(nodeAtLintPointer($document, $pointers[0]))->toBe('api_key')
+        ->and(nodeAtLintPointer($document, $pointers[1]))->toBe(['type' => 'string'])
+        ->and(nodeAtLintPointer($document, $pointers[2]))->toBe('AKIAIOSFODNN7EXAMPLE');
+});
+
+it('names a parameter by in and name, so reordering the list moves no pointer', function (): void {
+    $before = findingPointers(lintFindings(documentWithQueryParameters(['page', 'api_key', 'access_token'])));
+    $after = findingPointers(lintFindings(documentWithQueryParameters(['access_token', 'api_key', 'page'])));
+
+    sort($before);
+    sort($after);
+
+    expect($before)->toHaveCount(2)
+        ->and($after)->toBe($before);
+});
+
+it('keeps a safelisted parameter silenced, and only that one, however the list is reordered', function (array $names): void {
+    // Keyed by position, the entry written for `api_key` went on to silence whichever sensitive
+    // parameter took its place, and to stop silencing `api_key` itself.
+    $options = new SensitiveFieldLintOptions(allow: ['/paths/~1api~1v1~1{team~0id}~1users/get/parameters/query:api_key/name']);
+
+    $messages = array_map(static fn (object $d): string => (string) $d->message, lintFindings(documentWithQueryParameters($names), $options));
+
+    expect($messages)->toHaveCount(1)
+        ->and($messages[0])->toContain('"access_token"');
+})->with([
+    'as written' => [['page', 'api_key', 'access_token']],
+    'reordered' => [['access_token', 'page', 'api_key']],
+    'reversed' => [['access_token', 'api_key', 'page']],
+]);
+
+it('names what sits below a parameter by the same key, not only its name', function (): void {
+    // A property of a deepObject parameter, and a value in its example, move with the list as readily
+    // as the name does.
+    $document = ['paths' => ['/x' => ['get' => ['parameters' => [
+        ['name' => 'page', 'in' => 'query'],
+        ['name' => 'filter', 'in' => 'query', 'style' => 'deepObject', 'schema' => [
+            'type' => 'object',
+            'properties' => ['token' => ['type' => 'string']],
+        ], 'example' => ['owner' => 'AKIAIOSFODNN7EXAMPLE']],
+    ]]]]];
+
+    expect(findingPointers(lintFindings($document)))->toBe([
+        '/paths/~1x/get/parameters/query:filter/example/owner',
+        '/paths/~1x/get/parameters/query:filter/schema/properties/token',
+    ]);
+});
+
+it('escapes a parameter name the way it escapes any other token', function (): void {
+    $document = ['paths' => ['/x' => ['get' => ['parameters' => [['name' => 'api/key~1', 'in' => 'path', 'required' => true]]]]]];
+
+    expect(findingPointers(lintFindings($document)))->toBe(['/paths/~1x/get/parameters/path:api~1key~01/name']);
+});
+
+it('keys components.parameters by the component name it already has', function (): void {
+    // A map entry's key is stable, so it stays what the document spells.
+    $document = ['components' => ['parameters' => ['0' => ['name' => 'api_key', 'in' => 'query']]]];
+
+    expect(findingPointers(lintFindings($document)))->toBe(['/components/parameters/0/name']);
+});
+
+it('names the entry to write when the safelist still spells a pointer the old way', function (): void {
+    // The position-keyed, unescaped spelling no longer silences: it was the defect. The finding says
+    // which entry stopped matching and what to write, rather than coming back unexplained.
+    $legacy = '/paths//api/v1/{team~id}/users/get/parameters/1/name';
+    $options = new SensitiveFieldLintOptions(allow: [$legacy]);
+
+    $findings = lintFindings(documentWithQueryParameters(['page', 'api_key']), $options);
+
+    expect($findings)->toHaveCount(1)
+        ->and($findings[0]->help)->toContain('"'.$legacy.'"')
+        ->and($findings[0]->help)->toContain('write "/paths/~1api~1v1~1{team~0id}~1users/get/parameters/query:api_key/name"');
+
+    // And says nothing of the kind to a finding no entry spells.
+    expect(lintFindings(documentWithQueryParameters(['page', 'api_key']))[0]->help)->not->toContain('no longer matches');
+});
 
 it('names the move that would actually remove a parameter finding', function (): void {
     // Neither hide reaches a parameter — a parameter is not a property of anything — so the help says

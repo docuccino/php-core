@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Docuccino\Core\Lint;
 
+use Docuccino\Core\Contract\Pointer;
 use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Diagnostics\Severity;
 use Docuccino\Core\Document\DocumentMembers;
@@ -59,8 +60,8 @@ final class VacuousUnionLint implements DocumentLint
     }
 
     /**
-     * JSON pointers (relative to the operation) of every `anyOf` that carries an empty branch beside
-     * at least one other branch. A branch is empty when nothing but `x-` extension members constrain
+     * JSON pointers (relative to the operation, RFC 6901-escaped, so `application/json` is one token) of
+     * every `anyOf` that carries an empty branch beside at least one other branch. A branch is empty when nothing but `x-` extension members constrain
      * it — provenance rides inside schemas, and it constrains nothing.
      *
      * The walk skips what {@see DocumentMembers} reads as data — an example, a default, an `x-` member —
@@ -87,7 +88,7 @@ final class VacuousUnionLint implements DocumentLint
         foreach ($node as $key => $value) {
             $name = (string) $key;
             if (is_array($value) && ! DocumentMembers::holdsData($name, $value, $inNameMap)) {
-                $found = [...$found, ...self::vacuousUnions($value, $pointer.'/'.$name, DocumentMembers::nameMap($name, $inNameMap))];
+                $found = [...$found, ...self::vacuousUnions($value, Pointer::append($pointer, $name), DocumentMembers::nameMap($name, $inNameMap))];
             }
         }
 

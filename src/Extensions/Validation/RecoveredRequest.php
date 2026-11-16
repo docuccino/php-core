@@ -8,6 +8,7 @@ use Docuccino\Attributes\BodyParameter;
 use Docuccino\Attributes\QueryParameter;
 use Docuccino\Core\Diagnostics\Diagnostic;
 use Docuccino\Core\Draft\OperationDraft;
+use Docuccino\Core\Draft\SchemaNotes;
 use Docuccino\Core\Extensions\Context\RouteContext;
 use Docuccino\Core\Extensions\Schema\ClassAnnotations;
 use Docuccino\Core\Extensions\Schema\ClassDeclarations;
@@ -485,6 +486,10 @@ final class RecoveredRequest
         $members = new DeepObjectMembers($operation);
 
         foreach (self::queryLeaves($result->schema, []) as [$name, $schema, $required]) {
+            // What the rules enforce goes beneath whatever description wins, so an author's own prose
+            // for the parameter keeps it.
+            [$schema, $note] = SchemaNotes::take($schema);
+
             // A hint or a fact is an x-docuccino member, not a schema keyword — it travels on the draft
             // rather than through the guard, which would publish it as a keyword of that name.
             $docuccino = $schema['x-docuccino'] ?? null;
@@ -504,6 +509,9 @@ final class RecoveredRequest
                 }
                 foreach ($facts as $key => $fact) {
                     $member->setDocuccinoFact((string) $key, $fact);
+                }
+                if ($note !== null) {
+                    $member->declareDescriptionNote($note, $contribution);
                 }
 
                 foreach ($schema as $keyword => $value) {
@@ -526,6 +534,9 @@ final class RecoveredRequest
             if (is_string($description)) {
                 $parameter->setDescription($description, $contribution);
                 unset($schema['description']);
+            }
+            if ($note !== null) {
+                $parameter->declareDescriptionNote($note, $contribution);
             }
 
             // A container can't be named as a bracketed leaf, so it has to say on the parameter itself
