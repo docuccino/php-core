@@ -7,6 +7,38 @@ User-facing changes to `docuccino/core` — features, fixes, performance work an
 taken from the commit messages scoped `core`. Entries begin after v0.1.2; older history is in
 the [repository](https://github.com/docuccino/docuccino) git log.
 
+## v0.24.0
+
+### Breaking changes
+
+- publish the bounds a declared tagged union's rules add where client generators read them ([#728](https://github.com/docuccino/docuccino/pull/728))
+  - a field whose `#[BodyParameter]` names a tagged union the rules bound further is published as a `oneOf` of the union's members rather than a `$ref` to the union, so a generated client's type for that field becomes the members' union. `docuccino:diff` reports no change across the move.
+- escape a data-leakage pointer and name a parameter by in:name, so a safelist entry stays on its parameter ([#712](https://github.com/docuccino/docuccino/pull/712))
+  - a `lint.data-leakage` pointer is RFC 6901-escaped and names a listed parameter by `in:name` rather than its position, so a `lint.leakage.allow` entry written against the old spelling (`/paths//api/users/get/parameters/0/name`) no longer silences anything. The finding's help names the entry and the pointer to write instead (`/paths/~1api~1users/get/parameters/query:api_key/name`).
+- an @example is read against everything its schema admits, so null beside a nullable enum is null ([#697](https://github.com/docuccino/docuccino/pull/697))
+  - an `@example` (or `#[RuleSchema]` example) that has the right type but is not one of its schema's allowed values, such as `@example active` beside an enum of `draft`/`published`, is no longer published. It raises `docblock.example-untypable`, naming the values that would be accepted. It used to be published and reported by `lint.example-mismatch`, so an example kept with `lint.examples.allow` now disappears. On a validation field, an example generated from the field's other rules takes its place where they pin a value. Change the example to an allowed value.
+
+### Features
+
+- write the links known from the code as OpenAPI response links ([#797](https://github.com/docuccino/docuccino/pull/797))
+
+### Bug fixes
+
+- don't report a default-tag merge that tags.map made on purpose ([#724](https://github.com/docuccino/docuccino/pull/724))
+- a forked build worker that dies of a fatal error always ends, so the build never waits on it forever ([#720](https://github.com/docuccino/docuccino/pull/720))
+- publish only the components a build reaches, and diff a fresh build against its export without phantom additions ([#713](https://github.com/docuccino/docuccino/pull/713))
+- require symfony/yaml 7.4.23 or 8.1.11, so a few hundred bytes of YAML cannot stall a read, and work with opis/json-schema 2.6.2 ([#727](https://github.com/docuccino/docuccino/pull/727))
+- keep the diff linear beside a wide union, and restate a deep 3.0 document without breaking an export, a diff or a contract check ([#709](https://github.com/docuccino/docuccino/pull/709))
+- a diff reads the component behind a $ref that has a constraint beside it ([#693](https://github.com/docuccino/docuccino/pull/693))
+- a diff reads a reference wrapped in a one-branch allOf as the bare reference, when constrained or repointed ([#692](https://github.com/docuccino/docuccino/pull/692))
+- a diff reads a schema becoming a union of itself and null as the nullable widening it is ([#691](https://github.com/docuccino/docuccino/pull/691))
+- a diff reads a null admitted or withdrawn in a type union as the nullability change it is ([#690](https://github.com/docuccino/docuccino/pull/690))
+- a diff reads a one-branch allOf, anyOf or oneOf as the schema inside it ([#689](https://github.com/docuccino/docuccino/pull/689))
+- a contract check against an OpenAPI 3.0 artifact holds a payload to what 3.0 means ([#688](https://github.com/docuccino/docuccino/pull/688))
+- a diff with an OpenAPI 3.0 side compares what 3.0 means, not members it ignores ([#687](https://github.com/docuccino/docuccino/pull/687))
+- a document read at OpenAPI 3.0 and exported at 3.1 or 3.2 says what its schemas meant ([#686](https://github.com/docuccino/docuccino/pull/686))
+- an OpenAPI 3.2 export says 3.2.0, whatever version the document was read at ([#685](https://github.com/docuccino/docuccino/pull/685))
+
 ## v0.23.4
 
 ### Bug fixes
