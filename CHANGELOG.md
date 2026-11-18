@@ -7,6 +7,17 @@ User-facing changes to `docuccino/core` — features, fixes, performance work an
 taken from the commit messages scoped `core`. Entries begin after v0.1.2; older history is in
 the [repository](https://github.com/docuccino/docuccino) git log.
 
+## v0.25.1
+
+### Features
+
+- settle what the responses naming a schema say it is ([#822](https://github.com/docuccino/docuccino/pull/822))
+- compare response headers in docuccino:diff ([#815](https://github.com/docuccino/docuccino/pull/815))
+
+### Bug fixes
+
+- qualify a link parameter by location where its target uses the name twice ([#820](https://github.com/docuccino/docuccino/pull/820))
+
 ## v0.25.0
 
 ### Features
