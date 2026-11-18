@@ -7,6 +7,18 @@ User-facing changes to `docuccino/core` — features, fixes, performance work an
 taken from the commit messages scoped `core`. Entries begin after v0.1.2; older history is in
 the [repository](https://github.com/docuccino/docuccino) git log.
 
+## v0.25.0
+
+### Features
+
+- compare response links in docuccino:diff ([#807](https://github.com/docuccino/docuccino/pull/807))
+- file a thrown exception the application raises only where its own guarantees fail as an assertion ([#799](https://github.com/docuccino/docuccino/pull/799))
+
+### Bug fixes
+
+- list in a tag group only the tags an operation carries ([#804](https://github.com/docuccino/docuccino/pull/804))
+- say a dropped tag member and a capped Postman collection once per document ([#803](https://github.com/docuccino/docuccino/pull/803))
+
 ## v0.24.0
 
 ### Breaking changes
