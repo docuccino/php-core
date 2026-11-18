@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Docuccino\Core\Diagnostics\Severity;
 use Docuccino\Core\Document\UirDocument;
 use Docuccino\Core\Emit\EmitOptions;
 use Docuccino\Core\Emit\Formats;
@@ -229,10 +230,11 @@ it('drops each 3.2-only tag member with its own warning', function (string $memb
     'kind' => ['kind', 'downlevel.tag-kind'],
 ]);
 
-// What a dropped `parent` actually costs depends on the document in hand, so the help is read off it
-// rather than assumed: an artifact written before anything projected the groups carries `parent`
-// alone, and a help claiming the hierarchy survived would be false for it.
-it('tells the truth about the dropped parent for the document in hand', function (bool $withGroups, string $expected): void {
+// What a dropped `parent` actually costs depends on the document in hand, so the help and the severity are
+// read off it rather than assumed: an artifact written before anything projected the groups carries
+// `parent` alone, and a notice claiming the hierarchy survived would be false for it. Where the groups do
+// carry it, a renderer still nests the tags, so the member is all that goes and nothing warrants a warning.
+it('tells the truth about the dropped parent for the document in hand', function (bool $withGroups, string $expected, Severity $severity): void {
     $document = documentWith32OnlyConstructs();
     if ($withGroups) {
         $document['x-tagGroups'] = [['name' => 'Billing', 'tags' => ['Billing', 'Invoices']]];
@@ -240,30 +242,38 @@ it('tells the truth about the dropped parent for the document in hand', function
 
     $result = $this->emitter->emitWithReport(UirDocument::fromArray($document));
     $parent = array_values(array_filter(
-        $result->report->warnings(),
+        $result->report->diagnostics,
         static fn ($d) => $d->code === 'downlevel.tag-parent',
     ));
 
     expect($parent)->toHaveCount(1)
-        ->and($parent[0]->help)->toContain($expected);
+        ->and($parent[0]->help)->toContain($expected)
+        ->and($parent[0]->severity)->toBe($severity);
 })->with([
-    'the groups carry the forest, so only the member is lost' => [true, 'Only the 3.2 `parent` member is dropped'],
-    'nothing else carries it, so the hierarchy really flattens' => [false, 'The tag hierarchy flattens'],
+    'the groups carry the forest, so only the member is lost' => [true, 'Only the 3.2 `parent` member is dropped', Severity::Info],
+    'nothing else carries it, so the hierarchy really flattens' => [false, 'The tag hierarchy flattens', Severity::Warning],
 ]);
 
-it('warns once per tag per dropped member and names the tag', function (): void {
+/**
+ * The loss is the document's and so is the only remedy — ship the 3.2 artifact, or accept the price — so a
+ * member dropped from many tags is one notice naming every tag, not one per tag repeating the same fact.
+ * Measured on a 76-tag document: one notice per tag was 76 lines nobody could act on one at a time.
+ */
+it('reports each dropped tag member once, naming every tag it was dropped from', function (): void {
     $result = $this->emitter->emitWithReport(UirDocument::fromArray(documentWith32OnlyConstructs()));
 
-    $tagWarnings = array_values(array_filter(
-        $result->report->warnings(),
+    $tagNotices = array_values(array_filter(
+        $result->report->diagnostics,
         static fn ($d) => str_starts_with($d->code, 'downlevel.tag-'),
     ));
 
     // Billing carries summary+kind, Invoices parent+kind.
-    expect(array_map(static fn ($d) => $d->code, $tagWarnings))
-        ->toBe(['downlevel.tag-summary', 'downlevel.tag-kind', 'downlevel.tag-parent', 'downlevel.tag-kind'])
-        ->and($tagWarnings[0]->message)->toContain('`Billing`')
-        ->and($tagWarnings[2]->message)->toContain('`Invoices`');
+    expect(array_map(static fn ($d) => $d->code, $tagNotices))
+        ->toBe(['downlevel.tag-summary', 'downlevel.tag-parent', 'downlevel.tag-kind'])
+        ->and($tagNotices[0]->message)->toContain('tag `Billing`')
+        ->and($tagNotices[1]->message)->toContain('tag `Invoices`')
+        ->and($tagNotices[2]->message)->toContain('2 tags (`Billing`, `Invoices`)')
+        ->and(array_map(static fn ($d) => $d->routeSignature, $tagNotices))->toBe([null, null, null]);
 });
 
 it('keeps the 3.1-valid tag members through the downlevel', function (): void {

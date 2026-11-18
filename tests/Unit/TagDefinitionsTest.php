@@ -218,7 +218,7 @@ it('projects one group per duplicated root rather than one per definition', func
         ['name' => 'Billing'],
         ['name' => 'Billing'],
         ['name' => 'Invoices', 'parent' => 'Billing'],
-    ])->tagGroups())->toBe([['name' => 'Billing', 'tags' => ['Billing', 'Invoices']]]);
+    ])->tagGroups(['Billing', 'Invoices']))->toBe([['name' => 'Billing', 'tags' => ['Billing', 'Invoices']]]);
 });
 
 it('merges to the same bytes however the duplicate definitions are ordered', function (): void {
@@ -266,7 +266,7 @@ it('projects the tag forest as groups, roots first members of their own group', 
         ['name' => 'Invoices', 'parent' => 'Billing'],
         ['name' => 'Credit Notes', 'parent' => 'Invoices'],
         ['name' => 'Webhooks'],
-    ])->tagGroups();
+    ])->tagGroups(['Billing', 'Invoices', 'Credit Notes', 'Webhooks']);
 
     // A deeper hierarchy flattens into its root's group; a childless root keeps a singleton group
     // rather than vanishing from a viewer that hides ungrouped tags.
@@ -277,16 +277,42 @@ it('projects the tag forest as groups, roots first members of their own group', 
 });
 
 it('projects no groups when no tag declares a parent', function (): void {
-    expect(tagConfig([['name' => 'Billing'], ['name' => 'Webhooks']])->tagGroups())->toBe([]);
+    expect(tagConfig([['name' => 'Billing'], ['name' => 'Webhooks']])->tagGroups(['Billing', 'Webhooks']))->toBe([]);
 });
 
 it('treats a tag whose parent link was dropped as a root of its own group', function (): void {
     $groups = tagConfig([
         ['name' => 'Billing', 'parent' => 'Billing'], // self-cycle: the link drops, the tag stays
         ['name' => 'Invoices', 'parent' => 'Billing'],
-    ])->tagGroups();
+    ])->tagGroups(['Billing', 'Invoices']);
 
     expect($groups)->toBe([
         ['name' => 'Billing', 'tags' => ['Billing', 'Invoices']],
+    ]);
+});
+
+/**
+ * A viewer draws every member of a group as an entry a reader can open, so a tag no operation carries is an
+ * entry with nothing behind it. The common one is a root that only heads its children — a navigation
+ * heading — which, listed first in its own group, put an empty page at the top of every section. Measured on
+ * a 76-tag document: 10 of its 14 roots carried no operation.
+ */
+it('lists in a group only the tags an operation carries', function (): void {
+    $groups = tagConfig([
+        ['name' => 'Billing', 'kind' => 'nav'],
+        ['name' => 'Invoices', 'parent' => 'Billing'],
+        ['name' => 'Refunds', 'parent' => 'Billing'],
+        ['name' => 'Accounts'],
+        ['name' => 'Profiles', 'parent' => 'Accounts'],
+        ['name' => 'Reporting', 'kind' => 'nav'],
+        ['name' => 'Exports', 'parent' => 'Reporting'],
+    ])->tagGroups(['Invoices', 'Accounts', 'Profiles']);
+
+    expect($groups)->toBe([
+        // A root with operations of its own is still the first member of its group.
+        ['name' => 'Accounts', 'tags' => ['Accounts', 'Profiles']],
+        // The heading root and its child with no operation are both left out.
+        ['name' => 'Billing', 'tags' => ['Invoices']],
+        // Reporting leads to no operation at all, so there is no group to draw.
     ]);
 });

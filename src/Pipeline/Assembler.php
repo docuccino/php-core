@@ -121,9 +121,9 @@ final class Assembler
         }
 
         // The 3.2 `parent` members above are the spec's own statement of the hierarchy; `x-tagGroups`
-        // is the same forest in the convention most renderers group a sidebar by. Flat tags emit
-        // nothing.
-        $tagGroups = $document->tagGroups();
+        // is the same forest in the convention most renderers group a sidebar by, listing only the tags
+        // an operation carries. Flat tags emit nothing.
+        $tagGroups = $document->tagGroups(self::carriedTags($paths, $webhooks));
         if ($tagGroups !== []) {
             $doc['x-tagGroups'] = $tagGroups;
         }
@@ -267,6 +267,33 @@ final class Assembler
         $doc['x-docuccino'] = $extension;
 
         return $doc;
+    }
+
+    /**
+     * Every tag an operation carries, a path item's custom-method operations included. A member of a path
+     * item that carries `tags` is an operation; nothing else in one does.
+     *
+     * @param  array<string, array<string, mixed>>  ...$buckets  `paths` and `webhooks`
+     * @return list<string>
+     */
+    private static function carriedTags(array ...$buckets): array
+    {
+        $carried = [];
+        foreach ($buckets as $bucket) {
+            foreach ($bucket as $pathItem) {
+                $custom = is_array($pathItem['additionalOperations'] ?? null) ? $pathItem['additionalOperations'] : [];
+
+                foreach ([...array_values($pathItem), ...array_values($custom)] as $operation) {
+                    foreach (is_array($operation) && is_array($operation['tags'] ?? null) ? $operation['tags'] : [] as $tag) {
+                        if (is_string($tag)) {
+                            $carried[$tag] = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        return array_map(strval(...), array_keys($carried));
     }
 
     /**

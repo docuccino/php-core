@@ -377,6 +377,83 @@ final class DocumentDiffer
                 }
             }
         }
+
+        $this->diffLinks($id, $responsePath, $subject, $old->rest['links'] ?? null, $new->rest['links'] ?? null, $changes);
+    }
+
+    /**
+     * A response's `links`, by name. A link says which value from this response another operation takes; it
+     * makes no call fail by going, so none of the three is breaking — an operation a link named that goes
+     * is reported, and breaking, on its own. A changed link names the members that moved. Only what the
+     * document publishes is compared: a link's `x-docuccino` provenance is not part of the contract.
+     *
+     * @param  list<Change>  $changes
+     */
+    private function diffLinks(string $id, string $responsePath, ChangeSubject $subject, mixed $old, mixed $new, array &$changes): void
+    {
+        $oldLinks = is_array($old) ? Arr::stringKeyed($old) : [];
+        $newLinks = is_array($new) ? Arr::stringKeyed($new) : [];
+
+        foreach (Arr::sortedUnion(array_keys($oldLinks), array_keys($newLinks)) as $name) {
+            $linkPath = $responsePath.' links '.$name;
+
+            if (! array_key_exists($name, $newLinks)) {
+                $changes[] = new Change(ChangeKind::Removed, ChangeTarget::Response, $id, $linkPath, false, 'response.link-removed', subject: $subject);
+
+                continue;
+            }
+
+            if (! array_key_exists($name, $oldLinks)) {
+                $changes[] = new Change(ChangeKind::Added, ChangeTarget::Response, $id, $linkPath, false, 'response.link-added', subject: $subject);
+
+                continue;
+            }
+
+            $was = self::published($oldLinks[$name]);
+            $is = self::published($newLinks[$name]);
+
+            $fields = [];
+            foreach (Arr::sortedUnion(array_keys($was), array_keys($is)) as $member) {
+                if (Json::stable($was[$member] ?? null) !== Json::stable($is[$member] ?? null)) {
+                    $fields[] = new FieldChange($member, self::canonical($was[$member] ?? null), self::canonical($is[$member] ?? null));
+                }
+            }
+
+            if ($fields !== []) {
+                $changes[] = new Change(ChangeKind::Changed, ChangeTarget::Response, $id, $linkPath, false, 'response.link-changed', $fields, $subject);
+            }
+        }
+    }
+
+    /**
+     * A member's value with every object's keys in one order, so a link reads the same whichever dialect the
+     * document was written in — an export orders a `requestBody`'s keywords its own way.
+     */
+    private static function canonical(mixed $value): mixed
+    {
+        if (! is_array($value)) {
+            return $value;
+        }
+
+        $value = array_map(self::canonical(...), $value);
+        if (! array_is_list($value)) {
+            ksort($value, SORT_STRING);
+        }
+
+        return $value;
+    }
+
+    /**
+     * A link as the document publishes it: its members without Docuccino's own.
+     *
+     * @return array<string, mixed>
+     */
+    private static function published(mixed $link): array
+    {
+        $members = is_array($link) ? Arr::stringKeyed($link) : [];
+        unset($members['x-docuccino']);
+
+        return $members;
     }
 
     /**

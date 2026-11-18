@@ -682,14 +682,29 @@ it('skips a status it cannot put in an integer code', function (): void {
         ->and($codes)->not->toContain('default');
 });
 
-it('caps saved examples and says how many it kept', function (): void {
-    $truncated = array_values(array_filter(
-        postmanReport(loadFixture('postman-surface.uir.json')),
-        static fn (Diagnostic $d): bool => $d->code === 'postman.examples-truncated',
-    ));
+/**
+ * The cap is the collection's and the OpenAPI artifact keeps every response, so there is nothing to do
+ * about a truncated operation: it is information, said once for the whole collection with every operation
+ * it reached, not a warning per operation.
+ */
+it('caps saved examples and says once which operations it capped', function (): void {
+    $document = loadFixture('postman-surface.uir.json');
+    $one = array_values(array_filter(postmanReport($document), static fn (Diagnostic $d): bool => $d->code === 'postman.examples-truncated'));
 
-    expect($truncated)->toHaveCount(1)
-        ->and($truncated[0]->routeSignature)->toBe('POST /accounts');
+    // A second operation with as many responses as the first.
+    $document['paths']['/accounts']['put'] = $document['paths']['/accounts']['post'];
+    $document['paths']['/accounts']['put']['operationId'] = 'replaceAccount';
+    $two = array_values(array_filter(postmanReport($document), static fn (Diagnostic $d): bool => $d->code === 'postman.examples-truncated'));
+
+    expect($one)->toHaveCount(1)
+        ->and($one[0]->severity)->toBe(Severity::Info)
+        ->and($one[0]->routeSignature)->toBeNull()
+        ->and($one[0]->message)->toStartWith('One operation documents')
+        ->and($one[0]->message)->toContain('POST /accounts (')
+        ->and($two)->toHaveCount(1)
+        ->and($two[0]->message)->toStartWith('2 operations document')
+        ->and($two[0]->message)->toContain('POST /accounts (')
+        ->and($two[0]->message)->toContain('PUT /accounts (');
 });
 
 it('reports webhooks, which describe what the API sends rather than what you send', function (): void {

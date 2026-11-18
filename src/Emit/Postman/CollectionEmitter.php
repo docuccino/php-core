@@ -134,7 +134,9 @@ final readonly class CollectionEmitter implements ReportingEmitter
         $servers = is_array($oas['servers'] ?? null) ? array_values($oas['servers']) : [];
 
         $variables = $this->urls->variables($servers, $components, $diagnostics);
-        $operations = $this->operations($oas, $components, $diagnostics);
+        $truncated = [];
+        $operations = $this->operations($oas, $components, $diagnostics, $truncated);
+        $this->reportTruncated($truncated, $diagnostics);
 
         $collection = [
             'info' => $this->info($info, $servers, $variables),
@@ -180,9 +182,10 @@ final readonly class CollectionEmitter implements ReportingEmitter
      * @param  array<string, mixed>  $oas
      * @param  array<string, mixed>  $components
      * @param  list<Diagnostic>  $diagnostics
+     * @param  array<string, int>  $truncated
      * @return list<array{tags: list<string>, item: array<string, mixed>}>
      */
-    private function operations(array $oas, array $components, array &$diagnostics): array
+    private function operations(array $oas, array $components, array &$diagnostics, array &$truncated): array
     {
         $paths = Arr::stringKeyed(is_array($oas['paths'] ?? null) ? $oas['paths'] : []);
 
@@ -210,7 +213,7 @@ final readonly class CollectionEmitter implements ReportingEmitter
                 $operation = Arr::stringKeyed($pathItem[$method]);
                 $out[] = [
                     'tags' => $this->tagsOf($operation),
-                    'item' => $this->item($method, $template, $operation, $shared, $components, $oas, $diagnostics),
+                    'item' => $this->item($method, $template, $operation, $shared, $components, $oas, $diagnostics, $truncated),
                 ];
             }
         }
@@ -238,9 +241,10 @@ final readonly class CollectionEmitter implements ReportingEmitter
      * @param  array<string, mixed>  $components
      * @param  array<string, mixed>  $oas
      * @param  list<Diagnostic>  $diagnostics
+     * @param  array<string, int>  $truncated
      * @return array<string, mixed>
      */
-    private function item(string $method, string $template, array $operation, array $shared, array $components, array $oas, array &$diagnostics): array
+    private function item(string $method, string $template, array $operation, array $shared, array $components, array $oas, array &$diagnostics, array &$truncated): array
     {
         $signature = strtoupper($method).' '.$template;
         $parameters = $this->urls->merge($shared, is_array($operation['parameters'] ?? null) ? array_values($operation['parameters']) : [], $components);
@@ -269,7 +273,7 @@ final readonly class CollectionEmitter implements ReportingEmitter
 
         $item = ['name' => $this->name($method, $template, $operation), 'request' => $request];
 
-        $responses = $this->responses($operation, $components, $request, $signature, $diagnostics);
+        $responses = $this->responses($operation, $components, $request, $signature, $truncated);
         if ($responses !== []) {
             $item['response'] = $responses;
         }
@@ -500,10 +504,10 @@ final readonly class CollectionEmitter implements ReportingEmitter
      * @param  array<string, mixed>  $operation
      * @param  array<string, mixed>  $components
      * @param  array<string, mixed>  $request
-     * @param  list<Diagnostic>  $diagnostics
+     * @param  array<string, int>  $truncated  operation → how many responses it documents, where that is more than are kept
      * @return list<array<string, mixed>>
      */
-    private function responses(array $operation, array $components, array $request, string $signature, array &$diagnostics): array
+    private function responses(array $operation, array $components, array $request, string $signature, array &$truncated): array
     {
         $responses = Arr::stringKeyed(is_array($operation['responses'] ?? null) ? $operation['responses'] : []);
 
@@ -515,17 +519,7 @@ final readonly class CollectionEmitter implements ReportingEmitter
         $kept = array_slice($codes, 0, self::MAX_EXAMPLES);
 
         if (count($codes) > count($kept)) {
-            $diagnostics[] = new Diagnostic(
-                severity: Severity::Warning,
-                code: 'postman.examples-truncated',
-                message: sprintf(
-                    'Documents %d responses; the collection saves the first %d by status (%s) to stay navigable.',
-                    count($codes),
-                    count($kept),
-                    implode(', ', $kept),
-                ),
-                routeSignature: $signature,
-            );
+            $truncated[$signature] = count($codes);
         }
 
         $out = [];
@@ -535,6 +529,38 @@ final readonly class CollectionEmitter implements ReportingEmitter
         }
 
         return $out;
+    }
+
+    /**
+     * One notice for every operation that saves fewer examples than it documents. Nothing is lost a reader
+     * can act on — the OpenAPI artifact keeps every response — so it is information, and once: the cap is
+     * the collection's, the same for every operation it reaches.
+     *
+     * @param  array<string, int>  $truncated
+     * @param  list<Diagnostic>  $diagnostics
+     */
+    private function reportTruncated(array $truncated, array &$diagnostics): void
+    {
+        if ($truncated === []) {
+            return;
+        }
+
+        $operations = [];
+        foreach ($truncated as $signature => $documented) {
+            $operations[] = sprintf('%s (%d)', $signature, $documented);
+        }
+
+        $diagnostics[] = new Diagnostic(
+            severity: Severity::Info,
+            code: 'postman.examples-truncated',
+            message: sprintf(
+                '%s more responses than the collection saves, so %s the first %d by status to stay navigable: %s.',
+                count($truncated) === 1 ? 'One operation documents' : sprintf('%d operations document', count($truncated)),
+                count($truncated) === 1 ? 'it keeps' : 'each keeps',
+                self::MAX_EXAMPLES,
+                implode(', ', $operations),
+            ),
+        );
     }
 
     /**

@@ -69,6 +69,10 @@ $document = static function (bool $after, bool $ids): array {
                     'not' => ['required' => $after ? ['secret'] : []],
                 ]),
                 ...($after ? ['application/xml' => ['schema' => ['type' => 'string']]] : ['text/csv' => ['schema' => ['type' => 'string']]]),
+            ], 'links' => [
+                // One link kept and re-pointed, one dropped, one added.
+                'copy' => ['operationId' => 'copyForm', 'parameters' => ['form' => $after ? '$response.body#/uuid' : '$response.body#/id']],
+                ...($after ? ['audit' => ['operationId' => 'auditForm']] : ['archive' => ['operationId' => 'archiveForm']]),
             ]],
             '410' => ['description' => 'Gone.', 'content' => $json(['$ref' => '#/components/schemas/Still.Used'])],
         ] + ($after
@@ -163,7 +167,7 @@ it('names what every change is about, whichever code it is reported under and ho
     $stated = array_values(array_unique($matches[1]));
 
     expect($changeset->pairing)->toBe($pairing)
-        ->and($stated)->toHaveCount(35)
+        ->and($stated)->toHaveCount(38)
         ->and(array_values(array_diff($stated, array_column($changes, 'code'))))->toBe([]);
 
     // What each kind of node a change targets may be about: a parameter, a response and a schema position

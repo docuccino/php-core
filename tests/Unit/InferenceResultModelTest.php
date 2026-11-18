@@ -255,6 +255,31 @@ it('ranks every throw confidence, most certain first', function (ThrowConfidence
     'likely' => [ThrowConfidence::Likely, 1],
 ]);
 
+it('ranks every throw disposition, the one the document hears most from first', function (ThrowDisposition $disposition, int $rank): void {
+    // A response one site sends is not unsent by another site raising the same class as an assertion, and an
+    // assertion — published where the application renders it at a status — outranks plumbing, published nowhere.
+    expect($disposition->rank())->toBe($rank);
+})->with([
+    'signal' => [ThrowDisposition::Signal, 4],
+    'assertion' => [ThrowDisposition::Assertion, 3],
+    'internal' => [ThrowDisposition::Internal, 2],
+    'dropped' => [ThrowDisposition::Dropped, 1],
+]);
+
+it('lists every throw disposition in its rank dataset', function (): void {
+    // A dataset only proves the rows it lists, so the cases are held against it: a fifth disposition fails
+    // here rather than passing every row it is not in.
+    expect(array_map(static fn (ThrowDisposition $d): string => $d->value, ThrowDisposition::cases()))
+        ->toBe(['signal', 'assertion', 'internal', 'dropped']);
+});
+
+it('round-trips an assertion through its serialized form', function (): void {
+    // A warm build reads the throw back off the fragment, and must hear the same disposition a cold one did.
+    $thrown = new ThrownException('LogicException', 500, [], ThrowConfidence::Certain, ThrowDisposition::Assertion);
+
+    expect(ThrownException::fromArray($thrown->toArray())->disposition)->toBe(ThrowDisposition::Assertion);
+});
+
 it('normalises a negative line to no line at all', function (): void {
     // PHPStan reports -1 for synthesised throw points and execution-end nodes.
     $location = new SourceLocation('/app/a.php', -1);

@@ -3976,3 +3976,36 @@ it('pairs an artifact written before UIR 2.0 against one built after it, hash un
 
     expect((new ContentHasher)->hash($edited))->not->toBe((new ContentHasher)->hash($modern));
 });
+
+/**
+ * A response's links are part of what it publishes — which value from it another operation takes — and a
+ * diff that never read them reported nothing when a build added five. None of the three changes is
+ * breaking: a link makes no call fail by going, and an operation a link named that goes is reported on its
+ * own. Provenance is Docuccino's, not the contract's, so it moves nothing.
+ */
+it('reports a response link added, removed or changed, and nothing for its provenance alone', function (): void {
+    $link = static fn (string $pointer, array $provenance = ['layer' => 'inference']): array => [
+        'operationId' => 'showForm',
+        'parameters' => ['id' => '$response.body#/'.$pointer],
+        'x-docuccino' => ['provenance' => [$provenance]],
+    ];
+    $withLinks = static function (array $links): array {
+        $document = diffBase();
+        $document['paths']['/api/v1/forms/{id}']['get']['responses']['200']['links'] = $links;
+
+        return $document;
+    };
+
+    $added = diffOf(diffBase(), $withLinks(['showForm' => $link('id')]));
+    $removed = diffOf($withLinks(['showForm' => $link('id')]), diffBase());
+    $changed = diffOf($withLinks(['showForm' => $link('id')]), $withLinks(['showForm' => $link('data/id')]));
+    $provenance = diffOf($withLinks(['showForm' => $link('id')]), $withLinks(['showForm' => $link('id', ['layer' => 'attribute'])]));
+
+    expect(array_keys(changesByCode($added)))->toBe(['response.link-added'])
+        ->and(changesByCode($added)['response.link-added']->path)->toBe('GET /api/v1/forms/{id} responses 200 links showForm')
+        ->and(array_keys(changesByCode($removed)))->toBe(['response.link-removed'])
+        ->and(array_keys(changesByCode($changed)))->toBe(['response.link-changed'])
+        ->and(array_map(static fn ($f) => $f->field, changesByCode($changed)['response.link-changed']->fields))->toBe(['parameters'])
+        ->and($provenance->changes)->toBe([])
+        ->and($added->isBreaking() || $removed->isBreaking() || $changed->isBreaking())->toBeFalse();
+});

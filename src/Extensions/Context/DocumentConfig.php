@@ -305,14 +305,19 @@ final readonly class DocumentConfig
     }
 
     /**
-     * The tag forest as `x-tagGroups`: one group per parentless tag — itself first, then every
-     * descendant — in {@see tagDefinitions()} order. Empty when no tag declares a parent, so a flat
-     * document changes not a byte. The projection is total or absent: a viewer rendering groups hides
-     * any tag outside them, so a childless root still gets its singleton group rather than vanishing.
+     * The tag forest as `x-tagGroups`: one group per parentless tag, listing itself and every descendant
+     * an operation carries, in {@see tagDefinitions()} order. Empty when no tag declares a parent, so a
+     * flat document changes not a byte.
      *
+     * A viewer rendering groups shows nothing outside them, and draws every member as an entry a reader can
+     * open. So a tag no operation carries — most often a root that only heads its children — is left out
+     * rather than drawn empty, and a group left with no member goes with it: there is nothing under it a
+     * viewer could hide. A childless root that does carry operations keeps its singleton group.
+     *
+     * @param  list<string>  $carried  the tags the document's operations carry
      * @return list<array{name: string, tags: list<string>}>
      */
-    public function tagGroups(): array
+    public function tagGroups(array $carried): array
     {
         $tags = $this->tagDefinitions();
 
@@ -332,8 +337,17 @@ final readonly class DocumentConfig
 
         $groups = [];
         foreach ($tags as $tag) {
-            if (! isset($parented[$tag['name']])) {
-                $groups[] = ['name' => $tag['name'], 'tags' => self::descendantTags($tag['name'], $children)];
+            if (isset($parented[$tag['name']])) {
+                continue;
+            }
+
+            $members = array_values(array_filter(
+                self::descendantTags($tag['name'], $children),
+                static fn (string $name): bool => in_array($name, $carried, true),
+            ));
+
+            if ($members !== []) {
+                $groups[] = ['name' => $tag['name'], 'tags' => $members];
             }
         }
 

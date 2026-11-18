@@ -436,6 +436,8 @@ final readonly class OpenApi31DownlevelEmitter implements ReportingEmitter
     private function downlevelTags(array $tags, array &$diagnostics, bool $hasTagGroups): array
     {
         $out = [];
+        /** @var array<string, list<string>> $dropped */
+        $dropped = [];
 
         foreach ($tags as $tag) {
             if (! is_array($tag)) {
@@ -446,25 +448,36 @@ final readonly class OpenApi31DownlevelEmitter implements ReportingEmitter
 
             $name = is_string($tag['name'] ?? null) ? $tag['name'] : '(unnamed)';
 
-            foreach (self::TAG_MEMBERS_32 as $member => [$code, $help]) {
-                if (! isset($tag[$member])) {
-                    continue;
+            foreach (array_keys(self::TAG_MEMBERS_32) as $member) {
+                if (isset($tag[$member])) {
+                    unset($tag[$member]);
+                    $dropped[$member][] = $name;
                 }
-
-                unset($tag[$member]);
-                $diagnostics[] = new Diagnostic(
-                    severity: Severity::Warning,
-                    code: $code,
-                    message: sprintf(
-                        'Dropped the OpenAPI 3.2 `%s` member from tag `%s`, which OpenAPI 3.1 does not define.',
-                        $member,
-                        $name,
-                    ),
-                    help: $member === 'parent' && $hasTagGroups ? self::PARENT_HELP_WITH_GROUPS : $help,
-                );
             }
 
             $out[] = Arr::stringKeyed($tag);
+        }
+
+        // One notice per member rather than per tag: the loss is the document's, and so is the only remedy,
+        // so naming each tag in a notice of its own repeats one fact once per tag.
+        foreach (self::TAG_MEMBERS_32 as $member => [$code, $help]) {
+            $names = $dropped[$member] ?? [];
+            if ($names === []) {
+                continue;
+            }
+
+            $message = sprintf(
+                'Dropped the OpenAPI 3.2 `%s` member from %s, which OpenAPI 3.1 does not define.',
+                $member,
+                count($names) === 1
+                    ? sprintf('tag `%s`', $names[0])
+                    : sprintf('%d tags (%s)', count($names), implode(', ', array_map(static fn (string $n): string => '`'.$n.'`', $names))),
+            );
+
+            // A renderer reading `x-tagGroups` still nests the tags, so the member is all that goes.
+            $diagnostics[] = $member === 'parent' && $hasTagGroups
+                ? new Diagnostic(severity: Severity::Info, code: 'downlevel.tag-parent', message: $message, help: self::PARENT_HELP_WITH_GROUPS)
+                : new Diagnostic(severity: Severity::Warning, code: $code, message: $message, help: $help);
         }
 
         return $out;
