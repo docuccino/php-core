@@ -69,6 +69,15 @@ $document = static function (bool $after, bool $ids): array {
                     'not' => ['required' => $after ? ['secret'] : []],
                 ]),
                 ...($after ? ['application/xml' => ['schema' => ['type' => 'string']]] : ['text/csv' => ['schema' => ['type' => 'string']]]),
+            ], 'headers' => [
+                // One header for each way a promise to a client can move.
+                'X-Total' => ['required' => true, 'schema' => ['type' => 'integer'], 'description' => $after ? 'Rows in all.' : 'Rows.'],
+                'X-Cursor' => ['required' => ! $after, 'schema' => ['type' => 'string']],
+                'X-Trace' => ['required' => $after, 'schema' => ['type' => 'string']],
+                'X-Region' => $after ? ['$ref' => '#/components/headers/Region.Header'] : ['schema' => ['type' => 'string']],
+                ...($after
+                    ? ['X-Fresh' => ['schema' => ['type' => 'string']]]
+                    : ['X-Legacy' => ['required' => true, 'schema' => ['type' => 'string']], 'X-Hint' => ['schema' => ['type' => 'string']]]),
             ], 'links' => [
                 // One link kept and re-pointed, one dropped, one added.
                 'copy' => ['operationId' => 'copyForm', 'parameters' => ['form' => $after ? '$response.body#/uuid' : '$response.body#/id']],
@@ -167,7 +176,7 @@ it('names what every change is about, whichever code it is reported under and ho
     $stated = array_values(array_unique($matches[1]));
 
     expect($changeset->pairing)->toBe($pairing)
-        ->and($stated)->toHaveCount(38)
+        ->and($stated)->toHaveCount(45)
         ->and(array_values(array_diff($stated, array_column($changes, 'code'))))->toBe([]);
 
     // What each kind of node a change targets may be about: a parameter, a response and a schema position

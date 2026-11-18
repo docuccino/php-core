@@ -140,7 +140,7 @@ final class ResponseLinks
                 if ($parameters !== null) {
                     $out[$status][$operationId] = [
                         'operationId' => $operationId,
-                        'parameters' => $parameters,
+                        'parameters' => self::located($parameters, self::declaredParameters($targetSite['keys'], $targetSite['operation'], $doc)),
                         'x-docuccino' => ['provenance' => [(new ProvenanceRecord('inference', 'inference'))->toArray()]],
                     ];
                 }
@@ -350,6 +350,12 @@ final class ResponseLinks
                 return [null, null, null, self::parameterUndeclared($signature, $declared, (string) $parameter)];
             }
 
+            // A bare name the target uses in two locations fills one of them, and nothing says which.
+            $locations = self::locationsOf($declares, (string) $parameter);
+            if (count($locations) > 1) {
+                return [null, null, null, self::parameterAmbiguous($signature, $declared, (string) $parameter, $locations)];
+            }
+
             if (is_string($value)) {
                 $pointer = ResponsePointer::undocumentedIn($response, $doc, $value);
                 if ($pointer !== null) {
@@ -421,6 +427,41 @@ final class ResponseLinks
         }
 
         return $declared;
+    }
+
+    /**
+     * Path parameters keyed as OpenAPI's Link Object reads them: by bare name, unless the target uses that
+     * name in another location as well — a `page` in the path and a `page` in the query — where a bare key
+     * names either and is qualified as `path.page`. Only those are, so a link whose names are unambiguous
+     * keeps the key it has always published.
+     *
+     * @param  array<string, string>  $parameters  path parameter → value
+     * @param  array<string, array<string, true>>  $declares
+     * @return array<string, string>
+     */
+    private static function located(array $parameters, array $declares): array
+    {
+        $located = [];
+        foreach ($parameters as $name => $value) {
+            $located[count(self::locationsOf($declares, $name)) > 1 ? 'path.'.$name : $name] = $value;
+        }
+
+        return $located;
+    }
+
+    /**
+     * The locations the target declares a parameter of this name in, sorted. A name qualified by its location
+     * is no parameter's name, so it stands for none here and is never ambiguous.
+     *
+     * @param  array<string, array<string, true>>  $declares
+     * @return list<string>
+     */
+    private static function locationsOf(array $declares, string $name): array
+    {
+        $locations = array_keys(array_filter($declares, static fn (array $names): bool => isset($names[$name])));
+        sort($locations);
+
+        return $locations;
     }
 
     /**
@@ -600,6 +641,23 @@ final class ResponseLinks
             source: $declared->source,
             routeSignature: $signature,
             help: 'Name the parameter the way the target operation declares it, or qualify it with its location (`path.id`).',
+        );
+    }
+
+    /**
+     * @param  list<string>  $locations
+     */
+    private static function parameterAmbiguous(string $signature, DeclaredLink $declared, string $parameter, array $locations): Diagnostic
+    {
+        $qualified = array_map(static fn (string $in): string => '`'.$in.'.'.$parameter.'`', $locations);
+
+        return new Diagnostic(
+            severity: Severity::Warning,
+            code: 'response-link.parameter-ambiguous',
+            message: sprintf('A declared link to "%s" fills "%s", which that operation declares in more than one location (%s), so a client could not tell which and the link was left out.', $declared->operation, $parameter, implode(', ', $locations)),
+            source: $declared->source,
+            routeSignature: $signature,
+            help: sprintf('Qualify the parameter with its location: %s.', implode(' or ', $qualified)),
         );
     }
 

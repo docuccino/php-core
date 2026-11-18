@@ -73,6 +73,16 @@ final class ResponseDraft
     public const COMPONENT_DESCRIPTION = 'componentDescription';
 
     /**
+     * Frozen under `x-docuccino.facts` as `media type → the sentences said about the schema that media
+     * type's body references` ({@see describeReferencedSchema()}). It travels on the response, never in
+     * the schema: a schema is shared by its content, so a sentence written into it would split one name
+     * in two wherever two declarations differ, and would be carried in another route's cached body after
+     * the route that wrote it is gone. Settled across the document by {@see ReferencedSchemaDescriptions},
+     * which removes it.
+     */
+    public const SCHEMA_DESCRIPTIONS = 'schemaDescriptions';
+
+    /**
      * Frozen under `x-docuccino.facts` as `media type → the members of that media type's `example` that
      * came from a declared TYPE and nothing else` ({@see setExample()}). Public for the same reason as
      * the two above: the shared-error hoist reads it back off the finished document.
@@ -160,6 +170,15 @@ final class ResponseDraft
 
     /** The sentence that write carried ({@see COMPONENT_DESCRIPTION}), turning over with it. */
     private ?string $componentDescription = null;
+
+    /**
+     * Every sentence said about the schema each media type's body references ({@see SCHEMA_DESCRIPTIONS}).
+     * A set, never a guarded field: agreement is decided over the whole document, so this keeps every
+     * sentence rather than letting precedence pick one here.
+     *
+     * @var array<string, array<string, true>>
+     */
+    private array $schemaDescriptions = [];
 
     public function __construct(
         public readonly string $status,
@@ -249,6 +268,20 @@ final class ResponseDraft
     }
 
     /**
+     * Say what the schema this response's `$mediaType` body references IS — the description of a component
+     * that is no class, which a producer named and so is the only one able to describe. Every response
+     * naming one schema is a statement about the same thing, so the sentences are settled together once the
+     * document is whole ({@see SCHEMA_DESCRIPTIONS}): one sentence is published on the schema, two different
+     * ones publish neither. An empty sentence says nothing.
+     */
+    public function describeReferencedSchema(string $mediaType, string $description): void
+    {
+        if ($description !== '') {
+            $this->schemaDescriptions[$mediaType][$description] = true;
+        }
+    }
+
+    /**
      * Whether the status this response is keyed at was READ or stood in for — recorded once per producer
      * that reaches the status, and true only where every one of them stood in. A status two producers
      * meet at, one having read it, is a status something read.
@@ -313,6 +346,12 @@ final class ResponseDraft
 
         foreach ($other->content as $mediaType => $draft) {
             $this->content((string) $mediaType)->absorb($draft);
+        }
+
+        foreach ($other->schemaDescriptions as $mediaType => $sentences) {
+            foreach (array_keys($sentences) as $sentence) {
+                $this->describeReferencedSchema((string) $mediaType, (string) $sentence);
+            }
         }
 
         foreach ($other->declaredExamples as $mediaType => $named) {
@@ -693,6 +732,17 @@ final class ResponseDraft
 
         if ($this->statusUnplaced === true) {
             $facts += [self::STATUS_UNPLACED => true];
+        }
+
+        $described = [];
+        foreach ($this->schemaDescriptions as $mediaType => $sentences) {
+            $sentences = array_map('strval', array_keys($sentences));
+            sort($sentences, SORT_STRING);
+            $described[(string) $mediaType] = $sentences;
+        }
+        if ($described !== []) {
+            ksort($described, SORT_STRING);
+            $facts += [self::SCHEMA_DESCRIPTIONS => $described];
         }
 
         $docuccino = new NodeExtension(

@@ -576,6 +576,9 @@ it('freezes the drafts an extension writes through at the methods they mean to p
             'componentClaimNamesResponse',
             'content',
             'declareExamples',
+            // A producer that names a schema is the only one able to say what it is, and the sentence has to
+            // ride the response rather than the shared schema ({@see ResponseDraft::SCHEMA_DESCRIPTIONS}).
+            'describeReferencedSchema',
             'examplePlaceholders',
             'hasContent',
             'illustrateExamples',

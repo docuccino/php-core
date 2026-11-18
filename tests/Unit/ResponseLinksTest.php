@@ -340,6 +340,74 @@ it('reports a declared link it cannot write, and leaves it out', function (Decla
     'a pointer the response contradicts' => [new DeclaredLink('posts.show', ['post' => '$response.body#/data/uuid']), 'response-link.pointer-undocumented'],
 ]);
 
+/**
+ * A Link Object keys a parameter by its bare name, and OpenAPI lets it be qualified by location — `path.page`
+ * — for the one case a bare key cannot settle: the target uses the name in two locations, a `page` segment
+ * and a `page` query parameter for pagination. Unqualified, a client or an Arazzo runner may put the body's
+ * value in either, and a uuid lands in an integer page number.
+ */
+it('qualifies a filled path parameter by location only where the target uses its name twice', function (): void {
+    $doc = ($this->doc)([
+        'POST /posts' => ['operationId' => 'posts.store'],
+        'GET /posts/{post}' => ['operationId' => 'posts.show'],
+        'GET /posts/{post}/versions' => ['operationId' => 'posts.versions'],
+    ]);
+    $doc['paths']['/posts/{post}/versions']['get']['parameters'][] = ['name' => 'post', 'in' => 'query', 'schema' => ['type' => 'integer']];
+
+    [$out, $diagnostics] = ResponseLinks::write($doc, [
+        'POST /posts' => new OperationLinks(gives: [($this->gives)()]),
+        'GET /posts/{post}' => new OperationLinks(takes: ['post' => $this->post]),
+        'GET /posts/{post}/versions' => new OperationLinks(takes: ['post' => $this->post]),
+    ]);
+    $links = $out['paths']['/posts']['post']['responses']['200']['links'];
+
+    expect($links['posts.versions']['parameters'])->toBe(['path.post' => '$response.body#/data/id'])
+        // The target with one `post` keeps the bare key it has always published.
+        ->and($links['posts.show']['parameters'])->toBe(['post' => '$response.body#/data/id'])
+        ->and($diagnostics)->toBe([]);
+});
+
+it('qualifies a name the target declares twice through a shared parameter or its path item', function (): void {
+    // The second `post` is declared where a reader of the operation alone would miss it.
+    $doc = ($this->doc)([
+        'POST /posts' => ['operationId' => 'posts.store'],
+        'GET /posts/{post}/versions' => ['operationId' => 'posts.versions'],
+    ]);
+    $doc['components']['parameters']['PostPage'] = ['name' => 'post', 'in' => 'query', 'schema' => ['type' => 'integer']];
+    $doc['paths']['/posts/{post}/versions']['parameters'] = [['$ref' => '#/components/parameters/PostPage']];
+
+    [$out] = ResponseLinks::write($doc, [
+        'POST /posts' => new OperationLinks(gives: [($this->gives)()]),
+        'GET /posts/{post}/versions' => new OperationLinks(takes: ['post' => $this->post]),
+    ]);
+
+    expect($out['paths']['/posts']['post']['responses']['200']['links']['posts.versions']['parameters'])
+        ->toBe(['path.post' => '$response.body#/data/id']);
+});
+
+it('refuses a declared link filling a bare name its target declares in two locations, and keeps a qualified one', function (): void {
+    $doc = ($this->doc)([
+        'POST /posts' => ['operationId' => 'posts.store'],
+        'GET /posts/{post}/versions' => ['operationId' => 'posts.versions'],
+    ]);
+    $doc['paths']['/posts/{post}/versions']['get']['parameters'][] = ['name' => 'post', 'in' => 'query', 'schema' => ['type' => 'integer']];
+
+    [$bare, $refused] = ResponseLinks::write($doc, [
+        'POST /posts' => new OperationLinks(declared: [new DeclaredLink('posts.versions', ['post' => '$response.body#/data/id'])]),
+    ]);
+    [$qualified, $accepted] = ResponseLinks::write($doc, [
+        'POST /posts' => new OperationLinks(declared: [new DeclaredLink('posts.versions', ['path.post' => '$response.body#/data/id', 'query.post' => 2])]),
+    ]);
+
+    expect($bare['paths']['/posts']['post']['responses']['200'])->not->toHaveKey('links')
+        ->and(array_map(static fn ($d): string => $d->code, $refused))->toBe(['response-link.parameter-ambiguous'])
+        ->and($refused[0]->message)->toContain('(path, query)')
+        ->and($refused[0]->help)->toBe('Qualify the parameter with its location: `path.post` or `query.post`.')
+        ->and($qualified['paths']['/posts']['post']['responses']['200']['links']['posts.versions']['parameters'])
+        ->toBe(['path.post' => '$response.body#/data/id', 'query.post' => 2])
+        ->and($accepted)->toBe([]);
+});
+
 it('reports an operation with no success response to hang a declared link on', function (): void {
     $doc = ($this->doc)(['POST /posts' => ['operationId' => 'posts.store', 'status' => '422'], 'GET /posts/{post}' => ['operationId' => 'posts.show']]);
 

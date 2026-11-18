@@ -15,8 +15,8 @@ use Docuccino\Core\Support\Hydrate;
 /**
  * A document's reusable `components` buckets, used to read a `$ref`ing node back as the thing it points
  * at. The differ's one resolver: every position OAS lets a Reference Object stand in — a path item, a
- * request body, a response, a parameter, a security scheme, a schema — is read through here before
- * anything is compared.
+ * request body, a response, a response header, a parameter, a security scheme, a schema — is read through
+ * here before anything is compared.
  *
  * Resolving both sides is what keeps hoisting invisible to the diff: an inline body or parameter that
  * becomes a `$ref` (or moves between component names) compares thing-to-thing and reports nothing, while
@@ -26,7 +26,7 @@ use Docuccino\Core\Support\Hydrate;
  * a Reference Object may write beside its pointer, they override the component's, and every other sibling
  * is ignored. So a `required: false` written next to a `$ref` at a component that says `required: true`
  * describes nothing, and honouring it reported a parameter becoming optional, or required, for a contract
- * that had not moved. All four resolvers merge that one way — the component's members, with a `summary` or
+ * that had not moved. Every resolver here merges that one way — the component's members, with a `summary` or
  * a `description` from the referring node written over them. The identity is the exception, and not a
  * member of the contract: it names the USE rather than the thing the diff pairs on.
  *
@@ -59,6 +59,7 @@ final readonly class ComponentRefs
      * @param  array<string, array<string, mixed>>  $requestBodies
      * @param  array<string, array<string, mixed>>  $securitySchemes
      * @param  array<string, array<string, mixed>|bool>  $schemas
+     * @param  array<string, array<string, mixed>>  $headers
      */
     private function __construct(
         private array $responses,
@@ -67,6 +68,7 @@ final readonly class ComponentRefs
         private array $requestBodies,
         private array $securitySchemes,
         private array $schemas,
+        private array $headers,
         private ReferenceBudget $budget,
     ) {}
 
@@ -81,6 +83,7 @@ final readonly class ComponentRefs
             Hydrate::mapOfArrays($rest['requestBodies'] ?? null),
             Hydrate::mapOfArrays($rest['securitySchemes'] ?? null),
             $document->components?->schemaValues() ?? [],
+            Hydrate::mapOfArrays($rest['headers'] ?? null),
             new ReferenceBudget($document),
         );
     }
@@ -207,6 +210,19 @@ final readonly class ComponentRefs
     }
 
     /**
+     * A response header, which a Reference Object may stand in for as well. Unresolved it states neither
+     * `required` nor a schema, so it reads as an optional header that accepts anything — a header hoisted
+     * behind a pointer would report itself becoming optional, which is breaking.
+     *
+     * @param  array<string, mixed>  $header
+     * @return array{0: array<string, mixed>, 1: UnresolvedRef|null} the header to read, and the pointer that reached no header
+     */
+    public function resolveHeader(array $header): array
+    {
+        return $this->resolveInto($header, 'headers', $this->headers);
+    }
+
+    /**
      * `components.securitySchemes` takes a Reference Object too, and a scheme is compared member by member
      * against its opposite number — so a pointer read as a scheme reports `$ref` itself as a member of the
      * contract, and an inline scheme hoisted behind one reads as the way in changing. Nothing reads a
@@ -304,7 +320,7 @@ final readonly class ComponentRefs
     }
 
     /**
-     * The one body behind the two array-shaped resolvers: a bucket, a node that may point into it, and the
+     * The one body behind the array-shaped resolvers: a bucket, a node that may point into it, and the
      * merge {@see self::OVERRIDES} describes.
      *
      * @param  array<string, mixed>  $node

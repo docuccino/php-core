@@ -378,7 +378,114 @@ final class DocumentDiffer
             }
         }
 
+        $this->diffHeaders($id, $responsePath, $subject, $old->headers, $new->headers, $oldRefs, $newRefs, $changes);
         $this->diffLinks($id, $responsePath, $subject, $old->rest['links'] ?? null, $new->rest['links'] ?? null, $changes);
+    }
+
+    /**
+     * A response's `headers`, read from the client's side: a header the server sends is something a client
+     * may rely on, so it is breaking to stop promising one — a `required` header removed, or made optional
+     * — and never breaking to promise more. A header that was only ever optional goes without breaking
+     * anything, since a client already had to cope with its absence. The schema compares as a response
+     * body's does.
+     *
+     * Paired by name without regard to case, as HTTP names them, and a `Content-Type` is not read at all:
+     * OAS says a response header of that name SHALL be ignored, since the media type is what states it.
+     *
+     * @param  array<string, mixed>|null  $old
+     * @param  array<string, mixed>|null  $new
+     * @param  list<Change>  $changes
+     */
+    private function diffHeaders(string $id, string $responsePath, ChangeSubject $subject, ?array $old, ?array $new, ComponentRefs $oldRefs, ComponentRefs $newRefs, array &$changes): void
+    {
+        $oldHeaders = self::headers($old);
+        $newHeaders = self::headers($new);
+
+        foreach (Arr::sortedUnion(array_keys($oldHeaders), array_keys($newHeaders)) as $key) {
+            if (! array_key_exists($key, $newHeaders)) {
+                [$name, $header] = $oldHeaders[$key];
+                [$read] = $oldRefs->resolveHeader($header);
+                $required = ($read['required'] ?? false) === true;
+                $changes[] = new Change(ChangeKind::Removed, ChangeTarget::Response, $id, $responsePath.' headers '.$name, $required, $required ? 'response.required-header-removed' : 'response.header-removed', subject: $subject);
+
+                continue;
+            }
+
+            [$name, $header] = $newHeaders[$key];
+            $headerPath = $responsePath.' headers '.$name;
+
+            if (! array_key_exists($key, $oldHeaders)) {
+                $changes[] = new Change(ChangeKind::Added, ChangeTarget::Response, $id, $headerPath, false, 'response.header-added', subject: $subject);
+
+                continue;
+            }
+
+            [$was, $wasRef] = $oldRefs->resolveHeader($oldHeaders[$key][1]);
+            [$is, $isRef] = $newRefs->resolveHeader($header);
+
+            // A pointer that reached no header says what an unfollowable request body's does: the
+            // comparison could not be made, and reading the pointer as a header would report one that
+            // states nothing — optional, any value — in its place.
+            if (! UnresolvedRef::same($wasRef, $isRef)) {
+                $changes[] = new Change(ChangeKind::Changed, ChangeTarget::Response, $id, $headerPath, self::unresolvedBreaks($wasRef, $isRef), 'response.header-unresolved-ref', [new FieldChange('$ref', $wasRef?->ref, $isRef?->ref)], $subject);
+
+                continue;
+            }
+
+            $wasRequired = ($was['required'] ?? false) === true;
+            $isRequired = ($is['required'] ?? false) === true;
+            if ($wasRequired !== $isRequired) {
+                $changes[] = new Change(ChangeKind::Changed, ChangeTarget::Response, $id, $headerPath, $wasRequired, $wasRequired ? 'response.header-became-optional' : 'response.header-became-required', [new FieldChange('required', $was['required'] ?? null, $is['required'] ?? null)], $subject);
+            }
+
+            $this->scalarChange($changes, ChangeTarget::Response, $id, $headerPath, $subject, 'response.header-description-changed', 'description', $was['description'] ?? null, $is['description'] ?? null);
+
+            foreach ($this->schemas->compare(self::headerSchema($was), self::headerSchema($is), $headerPath.' schema', $id, request: false, oldRefs: $oldRefs, newRefs: $newRefs, subject: $subject) as $change) {
+                $changes[] = $change;
+            }
+        }
+    }
+
+    /**
+     * A response's headers keyed by lower-cased name, each with the name as the document spells it.
+     *
+     * @param  array<string, mixed>|null  $headers
+     * @return array<string, array{0: string, 1: array<string, mixed>}>
+     */
+    private static function headers(?array $headers): array
+    {
+        $out = [];
+        foreach ($headers ?? [] as $name => $header) {
+            $key = strtolower((string) $name);
+            if ($key !== 'content-type' && is_array($header)) {
+                $out[$key] = [(string) $name, Arr::stringKeyed($header)];
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * What a header's value may be: its `schema`, or the one under its `content`, which OAS lets a header
+     * state instead — exactly one media type, holding the schema. Neither is no constraint at all.
+     *
+     * @param  array<string, mixed>  $header
+     * @return array<string, mixed>|bool
+     */
+    private static function headerSchema(array $header): array|bool
+    {
+        $schema = $header['schema'] ?? null;
+        if (! array_key_exists('schema', $header) && is_array($header['content'] ?? null)) {
+            $media = Arr::stringKeyed($header['content']);
+            $first = $media === [] ? null : $media[array_key_first($media)];
+            $schema = is_array($first) ? ($first['schema'] ?? null) : null;
+        }
+
+        return match (true) {
+            is_bool($schema) => $schema,
+            is_array($schema) => Arr::stringKeyed($schema),
+            default => [],
+        };
     }
 
     /**

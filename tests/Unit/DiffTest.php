@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Docuccino\Core\Diff\Change;
 use Docuccino\Core\Diff\Changeset;
 use Docuccino\Core\Diff\ChangesetRenderer;
+use Docuccino\Core\Diff\ChangeTarget;
 use Docuccino\Core\Diff\DocumentDiffer;
 use Docuccino\Core\Diff\FieldChange;
 use Docuccino\Core\Diff\IdentityKeys;
@@ -4008,4 +4009,114 @@ it('reports a response link added, removed or changed, and nothing for its prove
         ->and(array_map(static fn ($f) => $f->field, changesByCode($changed)['response.link-changed']->fields))->toBe(['parameters'])
         ->and($provenance->changes)->toBe([])
         ->and($added->isBreaking() || $removed->isBreaking() || $changed->isBreaking())->toBeFalse();
+});
+
+/**
+ * A response header is something a client reads, so the contract runs the way a response body's does: it
+ * breaks to stop promising a header the client may rely on — a `required` one removed or made optional — and
+ * never to promise more. An optional header going breaks nothing, since a client already had to cope with
+ * its absence. The value compares with a response's semantics: a header that may now carry a value it never
+ * could breaks a client switching on it.
+ */
+it('reads a link parameter qualified by its location as the same link changed', function (): void {
+    // The link is keyed by its name, not by what it fills, so qualifying `id` as `path.id` changes that
+    // member of one link: a client following it still reaches the same operation.
+    $withLink = static function (string $key): array {
+        $document = diffBase();
+        $document['paths']['/api/v1/forms/{id}']['get']['responses']['200']['links'] = [
+            'showForm' => ['operationId' => 'forms.show', 'parameters' => [$key => '$response.body#/id']],
+        ];
+
+        return $document;
+    };
+
+    $changeset = diffOf($withLink('id'), $withLink('path.id'));
+
+    expect(array_map(static fn ($change): string => $change->code, $changeset->changes))->toBe(['response.link-changed'])
+        ->and($changeset->changes[0]->path)->toBe('GET /api/v1/forms/{id} responses 200 links showForm')
+        ->and(array_map(static fn ($f): array => [$f->field, $f->old, $f->new], $changeset->changes[0]->fields))
+        ->toBe([['parameters', ['id' => '$response.body#/id'], ['path.id' => '$response.body#/id']]])
+        ->and($changeset->isBreaking())->toBeFalse();
+});
+
+it('reports a response header by whether a client could have relied on it', function (): void {
+    $withHeaders = static function (array $headers): array {
+        $document = diffBase();
+        $document['paths']['/api/v1/forms/{id}']['get']['responses']['200']['headers'] = $headers;
+
+        return $document;
+    };
+    $required = ['required' => true, 'schema' => ['type' => 'integer']];
+    $optional = ['schema' => ['type' => 'integer']];
+    $on = static fn (Changeset $changeset): array => array_map(
+        static fn ($change): array => [$change->code, $change->breaking],
+        $changeset->changes,
+    );
+
+    expect($on(diffOf($withHeaders(['X-Total' => $required]), diffBase())))->toBe([['response.required-header-removed', true]])
+        ->and($on(diffOf($withHeaders(['X-Total' => $optional]), diffBase())))->toBe([['response.header-removed', false]])
+        ->and($on(diffOf(diffBase(), $withHeaders(['X-Total' => $required]))))->toBe([['response.header-added', false]])
+        ->and($on(diffOf($withHeaders(['X-Total' => $required]), $withHeaders(['X-Total' => $optional]))))->toBe([['response.header-became-optional', true]])
+        ->and($on(diffOf($withHeaders(['X-Total' => $optional]), $withHeaders(['X-Total' => $required]))))->toBe([['response.header-became-required', false]])
+        ->and($on(diffOf(
+            $withHeaders(['X-Total' => $optional + ['description' => 'Rows.']]),
+            $withHeaders(['X-Total' => $optional + ['description' => 'Rows in all.']]),
+        )))->toBe([['response.header-description-changed', false]]);
+
+    $removed = diffOf($withHeaders(['X-Total' => $required]), diffBase())->changes[0];
+    $optionalised = diffOf($withHeaders(['X-Total' => $required]), $withHeaders(['X-Total' => $optional]))->changes[0];
+
+    expect($removed->path)->toBe('GET /api/v1/forms/{id} responses 200 headers X-Total')
+        ->and($removed->target)->toBe(ChangeTarget::Response)
+        ->and(array_map(static fn ($f): array => [$f->field, $f->old, $f->new], $optionalised->fields))->toBe([['required', true, null]]);
+
+    // The value, read as a response: a value the header could not carry before breaks a client switching
+    // on it, where the same widening of a request parameter would not.
+    $enum = static fn (array $values): array => ['X-Mode' => ['required' => true, 'schema' => ['type' => 'string', 'enum' => $values]]];
+    $widened = diffOf($withHeaders($enum(['live'])), $withHeaders($enum(['live', 'test'])));
+
+    expect($widened->isBreaking())->toBeTrue()
+        ->and($widened->changes[0]->path)->toStartWith('GET /api/v1/forms/{id} responses 200 headers X-Mode schema');
+});
+
+it('reads a response header as HTTP names it, and as OAS says it is written', function (): void {
+    $withHeaders = static function (array $headers, array $components = []): array {
+        $document = diffBase();
+        $document['paths']['/api/v1/forms/{id}']['get']['responses']['200']['headers'] = $headers;
+        if ($components !== []) {
+            $document['components']['headers'] = $components;
+        }
+
+        return $document;
+    };
+    $header = ['required' => true, 'schema' => ['type' => 'integer']];
+
+    // A header name is case-insensitive in HTTP, so respelling one is no change.
+    expect(diffOf($withHeaders(['X-Total' => $header]), $withHeaders(['x-total' => $header]))->changes)->toBe([])
+        // OAS: a response header named Content-Type SHALL be ignored; the media type states it.
+        ->and(diffOf($withHeaders(['Content-Type' => $header]), diffBase())->changes)->toBe([])
+        // Provenance is Docuccino's, not the contract's.
+        ->and(diffOf(
+            $withHeaders(['X-Total' => $header + ['x-docuccino' => ['provenance' => [['layer' => 'inference']]]]]),
+            $withHeaders(['X-Total' => $header + ['x-docuccino' => ['provenance' => [['layer' => 'attribute']]]]]),
+        )->changes)->toBe([])
+        // A header may state its value under `content` instead, with exactly one media type.
+        ->and(diffOf(
+            $withHeaders(['X-Total' => $header]),
+            $withHeaders(['X-Total' => ['required' => true, 'content' => ['text/plain' => ['schema' => ['type' => 'integer']]]]]),
+        )->changes)->toBe([]);
+
+    // Hoisting a header behind a pointer is no change; editing the component it points at is one, reported
+    // where it is used; a pointer at a header the document does not declare publishes none, which breaks.
+    $pointer = ['$ref' => '#/components/headers/Total'];
+    $hoisted = diffOf($withHeaders(['X-Total' => $header]), $withHeaders(['X-Total' => $pointer], ['Total' => $header]));
+    $edited = diffOf(
+        $withHeaders(['X-Total' => $pointer], ['Total' => $header]),
+        $withHeaders(['X-Total' => $pointer], ['Total' => ['schema' => ['type' => 'integer']]]),
+    );
+    $dangling = diffOf($withHeaders(['X-Total' => $header]), $withHeaders(['X-Total' => $pointer]));
+
+    expect($hoisted->changes)->toBe([])
+        ->and(array_map(static fn ($change): string => $change->code, $edited->changes))->toBe(['response.header-became-optional'])
+        ->and(array_map(static fn ($change): array => [$change->code, $change->breaking], $dangling->changes))->toBe([['response.header-unresolved-ref', true]]);
 });
